@@ -1,0 +1,6 @@
+flask==3.0.0
+flask-cors==4.0.0
+PyMuPDF==1.23.7
+openai==1.6.1
+python-dotenv==1.0.0
+werkzeug==3.0.1
