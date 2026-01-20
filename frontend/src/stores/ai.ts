@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { Roadmap, Summary, Translation, ChatMessage, AiPanelTab } from '../types'
+import { aiApi } from '../api'
 
 export const useAiStore = defineStore('ai', () => {
   const activeTab = ref<AiPanelTab['id']>('roadmap')
@@ -23,22 +24,27 @@ export const useAiStore = defineStore('ai', () => {
     { id: 'chat', label: 'Chat', icon: 'chat' },
   ]
 
+  // 设置当前激活的tab
   function setActiveTab(tabId: AiPanelTab['id']) {
     activeTab.value = tabId
   }
 
+  // 折叠/展开面板
   function togglePanel() {
     isPanelCollapsed.value = !isPanelCollapsed.value
   }
 
+  // 设置摘要
   function setSummary(newSummary: Summary) {
     summary.value = newSummary
   }
 
+  // 设置翻译
   function setTranslation(translation: Translation) {
     currentTranslation.value = translation
   }
 
+  // 添加聊天消息
   function addChatMessage(message: Omit<ChatMessage, 'id' | 'timestamp'>) {
     chatMessages.value.push({
       ...message,
@@ -47,10 +53,12 @@ export const useAiStore = defineStore('ai', () => {
     })
   }
 
+  // 清空聊天消息
   function clearChat() {
     chatMessages.value = []
   }
 
+  // 重置所有数据
   function resetForNewDocument() {
     roadmap.value = null
     summary.value = null
@@ -58,28 +66,20 @@ export const useAiStore = defineStore('ai', () => {
     chatMessages.value = []
   }
 
+  // 设置大纲
   function setRoadmap(newRoadmap: Roadmap) {
     roadmap.value = newRoadmap
   }
 
+  // 获取大纲
   async function fetchRoadmap(pdfId: string) {
     if (roadmap.value) return // Return cached version if exists
 
     isLoadingRoadmap.value = true
     try {
-      const response = await fetch('http://localhost:5000/api/ai/roadmap', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ pdfId }),
-      })
-      
-      if (!response.ok) throw new Error('Failed to fetch roadmap')
-      
-      const data = await response.json()
+      const data = await aiApi.generateRoadmap(pdfId)
       // Ensure nodes have positions for Vue Flow
-      const processedRoadmap = layoutNodes(data.roadmap)
+      const processedRoadmap = layoutNodes(data)
       setRoadmap(processedRoadmap)
     } catch (error) {
       console.error('Error fetching roadmap:', error)

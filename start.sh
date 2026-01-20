@@ -2,6 +2,9 @@
 
 # Moonlight PDF Reader - Start Script
 
+rm -rf backend/uploads
+mkdir backend/uploads
+
 echo "Starting Moonlight PDF Reader..."
 
 # Start backend
