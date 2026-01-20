@@ -23,6 +23,7 @@ type PageRef = {
   container: HTMLElement // 页面容器元素引用
   canvas: HTMLCanvasElement // 页面绘制的画布引用
   textLayer: HTMLDivElement // 文字图层容器引用
+  linkLayer: HTMLDivElement // 链接图层容器引用
 }
 
 const pdfStore = usePdfStore() // 获取 PDF 仓库实例
@@ -55,12 +56,14 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
 
   const canvas = el.querySelector('canvas') // 查找页面对应的画布
   const textLayer = el.querySelector('.textLayer') // 查找页面对应的文字图层
+  const linkLayer = el.querySelector('.linkLayer') // 查找页面对应的链接图层
 
-  if (canvas instanceof HTMLCanvasElement && textLayer instanceof HTMLDivElement) {
+  if (canvas instanceof HTMLCanvasElement && textLayer instanceof HTMLDivElement && linkLayer instanceof HTMLDivElement) {
     pageRefs.set(pageNumber, {
       container: el, // 存储页面容器
       canvas, // 存储画布引用
-      textLayer // 存储文字层引用
+      textLayer, // 存储文字层引用
+      linkLayer // 存储链接层引用
     })
     // 移除立即渲染，改由 updateVisiblePages 统一调度
     // renderPage(pageNumber) 
@@ -183,6 +186,48 @@ async function renderPage(pageNumber: number) {
     viewport, // 提供视口信息
     textDivs: [] // 文字节点数组占位
   }).promise // 等待文字层绘制完成
+
+  try {
+    const annotations = await page.getAnnotations()
+    renderLinkLayer(annotations, viewport, refs.linkLayer)
+  } catch (err) {
+    console.error('Error rendering link layer:', err)
+  }
+}
+
+function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement) {
+  container.innerHTML = '' // 清空链接层
+  container.style.width = `${viewport.width}px` // 设置宽度
+  container.style.height = `${viewport.height}px` // 设置高度
+  
+  annotations.forEach(annotation => {
+    // 仅处理包含 URL 的外部链接
+    if (annotation.subtype === 'Link' && annotation.url) {
+      const link = document.createElement('a')
+      link.href = annotation.url
+      link.target = '_blank'
+      link.title = annotation.url || 'External Link'
+      
+      // 转换 PDF 坐标系到 Viewport 坐标系
+      // annotation.rect 是 [x1, y1, x2, y2]
+      const rect = viewport.convertToViewportRectangle(annotation.rect)
+      const [x1, y1, x2, y2] = rect
+      
+      const width = Math.abs(x2 - x1)
+      const height = Math.abs(y2 - y1)
+      const left = Math.min(x1, x2)
+      const top = Math.min(y1, y2)
+      
+      link.style.left = `${left}px`
+      link.style.top = `${top}px`
+      link.style.width = `${width}px`
+      link.style.height = `${height}px`
+      link.style.position = 'absolute'
+      link.className = 'hover:bg-yellow-200/20 cursor-pointer' // 简单的悬停反馈
+      
+      container.appendChild(link)
+    }
+  })
 }
 
 async function loadPdf(url: string) {
@@ -309,6 +354,7 @@ onBeforeUnmount(() => {
         >
           <canvas class="block mx-auto" /> 
           <div class="textLayer absolute inset-0" /> 
+          <div class="linkLayer absolute inset-0 pointer-events-none" /> <!-- 链接层，本身不响应事件，内部 a 标签响应 -->
         </div>
       </div>
     </div>
@@ -351,5 +397,9 @@ onBeforeUnmount(() => {
 
 :deep(.textLayer span) {
   cursor: text; /* 文字层中文字光标样式 */
+}
+
+:deep(.linkLayer a) {
+  pointer-events: auto; /* 确保链接可点击 */
 }
 </style>
