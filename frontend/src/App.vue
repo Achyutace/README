@@ -31,13 +31,53 @@ const bottomPanelClass = computed(() => {
   }
 })
 
-// Toggle functions
-const toggleTop = () => {
-  splitMode.value = splitMode.value === 'max-top' ? 'default' : 'max-top'
+// Toggle functions - Down arrow: divider goes down (top expands), Up arrow: divider goes up (bottom expands)
+const moveUp = () => {
+  // Moving divider up: top panel shrinks, bottom expands
+  // max-top -> default -> max-bottom
+  if (splitMode.value === 'max-top') {
+    splitMode.value = 'default'
+  } else if (splitMode.value === 'default') {
+    splitMode.value = 'max-bottom'
+  }
+  // If already at max-bottom, do nothing
 }
 
-const toggleBottom = () => {
-  splitMode.value = splitMode.value === 'max-bottom' ? 'default' : 'max-bottom'
+const moveDown = () => {
+  // Moving divider down: top panel expands, bottom shrinks
+  // max-bottom -> default -> max-top
+  if (splitMode.value === 'max-bottom') {
+    splitMode.value = 'default'
+  } else if (splitMode.value === 'default') {
+    splitMode.value = 'max-top'
+  }
+  // If already at max-top, do nothing
+}
+
+// Resizable sidebar width
+const sidebarWidth = ref(384) // Default w-96 = 384px
+const isResizing = ref(false)
+const MIN_WIDTH = 320  // Minimum width (slightly smaller than default)
+const MAX_WIDTH = 560  // Maximum width (can expand more to the left)
+
+const startResize = (e: MouseEvent) => {
+  isResizing.value = true
+  document.addEventListener('mousemove', handleResize)
+  document.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+
+const handleResize = (e: MouseEvent) => {
+  if (!isResizing.value) return
+  const windowWidth = window.innerWidth
+  const newWidth = windowWidth - e.clientX
+  sidebarWidth.value = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, newWidth))
+}
+
+const stopResize = () => {
+  isResizing.value = false
+  document.removeEventListener('mousemove', handleResize)
+  document.removeEventListener('mouseup', stopResize)
 }
 
 const resetSplit = () => {
@@ -60,11 +100,19 @@ const resetSplit = () => {
       <!-- Right Panel Container (Split View) -->
       <aside
         v-if="libraryStore.currentDocument"
-        :class="[
-          'flex flex-col border-l border-gray-200 bg-white transition-all duration-300 flex-shrink-0',
-          aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : 'w-96'
-        ]"
+        class="flex flex-col border-l border-gray-200 bg-white flex-shrink-0 relative"
+        :class="aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : ''"
+        :style="!aiStore.isPanelCollapsed ? { width: sidebarWidth + 'px' } : {}"
       >
+        <!-- Resize Handle -->
+        <div
+          v-if="!aiStore.isPanelCollapsed"
+          class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-primary-400 transition-colors z-50 group"
+          :class="{ 'bg-primary-500': isResizing }"
+          @mousedown="startResize"
+        >
+          <div class="absolute left-0 top-0 bottom-0 w-3 -ml-1"></div>
+        </div>
         <!-- Top Half: AI Panel (Roadmap, Summary, Translation) -->
         <div 
           :class="['flex flex-col border-b border-gray-200 transition-all duration-300 ease-in-out', topPanelClass]"
@@ -83,12 +131,13 @@ const resetSplit = () => {
              </div>
 
              <div class="bg-white border border-gray-200 rounded-full shadow-sm flex items-center gap-1 px-1 py-0.5 transform hover:scale-105 transition-transform cursor-pointer">
-                <!-- Up Arrow (Maximize Top) -->
+                <!-- Up Arrow (Move Divider Up) -->
                 <button 
-                  @click="toggleTop" 
-                  class="p-0.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600 transition-colors"
-                  :class="{ 'text-primary-600 bg-primary-50': splitMode === 'max-top' }"
-                  title="展开 AI 面板"
+                  @click="moveUp" 
+                  class="p-0.5 hover:bg-gray-100 rounded transition-colors"
+                  :class="splitMode === 'max-bottom' ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-primary-600'"
+                  :disabled="splitMode === 'max-bottom'"
+                  title="分界线上移"
                 >
                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
                 </button>
@@ -103,12 +152,13 @@ const resetSplit = () => {
                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12h16" /></svg>
                 </button>
 
-                <!-- Down Arrow (Maximize Bottom) -->
+                <!-- Down Arrow (Move Divider Down) -->
                 <button 
-                   @click="toggleBottom"
-                   class="p-0.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600 transition-colors"
-                   :class="{ 'text-primary-600 bg-primary-50': splitMode === 'max-bottom' }"
-                   title="展开聊天框"
+                   @click="moveDown"
+                   class="p-0.5 hover:bg-gray-100 rounded transition-colors"
+                   :class="splitMode === 'max-top' ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-primary-600'"
+                   :disabled="splitMode === 'max-top'"
+                   title="分界线下移"
                 >
                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
                 </button>
@@ -123,7 +173,7 @@ const resetSplit = () => {
           <div 
             class="px-4 py-2 border-b border-gray-200 bg-white text-sm font-medium text-gray-700 shadow-sm z-10 flex-shrink-0 h-10 flex items-center justify-between cursor-pointer hover:bg-gray-50"
             title="点击切换折叠状态"
-            @click.self="splitMode === 'max-top' ? resetSplit() : (splitMode === 'default' ? toggleBottom() : null)"
+            @click.self="splitMode === 'max-top' ? resetSplit() : (splitMode === 'default' ? moveDown() : null)"
           >
             <span>Chat & Ask</span>
             <button v-if="splitMode === 'max-top'" @click="resetSplit" class="text-xs text-primary-600 hover:underline font-normal">
