@@ -4,3 +4,22 @@ PyMuPDF==1.23.7
 openai==1.6.1
 python-dotenv==1.0.0
 werkzeug==3.0.1
+
+# LangChain & LangGraph for Agent orchestration
+langchain==0.1.0
+langchain-openai==0.0.2
+langchain-community==0.0.10
+langgraph==0.0.20
+
+# Vector database for RAG
+chromadb==0.4.22
+sentence-transformers==2.3.1
+
+# Tools
+tavily-python==0.3.0
+arxiv==2.1.0
+
+# Additional utilities
+requests==2.31.0
+tiktoken==0.5.2
+pydantic==2.5.3

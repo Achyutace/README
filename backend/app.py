@@ -15,6 +15,7 @@ README AI 辅助阅读应用 - Flask 后端服务
 
 import os
 import shutil
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -22,6 +23,8 @@ from dotenv import load_dotenv
 
 from services.pdf_service import PdfService
 from services.ai_service import AiService
+from services.rag_service import RAGService
+from services.agent_service import AcademicAgentService
 
 # 加载环境变量（如 OpenAI API Key）
 load_dotenv()
@@ -45,6 +48,10 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 pdf_service = PdfService(app.config['UPLOAD_FOLDER'])
 # AI 服务：负责调用 OpenAI API 实现各种 AI 功能
 ai_service = AiService()
+# RAG 服务：负责文档索引和检索
+rag_service = RAGService()
+# Agent 服务：负责智能对话和工具调用
+agent_service = AcademicAgentService(rag_service)
 
 
 @app.route('/api/health', methods=['GET'])
@@ -93,6 +100,24 @@ def upload_pdf():
         # 调用 PDF 服务保存并处理文件
         # 返回包含 id, filename, pageCount 的字典
         result = pdf_service.save_and_process(file)
+        
+        # 索引到 RAG 系统
+        pdf_id = result['id']
+        filepath = pdf_service.get_filepath(pdf_id)
+        user_id = request.args.get('userId', 'default')  # 从查询参数获取用户ID
+        
+        try:
+            index_result = rag_service.index_paper(
+                pdf_path=filepath,
+                paper_id=pdf_id,
+                user_id=user_id
+            )
+            result['indexed'] = True
+            result['chunks'] = index_result.get('chunks_created', 0)
+        except Exception as e:
+            print(f"RAG indexing warning: {e}")
+            result['indexed'] = False
+        
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -306,7 +331,10 @@ def translate_text():
 @app.route('/api/ai/chat', methods=['POST'])
 def chat():
     """
-    智能对话接口（RAG - Retrieval Augmented Generation）
+    智能对话接口（RAG - Retrieval Augmented Generation）【已废弃】
+    
+    请使用 /api/agent/chat 或 /api/agent/chat/stream 代替
+    这是旧版本的简单 RAG 实现，新版本使用 Agent 框架，支持工具调用
     
     基于 PDF 内容进行上下文感知的问答对话
     AI 会参考文档内容回答用户问题，并提供引用来源
@@ -356,6 +384,184 @@ def chat():
         return jsonify(response)
     except FileNotFoundError:
         return jsonify({'error': 'PDF not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== Agent 智能对话接口 ====================
+
+@app.route('/api/agent/chat', methods=['POST'])
+def agent_chat():
+    """
+    Agent 智能对话接口（新版）
+    
+    使用 Agent 框架实现的高级对话系统：
+    - 自动检索本地知识库
+    - 智能判断是否需要外部工具
+    - 支持联网搜索、论文查找、论文抓取等工具
+    - 提供详细的引用来源
+    
+    请求体：
+    {
+        "message": "用户问题",
+        "userId": "用户ID（可选，默认 'default'）",
+        "pdfId": "当前阅读的 PDF ID（可选）",
+        "history": [  // 可选，历史对话记录
+            {
+                "role": "user" | "assistant",
+                "content": "对话内容"
+            }
+        ]
+    }
+    
+    返回：
+    {
+        "response": "AI 的回答内容",
+        "citations": [  // 引用来源
+            {
+                "source": "local" | "external",
+                "page": 页码,
+                "section": "章节",
+                "text": "引用文本"
+            }
+        ],
+        "steps": ["执行步骤1", "执行步骤2", ...],
+        "context_used": {
+            "local_chunks": 3,
+            "external_sources": 1
+        }
+    }
+    
+    错误码：
+    400 - 缺少必需参数
+    500 - 服务调用失败
+    """
+    data = request.get_json()
+    message = data.get('message')
+    user_id = data.get('userId', 'default')
+    pdf_id = data.get('pdfId')
+    history = data.get('history', [])
+
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+
+    try:
+        result = agent_service.chat(
+            user_query=message,
+            user_id=user_id,
+            paper_id=pdf_id,
+            chat_history=history
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/agent/chat/stream', methods=['POST'])
+def agent_chat_stream():
+    """
+    Agent 流式对话接口
+    
+    与 /api/agent/chat 功能相同，但使用 Server-Sent Events (SSE) 流式返回
+    可以实时看到 Agent 的执行过程（检索、工具调用、生成等）
+    
+    请求体：与 /api/agent/chat 相同
+    
+    返回：SSE 流
+    
+    事件类型：
+    - step: 中间步骤更新
+      data: {"type": "step", "step": "正在检索...", "data": {...}}
+    
+    - final: 最终结果
+      data: {"type": "final", "response": "...", "citations": [...], "steps": [...]}
+    
+    - error: 错误
+      data: {"type": "error", "error": "错误信息"}
+    """
+    data = request.get_json()
+    message = data.get('message')
+    user_id = data.get('userId', 'default')
+    pdf_id = data.get('pdfId')
+    history = data.get('history', [])
+
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+
+    def generate():
+        """SSE 生成器"""
+        try:
+            for event in agent_service.stream_chat(
+                user_query=message,
+                user_id=user_id,
+                paper_id=pdf_id,
+                chat_history=history
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return app.response_class(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+# ==================== RAG 管理接口 ====================
+
+@app.route('/api/rag/stats', methods=['GET'])
+def rag_stats():
+    """
+    获取 RAG 知识库统计信息
+    
+    查询参数：
+    - userId: 用户ID（可选，默认 'default'）
+    
+    返回：
+    {
+        "collection_name": "user_default",
+        "total_chunks": 150,
+        "papers_indexed": 5
+    }
+    """
+    user_id = request.args.get('userId', 'default')
+    
+    try:
+        stats = rag_service.get_collection_stats(user_id)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/rag/delete/<pdf_id>', methods=['DELETE'])
+def delete_from_rag(pdf_id):
+    """
+    从 RAG 知识库删除论文
+    
+    路径参数：
+    - pdf_id: PDF 标识符
+    
+    查询参数：
+    - userId: 用户ID（可选，默认 'default'）
+    
+    返回：
+    {
+        "success": true,
+        "message": "Paper deleted from knowledge base"
+    }
+    """
+    user_id = request.args.get('userId', 'default')
+    
+    try:
+        success = rag_service.delete_paper(pdf_id, user_id)
+        if success:
+            return jsonify({'success': True, 'message': 'Paper deleted from knowledge base'})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to delete paper'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
