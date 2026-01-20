@@ -1,36 +1,48 @@
 import axios from 'axios'
 import type { Keyword, Summary, Translation, ChatMessage } from '../types'
 
+// 1. 创建 Axios 实例，配置基础设置
 const api = axios.create({
+  // 优先从环境变量读取 API 地址，否则默认使用本地 5000 端口
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
-  timeout: 30000,
+  timeout: 30000, 
 })
 
+/**
+ * 响应类型定义
+ */
 export interface PdfUploadResponse {
-  id: string
-  filename: string
-  pageCount: number
+  id: string        // PDF 在服务器上的唯一标识
+  filename: string  // 文件名
+  pageCount: number // 总页数
 }
 
 export interface ExtractTextResponse {
-  text: string
-  blocks: Array<{
+  text: string      // 提取出的纯文本
+  blocks: Array<{   // 带坐标和页码的文本块（用于高亮或精准定位）
     text: string
     pageNumber: number
     bbox: [number, number, number, number]
   }>
 }
 
+/**
+ * PDF 相关 API 模块
+ */
 export const pdfApi = {
+  // 上传 PDF 文件
   upload: async (file: File): Promise<PdfUploadResponse> => {
     const formData = new FormData()
     formData.append('file', file)
     const { data } = await api.post<PdfUploadResponse>('/pdf/upload', formData, {
+      // 必须指定为 multipart/form-data 以支持文件上传
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     return data
   },
 
+  // 提取 PDF 文本内容
+  // pageNumber 是可选参数，如果不传则提取全文件
   extractText: async (pdfId: string, pageNumber?: number): Promise<ExtractTextResponse> => {
     const params = pageNumber ? { page: pageNumber } : {}
     const { data } = await api.get<ExtractTextResponse>(`/pdf/${pdfId}/text`, { params })
@@ -38,22 +50,32 @@ export const pdfApi = {
   },
 }
 
+/**
+ * AI 功能相关 API 模块
+ */
 export const aiApi = {
+  // 提取 PDF 关键词
   extractKeywords: async (pdfId: string): Promise<Keyword[]> => {
     const { data } = await api.post<{ keywords: Keyword[] }>('/ai/keywords', { pdfId })
     return data.keywords
   },
 
+  // 生成 PDF 后文摘要
   generateSummary: async (pdfId: string): Promise<Summary> => {
     const { data } = await api.post<Summary>('/ai/summary', { pdfId })
     return data
   },
 
+  // 翻译指定文本
   translateText: async (text: string): Promise<Translation> => {
     const { data } = await api.post<Translation>('/ai/translate', { text })
     return data
   },
 
+  // 与 PDF 进行对话（RAG 模式）
+  // pdfId: 关联的文档 ID
+  // message: 当前用户输入
+  // history: 历史对话记录，用于保持上下文
   chat: async (
     pdfId: string,
     message: string,
@@ -64,7 +86,7 @@ export const aiApi = {
       message,
       history,
     })
-    return data
+    return data // 返回 AI 的答复内容及引用的原文位置（citations）
   },
 }
 
