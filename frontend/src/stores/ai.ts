@@ -21,7 +21,6 @@ export const useAiStore = defineStore('ai', () => {
     { id: 'roadmap', label: 'Roadmap', icon: 'map' },
     { id: 'summary', label: 'Summary', icon: 'document' },
     { id: 'translation', label: 'Translation', icon: 'translate' },
-    { id: 'chat', label: 'Chat', icon: 'chat' },
   ]
 
   // 设置当前激活的tab

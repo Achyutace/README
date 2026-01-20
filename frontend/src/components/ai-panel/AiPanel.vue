@@ -3,7 +3,7 @@ import { useAiStore } from '../../stores/ai'
 import RoadmapTab from './RoadmapTab.vue'
 import SummaryTab from './SummaryTab.vue'
 import TranslationTab from './TranslationTab.vue'
-import ChatTab from './ChatTab.vue'
+
 
 const aiStore = useAiStore()
 </script>
@@ -48,7 +48,6 @@ const aiStore = useAiStore()
       <RoadmapTab v-if="aiStore.activeTab === 'roadmap'" />
       <SummaryTab v-else-if="aiStore.activeTab === 'summary'" />
       <TranslationTab v-else-if="aiStore.activeTab === 'translation'" />
-      <ChatTab v-else-if="aiStore.activeTab === 'chat'" />
     </div>
   </aside>
 </template>
