@@ -1,4 +1,5 @@
 import os
+import shutil
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -75,8 +76,8 @@ def get_pdf_info(pdf_id):
 
 # ==================== AI Routes ====================
 
-@app.route('/api/ai/keywords', methods=['POST'])
-def extract_keywords():
+@app.route('/api/ai/roadmap', methods=['POST'])
+def generate_roadmap():
     data = request.get_json()
     pdf_id = data.get('pdfId')
 
@@ -85,8 +86,8 @@ def extract_keywords():
 
     try:
         text = pdf_service.extract_text(pdf_id)['text']
-        keywords = ai_service.extract_keywords(text)
-        return jsonify({'keywords': keywords})
+        roadmap = ai_service.generate_roadmap(text)
+        return jsonify({'roadmap': roadmap})
     except FileNotFoundError:
         return jsonify({'error': 'PDF not found'}), 404
     except Exception as e:
@@ -144,6 +145,25 @@ def chat():
         return jsonify({'error': 'PDF not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def clear_uploads():
+    """清空上传目录中的所有内容，但保留目录本身"""
+    if os.path.exists(app.config['UPLOAD_FOLDER']):
+        for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+            if filename == '.gitkeep':
+                continue
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f'Failed to delete {file_path}. Reason: {e}')
+
+
+# clear_uploads()
 
 
 if __name__ == '__main__':

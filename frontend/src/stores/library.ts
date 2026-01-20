@@ -10,15 +10,37 @@ export const useLibraryStore = defineStore('library', () => {
     documents.value.find(doc => doc.id === currentDocumentId.value) || null
   )
 
-  function addDocument(file: File): PdfDocument {
-    const doc: PdfDocument = {
-      id: crypto.randomUUID(),
-      name: file.name,
-      url: URL.createObjectURL(file),
-      uploadedAt: new Date(),
+  async function addDocument(file: File): Promise<PdfDocument> {
+    // Optimistic UI updates can be tricky with real IDs, so we'll wait for the server
+    try {
+      // Create FormData
+      const formData = new FormData()
+      formData.append('file', file)
+
+      // Upload to backend
+      const response = await fetch('http://localhost:5000/api/pdf/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      
+      if (!response.ok) throw new Error('Upload failed')
+      
+      const data = await response.json()
+      
+      const doc: PdfDocument = {
+        id: data.id, // Use server-generated ID
+        name: file.name,
+        url: URL.createObjectURL(file), // Still use local URL for viewing
+        uploadedAt: new Date(),
+        pageCount: data.pageCount
+      }
+      
+      documents.value.push(doc)
+      return doc
+    } catch (error) {
+      console.error('Failed to upload PDF:', error)
+      throw error
     }
-    documents.value.push(doc)
-    return doc
   }
 
   function removeDocument(id: string) {

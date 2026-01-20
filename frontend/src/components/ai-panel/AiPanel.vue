@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAiStore } from '../../stores/ai'
-import KeywordsTab from './KeywordsTab.vue'
+import RoadmapTab from './RoadmapTab.vue'
 import SummaryTab from './SummaryTab.vue'
 import TranslationTab from './TranslationTab.vue'
 import ChatTab from './ChatTab.vue'
@@ -45,7 +45,7 @@ const aiStore = useAiStore()
 
     <!-- Tab Content -->
     <div class="flex-1 overflow-hidden">
-      <KeywordsTab v-if="aiStore.activeTab === 'keywords'" />
+      <RoadmapTab v-if="aiStore.activeTab === 'roadmap'" />
       <SummaryTab v-else-if="aiStore.activeTab === 'summary'" />
       <TranslationTab v-else-if="aiStore.activeTab === 'translation'" />
       <ChatTab v-else-if="aiStore.activeTab === 'chat'" />

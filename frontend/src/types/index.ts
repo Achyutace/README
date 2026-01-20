@@ -48,8 +48,34 @@ export interface ChatMessage {
   }>
 }
 
+export interface RoadmapNodeData {
+  label: string
+  description: string
+  papers: Array<{
+    title: string
+    link: string
+    year?: string
+  }>
+}
+
+export interface Roadmap {
+  nodes: Array<{
+    id: string
+    type?: string
+    data: RoadmapNodeData
+    position: { x: number; y: number }
+    label?: string // helpful for default node type
+  }>
+  edges: Array<{
+    id: string
+    source: string
+    target: string
+    label?: string
+  }>
+}
+
 export interface AiPanelTab {
-  id: 'keywords' | 'summary' | 'translation' | 'chat'
+  id: 'roadmap' | 'summary' | 'translation' | 'chat'
   label: string
   icon: string
 }

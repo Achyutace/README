@@ -19,16 +19,20 @@ function triggerFileUpload() {
   fileInput.value?.click()
 }
 
-function handleFileUpload(event: Event) {
+async function handleFileUpload(event: Event) {
   const target = event.target as HTMLInputElement
   const files = target.files
   if (files && files.length > 0) {
     const file = files[0]
     if (file && file.type === 'application/pdf') {
-      const doc = libraryStore.addDocument(file)
-      libraryStore.selectDocument(doc.id)
-      pdfStore.setCurrentPdf(doc.url)
-      aiStore.resetForNewDocument()
+      try {
+        const doc = await libraryStore.addDocument(file)
+        libraryStore.selectDocument(doc.id)
+        pdfStore.setCurrentPdf(doc.url)
+        aiStore.resetForNewDocument()
+      } catch (error) {
+        alert('上传失败，请确保后端服务已启动')
+      }
     }
   }
   target.value = ''

@@ -16,8 +16,8 @@ class AiService:
         if HAS_OPENAI and os.getenv('OPENAI_API_KEY'):
             self.client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-    def extract_keywords(self, text: str) -> list:
-        """Extract keywords from text."""
+    def generate_roadmap(self, text: str) -> dict:
+        """Generate a concept roadmap from text."""
         if self.client:
             try:
                 response = self.client.chat.completions.create(
@@ -25,23 +25,22 @@ class AiService:
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a helpful assistant that extracts key academic terms from research papers. Return a JSON array of objects with 'term' and 'definition' fields."
+                            "content": "You are a helpful assistant that extracts key concepts and creates a learning roadmap from academic papers. Return a JSON structure representing a graph of concepts. The output should contain 'nodes' (list of {id, label, data: {description, papers: [{title, link, year}]}}) and 'edges' (list of {id, source, target})."
                         },
                         {
                             "role": "user",
-                            "content": f"Extract 5-10 key academic terms from this text and provide brief definitions:\n\n{text[:4000]}"
+                            "content": f"Create a concept roadmap from this text. Identify 5-8 key concepts and their relationships:\n\n{text[:6000]}"
                         }
                     ],
                     temperature=0.3
                 )
-                # Parse response (simplified, in production use proper JSON parsing)
                 content = response.choices[0].message.content
-                return self._parse_keywords(content)
+                return self._parse_json_roadmap(content)
             except Exception as e:
                 print(f"OpenAI error: {e}")
 
-        # Fallback: Demo mode - extract common academic terms
-        return self._demo_extract_keywords(text)
+        # Fallback: Demo mode
+        return self._demo_roadmap()
 
     def generate_summary(self, text: str) -> dict:
         """Generate a 3-bullet summary of the text."""
@@ -204,6 +203,34 @@ class AiService:
             {'term': 'Neural Network', 'definition': '神经网络是一种计算模型', 'occurrences': []},
             {'term': 'Deep Learning', 'definition': '深度学习是机器学习的一个分支', 'occurrences': []},
         ]
+
+    def _parse_json_roadmap(self, text: str) -> dict:
+        import json
+        try:
+            # Try to find JSON block
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            return json.loads(text)
+        except:
+             return self._demo_roadmap()
+
+    def _demo_roadmap(self) -> dict:
+        return {
+            "nodes": [
+                { "id": "1", "label": "Large Language Models", "data": { "label": "Large Language Models", "description": "Foundation models trained on vast amounts of data.", "papers": [{ "title": "Language Models are Few-Shot Learners", "link": "https://arxiv.org/abs/2005.14165", "year": "2020" }] }, "position": { "x": 250, "y": 0 } },
+                { "id": "2", "label": "Chain-of-Thought", "data": { "label": "Chain-of-Thought", "description": "Generating intermediate reasoning steps.", "papers": [{ "title": "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models", "link": "https://arxiv.org/abs/2201.11903", "year": "2022" }] }, "position": { "x": 100, "y": 150 } },
+                { "id": "3", "label": "Self-Consistency", "data": { "label": "Self-Consistency", "description": "Sampling multiple reasoning paths and choosing the most consistent answer.", "papers": [{ "title": "Self-Consistency Improves Chain of Thought Reasoning in Language Models", "link": "https://arxiv.org/abs/2203.11171", "year": "2022" }] }, "position": { "x": 400, "y": 150 } },
+                { "id": "4", "label": "Prompt Engineering", "data": { "label": "Prompt Engineering", "description": "Techniques for designing inputs to get optimal outputs.", "papers": [] }, "position": { "x": 250, "y": 300 } }
+            ],
+            "edges": [
+                { "id": "e1-2", "source": "1", "target": "2", "label": "enabled by" },
+                { "id": "e1-3", "source": "1", "target": "3", "label": "improved by" },
+                { "id": "e2-3", "source": "2", "target": "3", "label": "extends" },
+                { "id": "e4-2", "source": "4", "target": "2", "label": "includes" }
+            ]
+        }
 
     def _demo_summary(self) -> dict:
         """Demo mode: return sample summary."""
