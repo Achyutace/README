@@ -155,17 +155,38 @@ async function renderPage(pageNumber: number) {
   const context = refs.canvas.getContext('2d') // 获取画布 2D 上下文
   if (!context) return // 无上下文则终止
 
-  // 重要优化：如果是缩放操作，需要先调整容器尺寸，避免渲染时闪烁
-  refs.canvas.width = viewport.width 
-  refs.canvas.height = viewport.height
-  refs.canvas.style.width = `${viewport.width}px` 
-  refs.canvas.style.height = `${viewport.height}px` 
+  // 1. 高清屏优化：获取设备像素比
+  const outputScale = window.devicePixelRatio || 1
 
-  refs.textLayer.style.width = `${viewport.width}px`
-  refs.textLayer.style.height = `${viewport.height}px`
+  // 2. 布局优化：设置容器与 Canvas 的逻辑尺寸和物理尺寸
+  // 容器本身不需要设大，但内部 Canvas 需要根据 dpr 放大
+  refs.container.style.width = `${Math.floor(viewport.width)}px`
+  refs.container.style.height = `${Math.floor(viewport.height)}px`
+
+  refs.canvas.width = Math.floor(viewport.width * outputScale)
+  refs.canvas.height = Math.floor(viewport.height * outputScale)
+  refs.canvas.style.width = `${Math.floor(viewport.width)}px`
+  refs.canvas.style.height = `${Math.floor(viewport.height)}px`
+
+  // 文字层和链接层使用逻辑尺寸
+  refs.textLayer.style.width = `${Math.floor(viewport.width)}px`
+  refs.textLayer.style.height = `${Math.floor(viewport.height)}px`
   refs.textLayer.innerHTML = '' // 重绘前清空文字层
+  
+  // 链接层同样使用逻辑尺寸（复用 renderLinkLayer 内部逻辑，也可以在此显式重置防止闪烁）
+  refs.linkLayer.style.width = `${Math.floor(viewport.width)}px`
+  refs.linkLayer.style.height = `${Math.floor(viewport.height)}px`
 
-  const renderTask = page.render({ canvasContext: context, viewport }) // 创建页面渲染任务
+  // 3. 渲染优化：应用缩放变换
+  const transform = outputScale !== 1 
+    ? [outputScale, 0, 0, outputScale, 0, 0] 
+    : undefined
+
+  const renderTask = page.render({ 
+    canvasContext: context, 
+    viewport, 
+    transform 
+  }) // 创建页面渲染任务
   renderTasks.set(pageNumber, renderTask) // 缓存任务便于取消
   
   try {
@@ -344,12 +365,12 @@ onBeforeUnmount(() => {
       @scroll="handleScroll" 
     >
       <!-- 居中内容区，控制最大宽度与行间距 -->
-      <div class="max-w-4xl mx-auto space-y-4">
+      <div class="space-y-4 flex flex-col items-center">
         <!-- 遍历所有页码生成页面容器 -->
         <div
           v-for="page in pageNumbers" 
           :key="page" 
-          class="pdf-page relative bg-white shadow-lg border border-gray-200 overflow-hidden" 
+          class="pdf-page relative bg-white shadow-lg border border-gray-200 overflow-hidden shrink-0" 
           :ref="(el, refs) => handlePageContainerRef(page, el, refs)" 
         >
           <canvas class="block mx-auto" /> 
@@ -384,11 +405,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .pdf-page {
   border-radius: 0.75rem; /* 单页容器圆角 */
-}
-
-.pdf-page canvas {
-  /* width: 100%;  移除强制宽度，避免与 textLayer 坐标不一致 */
-  /* height: auto; */
 }
 
 .textLayer {
