@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Keyword, Summary, Translation, ChatMessage } from '../types'
+import type { Keyword, Summary, Translation, ChatMessage, Roadmap } from '../types'
 
 // 1. 创建 Axios 实例，配置基础设置
 const api = axios.create({
@@ -87,6 +87,12 @@ export const aiApi = {
       history,
     })
     return data // 返回 AI 的答复内容及引用的原文位置（citations）
+  },
+
+  // 生成 PDF 大纲/知识图谱
+  generateRoadmap: async (pdfId: string): Promise<Roadmap> => {
+    const { data } = await api.post<{ roadmap: Roadmap }>('/ai/roadmap', { pdfId })
+    return data.roadmap
   },
 }
 
