@@ -95,12 +95,6 @@ export const aiApi = {
     })
     return data // 返回 AI 的答复内容及引用的原文位置(citations)
   },
-
-  // 生成 PDF 大纲/知识图谱
-  generateRoadmap: async (pdfId: string): Promise<Roadmap> => {
-    const { data } = await api.post<{ roadmap: Roadmap }>('/ai/roadmap', { pdfId })
-    return data.roadmap
-  },
 }
 
 /**
