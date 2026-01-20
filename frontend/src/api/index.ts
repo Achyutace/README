@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Keyword, Summary, Translation, ChatMessage } from '../types'
+import type { Keyword, Summary, Translation, ChatMessage, Roadmap } from '../types'
 
 // 1. 创建 Axios 实例，配置基础设置
 const api = axios.create({
@@ -60,6 +60,13 @@ export const aiApi = {
     return data.keywords
   },
 
+  // 生成学习路线图
+  generateRoadmap: async (pdfId: string): Promise<Roadmap> => {
+    const { data } = await api.post<{ roadmap: Roadmap }>('/ai/roadmap', { pdfId })
+    // 自动布局节点位置
+    return layoutNodes(data.roadmap)
+  },
+
   // 生成 PDF 后文摘要
   generateSummary: async (pdfId: string): Promise<Summary> => {
     const { data } = await api.post<Summary>('/ai/summary', { pdfId })
@@ -86,8 +93,28 @@ export const aiApi = {
       message,
       history,
     })
-    return data // 返回 AI 的答复内容及引用的原文位置（citations）
+    return data // 返回 AI 的答复内容及引用的原文位置(citations)
   },
+}
+
+/**
+ * 辅助函数：为 Roadmap 节点自动布局
+ * 如果节点已有非零位置，则保留；否则使用简单的网格布局
+ */
+function layoutNodes(data: Roadmap): Roadmap {
+  // 检查是否已有位置信息
+  if (data.nodes.some(n => n.position && (n.position.x !== 0 || n.position.y !== 0))) {
+    return data
+  }
+
+  // 使用简单的网格布局
+  const nodes = data.nodes.map((node, index) => ({
+    ...node,
+    position: { x: (index % 3) * 250, y: Math.floor(index / 3) * 150 },
+    data: node.data // 保留节点数据
+  }))
+  
+  return { ...data, nodes }
 }
 
 export default api
