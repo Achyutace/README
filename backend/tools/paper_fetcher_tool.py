@@ -115,28 +115,30 @@ class PaperFetcherTool:
         char_count = 0
         max_chars = self.max_tokens * 4  # 粗略估计：1 token ≈ 4 字符
         
+        pages_count = len(doc)  # 在关闭前获取页数
+
         for i, page in enumerate(doc):
             if i >= self.max_pages:
                 break
-            
+
             page_text = page.get_text()
             if char_count + len(page_text) > max_chars:
                 # 截断
                 remaining = max_chars - char_count
                 full_text_parts.append(page_text[:remaining] + '\n...[截断]')
                 break
-            
+
             full_text_parts.append(page_text)
             char_count += len(page_text)
-        
+
         doc.close()
-        
+
         return {
             'title': title,
             'abstract': abstract,
             'key_sections': key_sections,
             'full_text': '\n\n'.join(full_text_parts),
-            'pages_extracted': min(len(doc), self.max_pages)
+            'pages_extracted': min(pages_count, self.max_pages)
         }
     
     def _extract_abstract(self, doc: fitz.Document) -> str:
