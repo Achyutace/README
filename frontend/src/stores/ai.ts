@@ -18,9 +18,9 @@ export const useAiStore = defineStore('ai', () => {
 
   const tabs: AiPanelTab[] = [
     { id: 'roadmap', label: 'Roadmap', icon: 'map' },
-    { id: 'summary', label: '摘要', icon: 'document' },
-    { id: 'translation', label: '翻译', icon: 'translate' },
-    { id: 'chat', label: '对话', icon: 'chat' },
+    { id: 'summary', label: 'Summary', icon: 'document' },
+    { id: 'translation', label: 'Translation', icon: 'translate' },
+    { id: 'chat', label: 'Chat', icon: 'chat' },
   ]
 
   function setActiveTab(tabId: AiPanelTab['id']) {
