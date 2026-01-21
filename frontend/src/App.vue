@@ -21,10 +21,10 @@ const bottomMinimized = ref(false)
 const bothMinimized = computed(() => topMinimized.value && bottomMinimized.value)
 
 // Resizable sidebar width
-const sidebarWidth = ref(384) // Default w-96 = 384px
+const sidebarWidth = ref(480) // Default w-96 = 384px
 const isResizingWidth = ref(false)
-const MIN_WIDTH = 320
-const MAX_WIDTH = 560
+const MIN_SIDEBAR_WIDTH = 380
+const MAX_SIDEBAR_WIDTH = 650
 const MINIMIZED_WIDTH = 180 // Width when both panels are minimized (half of toolbar width ~360px)
 
 const effectiveSidebarWidth = computed(() => {
@@ -33,9 +33,10 @@ const effectiveSidebarWidth = computed(() => {
 })
 
 // Vertical split ratio (0 to 1, representing top panel percentage)
-const splitRatio = ref(0.5)
+const splitRatio = ref(0.45)
 const isResizingSplit = ref(false)
 const sidebarRef = ref<HTMLElement | null>(null)
+const chatTabRef = ref<any>(null)
 
 const SNAP_THRESHOLD = 60 // Distance from edge to trigger auto-minimize
 
@@ -45,7 +46,7 @@ const toggleTopMinimize = () => {
     // Expanding top panel
     topMinimized.value = false
     if (!bottomMinimized.value) {
-      splitRatio.value = 0.5 // Reset to 50/50
+      splitRatio.value = 0.45 // Reset to 45/55
     }
   } else {
     // Minimizing top panel
@@ -59,7 +60,7 @@ const toggleBottomMinimize = () => {
     // Expanding bottom panel
     bottomMinimized.value = false
     if (!topMinimized.value) {
-      splitRatio.value = 0.5 // Reset to 50/50
+      splitRatio.value = 0.45 // Reset to 45/55
     }
   } else {
     // Minimizing bottom panel
@@ -80,7 +81,7 @@ const handleWidthResize = (e: MouseEvent) => {
   if (!isResizingWidth.value) return
   const windowWidth = window.innerWidth
   const newWidth = windowWidth - e.clientX
-  sidebarWidth.value = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, newWidth))
+  sidebarWidth.value = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, newWidth))
 }
 
 const stopWidthResize = () => {
@@ -156,7 +157,7 @@ const bottomPanelStyle = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-gray-50">
+  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50">
     <!-- Left Sidebar - Library -->
     <LibrarySidebar class="flex-shrink-0" />
 
@@ -164,7 +165,7 @@ const bottomPanelStyle = computed(() => {
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- When both minimized: Top Row = Toolbar + Minimized Bars -->
       <template v-if="bothMinimized">
-        <div class="flex items-stretch bg-white border-b border-gray-200 shadow-sm">
+        <div class="flex items-stretch bg-white/95 backdrop-blur-sm border-b border-gray-200/60 shadow-sm">
           <!-- PDF Toolbar -->
           <div class="flex-1">
             <PdfToolbar v-if="pdfStore.currentPdfUrl" />
@@ -213,7 +214,7 @@ const bottomPanelStyle = computed(() => {
         <div class="flex flex-1 overflow-hidden">
           <!-- Left: PDF Viewer with its toolbar -->
           <div class="flex-1 flex flex-col overflow-hidden">
-            <div class="bg-white border-b border-gray-200 shadow-sm">
+            <div class="bg-white/95 backdrop-blur-sm border-b border-gray-200/60 shadow-sm">
               <PdfToolbar v-if="pdfStore.currentPdfUrl" />
               <div v-else class="h-[49px]"></div>
             </div>
@@ -224,14 +225,14 @@ const bottomPanelStyle = computed(() => {
         <aside
           v-if="libraryStore.currentDocument && !bothMinimized"
           ref="sidebarRef"
-          class="flex flex-col border-l border-gray-200 bg-white flex-shrink-0 relative transition-all duration-200"
+          class="flex flex-col border-l border-gray-200/60 bg-white/95 backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
           :class="aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : ''"
           :style="!aiStore.isPanelCollapsed ? { width: effectiveSidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div
             v-if="!aiStore.isPanelCollapsed"
-            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-primary-400 transition-colors z-50"
+            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 transition-colors z-50"
             :class="{ 'bg-primary-500': isResizingWidth }"
             @mousedown="startWidthResize"
           >
@@ -306,21 +307,33 @@ const bottomPanelStyle = computed(() => {
             </div>
             <!-- Full Panel Content -->
             <template v-else>
-              <!-- Panel Header with Minimize Button -->
-              <div class="flex items-center px-3 py-2 border-b border-gray-200 bg-white">
+              <!-- Panel Header with Minimize Button and History -->
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-white">
+                <div class="flex items-center">
+                  <button
+                    @click="toggleBottomMinimize"
+                    class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
+                    title="最小化"
+                  >
+                    <!-- Triangle pointing down (expanded state) -->
+                    <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7 10l5 5 5-5H7z"/>
+                    </svg>
+                  </button>
+                  <span class="text-sm font-medium text-gray-700">Chat & Ask</span>
+                </div>
+                <!-- History Button (Clock Icon) - Always visible -->
                 <button
-                  @click="toggleBottomMinimize"
-                  class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
-                  title="最小化"
+                  class="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="聊天记录"
+                  @click="chatTabRef?.toggleHistoryPanel()"
                 >
-                  <!-- Triangle pointing down (expanded state) -->
-                  <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M7 10l5 5 5-5H7z"/>
+                  <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </button>
-                <span class="text-sm font-medium text-gray-700">Chat & Ask</span>
               </div>
-              <ChatTab class="flex-1 overflow-hidden" />
+              <ChatTab ref="chatTabRef" class="flex-1 overflow-hidden" />
             </template>
           </div>
         </aside>

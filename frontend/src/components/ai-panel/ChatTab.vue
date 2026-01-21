@@ -28,6 +28,11 @@ const showModelMenu = ref(false)
 const showMoreModels = ref(false)
 const selectedModel = ref('README Fusion')
 
+// Chat session state
+const currentSessionId = ref<string | null>(null)
+const showHistoryPanel = ref(false)
+const chatSessions = ref<any[]>([])
+
 const premiumModels = [
   { id: 'gpt', name: 'GPT-5.1' },
   { id: 'claude', name: 'Claude Sonnet 4.5' },
@@ -117,6 +122,53 @@ const closeMenus = () => {
   showKeywordSubmenu.value = false
   showModelMenu.value = false
   showMoreModels.value = false
+  showHistoryPanel.value = false
+}
+
+// Chat session handlers
+const toggleHistoryPanel = () => {
+  showHistoryPanel.value = !showHistoryPanel.value
+  if (showHistoryPanel.value) {
+    loadChatSessions()
+  }
+}
+
+const loadChatSessions = async () => {
+  // TODO: Call API to load chat sessions
+  // Mock data for now
+  chatSessions.value = [
+    { id: '1', title: 'Chain-of-Thought 推理', updatedAt: '2026-01-21T07:30:00', messageCount: 5 },
+    { id: '2', title: 'Unlearning 方法', updatedAt: '2026-01-21T06:15:00', messageCount: 3 },
+    { id: '3', title: 'VLA 架构分析', updatedAt: '2026-01-20T18:45:00', messageCount: 8 },
+  ]
+}
+
+const createNewChat = () => {
+  currentSessionId.value = null
+  aiStore.clearChat()
+  showHistoryPanel.value = false
+}
+
+const loadChatSession = (sessionId: string) => {
+  // TODO: Call API to load session messages
+  currentSessionId.value = sessionId
+  showHistoryPanel.value = false
+  // Mock: load messages for this session
+  console.log('Loading session:', sessionId)
+}
+
+const formatTime = (timestamp: string) => {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  
+  if (diffMins < 60) return `${diffMins}分钟前`
+  if (diffHours < 24) return `${diffHours}小时前`
+  if (diffDays < 7) return `${diffDays}天前`
+  return date.toLocaleDateString('zh-CN')
 }
 
 const suggestedPrompts = [
@@ -185,31 +237,99 @@ function handleCitationClick(pageNumber: number) {
 watch(() => aiStore.chatMessages.length, () => {
   nextTick(scrollToBottom)
 })
+
+// Expose methods for parent component
+defineExpose({
+  toggleHistoryPanel
+})
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col relative">
+    <!-- Top Toolbar: New Chat Button -->
+    <div class="absolute top-3 right-3 z-10 flex gap-2">
+      <!-- New Chat Button - Minimalist premium style -->
+      <button
+        @click="createNewChat"
+        class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm hover:bg-white border border-gray-200/60 text-gray-700 hover:text-gray-900 rounded-xl transition-all duration-200 shadow-sm hover:shadow"
+        title="新对话"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" />
+        </svg>
+        <span class="text-sm font-medium">新对话</span>
+      </button>
+    </div>
+
+    <!-- History Panel (Overlay) -->
+    <div
+      v-if="showHistoryPanel"
+      class="absolute inset-0 bg-black/20 z-20"
+      @click="showHistoryPanel = false"
+    >
+      <div
+        class="absolute right-0 top-0 bottom-0 w-80 bg-white/95 backdrop-blur-md shadow-2xl border-l border-gray-200/50"
+        @click.stop
+      >
+        <!-- History Header - Premium style -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 class="text-sm font-semibold text-gray-800 tracking-wide">聊天记录</h3>
+          <button
+            @click="showHistoryPanel = false"
+            class="p-1.5 hover:bg-gray-100 rounded-lg transition-all duration-200"
+          >
+            <svg class="w-4 h-4 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- History List - Clean premium style -->
+        <div class="overflow-y-auto" style="height: calc(100% - 65px)">
+          <div v-if="chatSessions.length === 0" class="p-8 text-center text-gray-400 text-sm">
+            暂无聊天记录
+          </div>
+          <button
+            v-for="session in chatSessions"
+            :key="session.id"
+            @click="loadChatSession(session.id)"
+            class="w-full text-left px-5 py-3.5 hover:bg-gray-50/80 border-b border-gray-50 transition-all duration-200 group"
+          >
+            <div class="font-medium text-sm text-gray-800 truncate mb-1.5 group-hover:text-gray-900">
+              {{ session.title }}
+            </div>
+            <div class="flex items-center justify-between text-xs text-gray-400">
+              <span>{{ session.messageCount }} 条消息</span>
+              <span>{{ formatTime(session.updatedAt) }}</span>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Messages Area -->
     <div
       ref="messagesContainer"
       class="flex-1 overflow-y-auto p-4 space-y-4"
     >
-      <!-- Empty State with Suggested Prompts -->
-      <div v-if="aiStore.chatMessages.length === 0" class="h-full flex flex-col justify-center">
-        <div class="text-center mb-6">
-          <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          <p class="text-sm text-gray-500">有什么想问的？</p>
+      <!-- Empty State with Suggested Prompts - Centered premium design -->
+      <div v-if="aiStore.chatMessages.length === 0" class="h-full flex flex-col justify-center items-center px-8">
+        <div class="text-center mb-8">
+          <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          </div>
+          <p class="text-sm text-gray-500 font-medium">有什么想问的？</p>
         </div>
 
-        <!-- Suggested Prompts -->
-        <div class="space-y-2">
+        <!-- Suggested Prompts - Centered with max width -->
+        <div class="w-full max-w-md space-y-2.5">
           <button
             v-for="prompt in suggestedPrompts"
             :key="prompt"
             @click="sendMessage(prompt)"
-            class="w-full text-left px-4 py-3 bg-gray-50 hover:bg-primary-50 rounded-lg text-sm text-gray-700 transition-colors"
+            class="w-full text-center px-5 py-3.5 bg-white hover:bg-gray-50 border border-gray-100 hover:border-gray-200 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 shadow-sm hover:shadow"
           >
             {{ prompt }}
           </button>
@@ -225,18 +345,18 @@ watch(() => aiStore.chatMessages.length, () => {
             message.role === 'user' ? 'max-w-[85%] ml-auto' : 'w-full'
           ]"
         >
-          <!-- User Message: lighter bubble -->
+          <!-- User Message: Clean minimal bubble -->
           <div
             v-if="message.role === 'user'"
-            class="px-4 py-3 rounded-2xl bg-primary-100 text-primary-900 rounded-br-md"
+            class="px-5 py-3.5 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100/80 text-gray-800 rounded-br-md border border-gray-100/50"
           >
-            <p class="text-sm whitespace-pre-wrap">{{ message.content }}</p>
+            <p class="text-sm whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
           </div>
           
-          <!-- Assistant Message: no frame, like normal text -->
+          <!-- Assistant Message: Clean text with subtle styling -->
           <div
             v-else
-            class="px-2 py-2"
+            class="space-y-3"
           >
             <p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
 
@@ -273,8 +393,8 @@ watch(() => aiStore.chatMessages.length, () => {
       </template>
     </div>
 
-    <!-- Input Area -->
-    <div class="p-4 border-t border-gray-200" @click.self="closeMenus">
+    <!-- Input Area - Premium minimal style -->
+    <div class="p-4 border-t border-gray-100 bg-white/50 backdrop-blur-sm" @click.self="closeMenus">
       <!-- Preview boxes for selected references and files -->
       <div v-if="selectedReferences.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-1.5 mb-2">
         <!-- Reference previews -->
@@ -459,19 +579,19 @@ watch(() => aiStore.chatMessages.length, () => {
         </div>
       </div>
 
-      <!-- Input row -->
-      <div class="flex gap-2">
+      <!-- Input row - Premium minimal design -->
+      <div class="flex gap-3">
         <input
           v-model="inputMessage"
           type="text"
           placeholder="输入问题..."
           @keyup.enter="sendMessage()"
-          class="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:border-primary-500 text-sm"
+          class="flex-1 px-5 py-3 border border-gray-200 rounded-2xl focus:outline-none focus:border-gray-300 focus:ring-2 focus:ring-gray-100 text-sm bg-white transition-all duration-200"
         />
         <button
           @click="sendMessage()"
           :disabled="!inputMessage.trim() || aiStore.isLoadingChat"
-          class="px-4 py-2 bg-primary-600 text-white rounded-full hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          class="px-5 py-3 bg-gray-900 text-white rounded-2xl hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

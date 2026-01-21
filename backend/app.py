@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from services.pdf_service import PdfService
 from services.ai_service import AiService
+from services.chat_service import ChatService
 
 # 加载环境变量（如 OpenAI API Key）
 load_dotenv()
@@ -45,6 +46,8 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 pdf_service = PdfService(app.config['UPLOAD_FOLDER'])
 # AI 服务：负责调用 OpenAI API 实现各种 AI 功能
 ai_service = AiService()
+# 聊天服务：负责管理聊天会话和消息历史
+chat_service = ChatService()
 
 
 @app.route('/api/health', methods=['GET'])
@@ -314,17 +317,13 @@ def chat():
     请求体：
     {
         "pdfId": "PDF 标识符",
-        "message": "用户问题",
-        "history": [  // 可选，历史对话记录
-            {
-                "role": "user" | "assistant",
-                "content": "对话内容"
-            }
-        ]
+        "sessionId": "会话ID（可选，不提供则创建新会话）",
+        "message": "用户问题"
     }
     
     返回：
     {
+        "sessionId": "会话ID",
         "response": "AI 的回答内容",
         "citations": [  // 引用的原文位置
             {
@@ -343,21 +342,143 @@ def chat():
     data = request.get_json()
     pdf_id = data.get('pdfId')
     message = data.get('message')
-    history = data.get('history', [])
+    session_id = data.get('sessionId')
 
     if not pdf_id or not message:
         return jsonify({'error': 'pdfId and message are required'}), 400
 
     try:
+        # 如果没有提供sessionId，创建新会话
+        if not session_id:
+            session = chat_service.create_session(pdf_id)
+            session_id = session['id']
+        
+        # 添加用户消息
+        chat_service.add_message(session_id, 'user', message)
+        
+        # 获取历史消息作为上下文
+        history = chat_service.get_messages(session_id)
+        history_for_ai = [{'role': m['role'], 'content': m['content']} for m in history[:-1]]  # 排除刚添加的消息
+        
         # 提取 PDF 的全文本作为上下文
         text = pdf_service.extract_text(pdf_id)['text']
-        # 调用 AI 服务进行对话，传入文档内容、用户问题和历史记录
-        response = ai_service.chat(text, message, history)
-        return jsonify(response)
+        # 调用 AI 服务进行对话
+        ai_response = ai_service.chat(text, message, history_for_ai)
+        
+        # 添加AI回复到会话
+        chat_service.add_message(session_id, 'assistant', ai_response['response'], ai_response.get('citations', []))
+        
+        return jsonify({
+            'sessionId': session_id,
+            'response': ai_response['response'],
+            'citations': ai_response.get('citations', [])
+        })
     except FileNotFoundError:
         return jsonify({'error': 'PDF not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ==================== 聊天会话管理路由 ====================
+
+@app.route('/api/chat/sessions', methods=['GET'])
+def list_chat_sessions():
+    """
+    获取聊天会话列表
+    
+    查询参数：
+    - pdfId: 可选，筛选特定PDF的会话
+    
+    返回：
+    {
+        "sessions": [
+            {
+                "id": "会话ID",
+                "pdfId": "PDF ID",
+                "title": "会话标题",
+                "createdAt": "创建时间",
+                "updatedAt": "更新时间",
+                "messageCount": 消息数量
+            }
+        ]
+    }
+    """
+    pdf_id = request.args.get('pdfId')
+    sessions = chat_service.list_sessions(pdf_id)
+    return jsonify({'sessions': sessions})
+
+
+@app.route('/api/chat/sessions', methods=['POST'])
+def create_chat_session():
+    """
+    创建新的聊天会话
+    
+    请求体：
+    {
+        "pdfId": "PDF 标识符",
+        "title": "会话标题（可选）"
+    }
+    
+    返回：
+    {
+        "session": {
+            "id": "会话ID",
+            "pdfId": "PDF ID",
+            "title": "会话标题",
+            "createdAt": "创建时间",
+            "updatedAt": "更新时间",
+            "messageCount": 0
+        }
+    }
+    """
+    data = request.get_json()
+    pdf_id = data.get('pdfId')
+    title = data.get('title')
+    
+    if not pdf_id:
+        return jsonify({'error': 'pdfId is required'}), 400
+    
+    session = chat_service.create_session(pdf_id, title)
+    return jsonify({'session': session})
+
+
+@app.route('/api/chat/sessions/<session_id>', methods=['GET'])
+def get_chat_session(session_id):
+    """
+    获取特定会话的详细信息和消息历史
+    
+    返回：
+    {
+        "session": {会话信息},
+        "messages": [消息列表]
+    }
+    """
+    session = chat_service.get_session(session_id)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    messages = chat_service.get_messages(session_id)
+    return jsonify({
+        'session': session,
+        'messages': messages
+    })
+
+
+@app.route('/api/chat/sessions/<session_id>', methods=['DELETE'])
+def delete_chat_session(session_id):
+    """
+    删除聊天会话
+    
+    返回：
+    {
+        "success": true
+    }
+    """
+    success = chat_service.delete_session(session_id)
+    if not success:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    return jsonify({'success': True})
 
 
 # ==================== 工具函数 ====================
