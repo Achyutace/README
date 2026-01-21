@@ -150,7 +150,7 @@ function handlePageInput() {
     <!-- Roadmap Popup - Centered over PDF -->
     <div
       v-if="showRoadmap"
-      class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[550px] bg-white rounded-lg shadow-2xl border border-gray-200 z-50 flex flex-col overflow-hidden"
+      class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[550px] bg-white rounded-lg shadow-2xl border border-gray-200 z-[9999] flex flex-col overflow-hidden"
     >
       <!-- Popup Header -->
       <div class="px-4 py-3 border-b border-gray-200 flex justify-between items-center bg-gray-50">
@@ -241,7 +241,7 @@ function handlePageInput() {
     <!-- Backdrop -->
     <div
       v-if="showRoadmap"
-      class="fixed inset-0 z-40 bg-black/30"
+      class="fixed inset-0 z-[9998] bg-black/30"
       @click="closeRoadmap"
     ></div>
   </div>
