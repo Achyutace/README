@@ -1,10 +1,10 @@
 """
-Agent Service - 学术论文阅读助手 Agent 
+Agent Service - 学术论文阅读助手 Agent [对话用]
 
 使用 LangGraph 实现的多节点工作流：
 1. RAG 检索（强制执行）
 2. 相关性与充分性评估
-3. 工具规划与执行
+3. 工具规划与执行[联网搜索+笔记编辑+切换对话历史+读取完整文本]
 4. 综合生成
 """
 
@@ -57,8 +57,6 @@ class AgentState(TypedDict):
     steps: List[str]  # 记录执行步骤
     current_step: str
 
-
-# ==================== Agent 核心类 ====================
 
 class AcademicAgentService:
     """学术论文阅读助手 Agent"""

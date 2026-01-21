@@ -214,7 +214,7 @@ class RAGService:
         for i, chunk in enumerate(self.current_chunks):
             chunk.embedding = embeddings[i]
     
-    def retrieve(self, query: str, user_id: str = "default", top_k: int = 5,
+    def retrieve(self, query: str, top_k: int = 3, 
                  section_filter: Optional[str] = None,
                  page_filter: Optional[int] = None) -> List[Dict]:
         """
@@ -268,24 +268,18 @@ class RAGService:
             filtered_similarities.sort(key=lambda x: x[1], reverse=True)
             top_indices = [i for i, _ in filtered_similarities[:top_k]]
             
-            # 6. 构造返回结果（兼容 agent_service 期望的格式）
+            # 6. 构造返回结果
             results = []
             for idx in top_indices:
                 chunk = self.current_chunks[idx]
                 results.append({
                     'content': chunk.content,
-                    'parent_content': chunk.content,  # agent_service 期望的字段
                     'section': chunk.section,
                     'page': chunk.page,
                     'chunk_index': chunk.chunk_index,
-                    'score': float(similarities[idx]),
-                    'metadata': {  # agent_service 期望的嵌套结构
-                        'section': chunk.section,
-                        'page': chunk.page,
-                        'chunk_index': chunk.chunk_index
-                    }
+                    'score': float(similarities[idx])
                 })
-
+            
             return results
             
         except Exception as e:
@@ -371,71 +365,3 @@ class RAGService:
         self.current_chunks = []
         self.chunks_embeddings = None
         self.current_metadata = None
-
-    def index_paper(self, pdf_path: str, paper_id: str, user_id: str = "default") -> Dict:
-        """
-        索引论文到 RAG 系统（供 app.py 上传接口调用）
-
-        Args:
-            pdf_path: PDF 文件路径
-            paper_id: 论文 ID
-            user_id: 用户 ID
-
-        Returns:
-            {
-                'success': bool,
-                'chunks_created': int
-            }
-        """
-        # 这里我们直接调用 load_paper，假设缓存已经被 PdfService 创建
-        # 如果缓存不存在，则尝试直接从 PDF 解析
-        result = self.load_paper(paper_id)
-
-        if result.get('success'):
-            return {
-                'success': True,
-                'chunks_created': result.get('chunks_count', 0)
-            }
-        else:
-            # 缓存不存在时，返回提示信息
-            return {
-                'success': False,
-                'chunks_created': 0,
-                'error': result.get('error', 'Failed to index paper')
-            }
-
-    def get_collection_stats(self, user_id: str = "default") -> Dict:
-        """
-        获取 RAG 知识库统计信息
-
-        Args:
-            user_id: 用户 ID
-
-        Returns:
-            {
-                'collection_name': str,
-                'total_chunks': int,
-                'papers_indexed': int
-            }
-        """
-        return {
-            'collection_name': f'user_{user_id}',
-            'total_chunks': len(self.current_chunks) if self.current_chunks else 0,
-            'papers_indexed': 1 if self.current_pdf_id else 0
-        }
-
-    def delete_paper(self, paper_id: str, user_id: str = "default") -> bool:
-        """
-        从 RAG 知识库删除论文
-
-        Args:
-            paper_id: 论文 ID
-            user_id: 用户 ID
-
-        Returns:
-            是否删除成功
-        """
-        if self.current_pdf_id == paper_id:
-            self.clear()
-            return True
-        return False
