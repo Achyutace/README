@@ -18,6 +18,9 @@ const emit = defineEmits<{
 const aiStore = useAiStore()
 const pdfStore = usePdfStore()
 const isColorPickerOpen = ref(false)
+const customColor = ref('#000000')
+const isCustomColorSet = ref(false)
+
 const colorOptions = [
   { label: '亮黄', value: '#F6E05E' },
   { label: '薄绿', value: '#9AE6B4' },
@@ -25,6 +28,14 @@ const colorOptions = [
   { label: '柔粉', value: '#FBB6CE' },
   { label: '橘橙', value: '#F6AD55' }
 ]
+
+function handleCustomColorChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const color = input.value
+  customColor.value = color
+  isCustomColorSet.value = true
+  handleColorSelect(color)
+}
 
 async function handleTranslate() {
   aiStore.isLoadingTranslation = true
@@ -74,6 +85,13 @@ function handleHighlight() {
 
 function toggleColorPicker(event: MouseEvent) {
   event.stopPropagation()
+  if (!isColorPickerOpen.value) {
+    // 当打开颜色选择器时，如果是编辑已有高亮，将自定义颜色初始化为当前高亮颜色
+    if (props.mode === 'highlight' && props.highlight) {
+      customColor.value = props.highlight.color
+      isCustomColorSet.value = true
+    }
+  }
   isColorPickerOpen.value = !isColorPickerOpen.value
 }
 
@@ -156,6 +174,21 @@ function handleColorSelect(color: string) {
             :style="{ backgroundColor: option.value }"
             :title="option.label"
           ></button>
+          
+          <div class="relative w-6 h-6 rounded-full border border-white/70 shadow-sm overflow-hidden group cursor-pointer" title="自定义颜色">
+            <div 
+              class="absolute inset-0 w-full h-full"
+              :style="{ 
+                background: isCustomColorSet ? customColor : 'conic-gradient(from 180deg at 50% 50%, #FF0000 0deg, #FFFF00 60deg, #00FF00 120deg, #00FFFF 180deg, #0000FF 240deg, #FF00FF 300deg, #FF0000 360deg)'
+              }"
+            ></div>
+            <input 
+              type="color" 
+              v-model="customColor"
+              @change="handleCustomColorChange"
+              class="absolute inset-0 w-full h-full opacity-0 cursor-pointer p-0 border-none"
+            />
+          </div>
         </div>
       </div>
 

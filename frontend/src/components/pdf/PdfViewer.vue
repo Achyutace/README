@@ -589,8 +589,6 @@ function handleClickOutside() {
   const selection = window.getSelection()
   // Keep the action menu open when there is still a text selection
   if (selection && selection.toString().trim()) return
-  // Keep the menu open when editing a highlight
-  if (pdfStore.isEditingHighlight) return
 
   showTooltip.value = false // 隐藏提示
   pdfStore.clearSelection() // 清空选中文本
