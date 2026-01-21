@@ -3,8 +3,8 @@ import { ref, computed } from 'vue'
 import LibrarySidebar from './components/sidebar/LibrarySidebar.vue'
 import PdfViewer from './components/pdf/PdfViewer.vue'
 import PdfToolbar from './components/pdf/PdfToolbar.vue'
-import AiPanel from './components/ai-panel/AiPanel.vue'
-import ChatTab from './components/ai-panel/ChatTab.vue' 
+import NotesPanel from './components/notes/NotesPanel.vue'
+import ChatTab from './components/ai-panel/ChatTab.vue'
 import { useLibraryStore } from './stores/library'
 import { useAiStore } from './stores/ai'
 import { usePdfStore } from './stores/pdf'
@@ -205,7 +205,7 @@ const bottomPanelStyle = computed(() => {
               <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M7 14l5-5 5 5H7z"/>
               </svg>
-              <span class="text-white text-xs font-medium truncate">AI</span>
+              <span class="text-white text-xs font-medium truncate">Notes</span>
             </div>
             <!-- Bottom panel minimized bar -->
             <div 
@@ -272,7 +272,7 @@ const bottomPanelStyle = computed(() => {
               <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M7 14l5-5 5 5H7z"/>
               </svg>
-              <span class="text-white text-xs font-medium truncate">AI 助手</span>
+              <span class="text-white text-xs font-medium truncate">笔记</span>
             </div>
             <!-- Full Panel Content -->
             <template v-else>
@@ -288,10 +288,10 @@ const bottomPanelStyle = computed(() => {
                     <path d="M7 10l5 5 5-5H7z"/>
                   </svg>
                 </button>
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">AI 助手</span>
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
               </div>
               <div class="flex-1 overflow-hidden">
-                <AiPanel />
+                <NotesPanel />
               </div>
             </template>
           </div>
