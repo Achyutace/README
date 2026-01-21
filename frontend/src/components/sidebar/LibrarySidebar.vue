@@ -63,7 +63,7 @@ function removeDocument(id: string, event: Event) {
     <!-- Logo Area -->
     <div class="p-4 flex items-center justify-between border-b border-gray-700">
       <h1 v-if="!isCollapsed" class="text-xl font-bold text-primary-500">
-        Moonlight
+        README
       </h1>
       <button
         @click="toggleSidebar"
