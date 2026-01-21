@@ -2,11 +2,6 @@
 存储服务 TODO
 
 提供 PDF 文件、段落、图片、笔记和高亮的统一存储接口
-注意：
-服务层 (Service/Business Logic): 它是“大脑”。它负责：
-坐标系转换（比如屏幕像素转经纬度，或者相对位置计算）。
-判定逻辑（比如计算点击位置是否命中目标）。
-调度数据库层进行存储。
 """
 
 import os
@@ -38,7 +33,7 @@ class StorageService:
         self.images_folder.mkdir(parents=True, exist_ok=True)
 
         # 创建PDF存储目录 (全局数据共享)
-        self.uploadss_folder = self.storage_root / 'uploads'
+        self.uploads_folder = self.storage_root / 'uploads'
         self.uploads_folder.mkdir(parents=True, exist_ok=True)
         
         # 初始化数据库（全局共享数据库，通过 user_id 区分用户）
@@ -69,6 +64,45 @@ class StorageService:
             metadata=metadata
         )
     
+    def persist_pdf_parsing(self, 
+                          file_path: str, 
+                          file_hash: str, 
+                          filename: str,
+                          page_count: int,
+                          paragraphs: List[Dict],
+                          images: List[Dict] = None,
+                          user_id: str = "default") -> bool:
+        """
+        将 PDF 解析结果（元数据、段落、图片索引）持久化到数据库
+        通常在 PdfService 解析完文件后调用
+        """
+        try:
+            # 1. 保存文件元数据
+            self.db.add_pdf_file(
+                file_path=file_path,
+                filename=filename,
+                user_id=user_id,
+                page_count=page_count,
+                file_hash=file_hash
+            )
+
+            # 2. 批量保存段落
+            if paragraphs:
+                # 预处理 paragraphs，确保包含 index
+                processed_paras = []
+                for idx, p in enumerate(paragraphs):
+                    # 如果 pdf_service 没给 index，手动加上
+                    if 'index' not in p:
+                        p['index'] = idx
+                    processed_paras.append(p)
+                
+                self.db.add_paragraphs_batch(file_hash, processed_paras)
+
+            return True
+        except Exception as e:
+            print(f"Error persisting PDF data: {e}")
+            return False
+        
     def get_pdf_info(self, file_hash: str) -> Optional[Dict]:
         """
         获取 PDF 文件信息
@@ -157,7 +191,7 @@ class StorageService:
         """
         return self.db.check_pdf_exists(file_hash)
     
-    # ==================== 段落管理 ====================
+    # ==================== 供段落翻译使用 ====================
     
     def save_paragraphs(self, file_hash: str, page_number: int, 
                        paragraphs: List[Dict]) -> List[int]:

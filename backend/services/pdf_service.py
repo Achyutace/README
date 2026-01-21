@@ -30,22 +30,66 @@ class PdfService:
             self.cache_folder = cache_folder
         else:
             self.cache_folder = os.path.join(os.path.dirname(upload_folder), 'cache')
-        
-        # 创建缓存子目录
-        self.paragraphs_cache = os.path.join(self.cache_folder, 'paragraphs')
-        self.translations_cache = os.path.join(self.cache_folder, 'translations')
-        self.images_cache = os.path.join(self.cache_folder, 'images')
-        self.vectors_cache = os.path.join(self.cache_folder, 'vectors')
-        
-        for cache_dir in [self.paragraphs_cache, self.translations_cache, 
-                          self.images_cache, self.vectors_cache]:
-            os.makedirs(cache_dir, exist_ok=True)
 
-    def save_and_process(self, file) -> dict:
-        """Save uploaded PDF and extract basic info."""
-        pdf_id = str(uuid.uuid4())
+    def _find_filepath_by_id(self, pdf_id: str) -> str:
+        """
+        根据 ID (Hash) 在上传目录查找文件
+        文件名约定: {hash}_{filename} 
+        """
+        # 1. 查内存注册表
+        if pdf_id in self.pdf_registry:
+            return self.pdf_registry[pdf_id]['filepath']
+            
+        # 2. 查磁盘 (文件名以 pdf_id 开头)
+        if os.path.exists(self.upload_folder):
+            prefix = f"{pdf_id}"
+            for fname in os.listdir(self.upload_folder):
+                if fname.startswith(prefix) and (len(fname) == len(prefix) or fname[len(prefix)] in ['_', '.']):
+                    return os.path.join(self.upload_folder, fname)
+        return None
+
+    def save_and_process(self, file, file_hash: str) -> dict:
+        """
+        保存上传的 PDF 并提取基本信息
+        
+        Args:
+            file: 上传的文件对象
+            file_hash: 文件的 SHA256 哈希值
+            
+        Returns:
+            包含 id, filename, pageCount, exists 的字典
+        """
+        pdf_id = file_hash
         filename = secure_filename(file.filename)
-        filepath = os.path.join(self.upload_folder, f"{pdf_id}_{filename}")
+        
+        # 1. 检查是否已存在 (秒传)
+        existing_filepath = self._find_filepath_by_id(pdf_id)
+        
+        if existing_filepath:
+            # 文件已存在，不再重复写入磁盘
+            doc = fitz.open(existing_filepath)
+            page_count = len(doc)
+            doc.close()
+            
+            # 确保注册表中有它
+            self.pdf_registry[pdf_id] = {
+                'id': pdf_id,
+                'filename': filename,
+                'filepath': existing_filepath,
+                'pageCount': page_count
+            }
+            
+            return {
+                'id': pdf_id,
+                'filename': filename,
+                'pageCount': page_count,
+                'exists': True  # 标记已存在
+            }
+
+        # 2. 文件不存在，保存新文件
+        # 格式: {hash}_{filename}
+        save_filename = f"{pdf_id}_{filename}"
+        filepath = os.path.join(self.upload_folder, save_filename)
 
         file.save(filepath)
 
@@ -65,19 +109,16 @@ class PdfService:
         return {
             'id': pdf_id,
             'filename': filename,
-            'pageCount': page_count
+            'pageCount': page_count,
+            'exists': False
         }
 
     def get_filepath(self, pdf_id: str) -> str:
         """Get filepath for a PDF by ID."""
-        if pdf_id in self.pdf_registry:
-            return self.pdf_registry[pdf_id]['filepath']
-
-        # Search in upload folder if not in registry
-        for filename in os.listdir(self.upload_folder):
-            if filename.startswith(pdf_id):
-                filepath = os.path.join(self.upload_folder, filename)
-                return filepath
+        filepath = self._find_filepath_by_id(pdf_id)
+        
+        if filepath:
+            return filepath
 
         raise FileNotFoundError(f"PDF not found: {pdf_id}")
 
@@ -95,6 +136,24 @@ class PdfService:
         doc.close()
         return info
 
+    def get_page_dimensions(self, pdf_id: str, page_number: int) -> dict:
+        """获取特定页面的尺寸，用于坐标转换"""
+        filepath = self.get_filepath(pdf_id)
+        doc = fitz.open(filepath)
+        
+        try:
+            if page_number < 1 or page_number > len(doc):
+                raise ValueError(f"Invalid page number: {page_number}")
+            
+            page = doc[page_number - 1]
+            rect = page.rect
+            return {
+                "width": rect.width,
+                "height": rect.height
+            }
+        finally:
+            doc.close()
+            
     def extract_text(self, pdf_id: str, page_number: int = None) -> dict:
         """Extract text from PDF, optionally from specific page."""
         filepath = self.get_filepath(pdf_id)
@@ -310,6 +369,5 @@ class PdfService:
             # 记录错误或抛出
             print(f"Error fetching image {image_id}: {e}")
             return None
-        
-    
-    
+
+

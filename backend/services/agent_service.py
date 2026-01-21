@@ -2,10 +2,10 @@
 Agent Service - 学术论文阅读助手 Agent [对话用]
 
 使用 LangGraph 实现的多节点工作流：
-1. RAG 检索
-2. 相关性与充分性评估
-3. 工具规划与执行[联网搜索+笔记编辑+切换对话历史+读取完整文本]
-4. 综合生成
+1. RAG 检索 - 从本地向量数据库中检索当前论文相关段落
+2. 相关性与充分性评估 - 判断检索到的信息是否足以回答问题
+3. 工具规划与执行 - 如果信息不足，调用外部工具（联网搜索/笔记编辑/读取对话历史/读取完整文本）
+4. 综合生成 - 整合本地和外部信息，生成最终答案
 """
 
 import os
@@ -13,77 +13,69 @@ import json
 from typing import Dict, List, Optional, TypedDict, Annotated
 from datetime import datetime
 
-from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain.tools import Tool
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor
+# LangChain 核心组件
+from langchain_openai import ChatOpenAI  # OpenAI 的聊天模型
+from langchain.schema import HumanMessage, AIMessage, SystemMessage  # 消息类型
+from langchain.tools import Tool  # 工具封装
+from langgraph.graph import StateGraph, END  # 状态图和结束节点
+from langgraph.prebuilt import ToolExecutor  # 工具执行器
 
-from services.rag_service import RAGService
-from services.pdf_service import PdfService
-from tools.web_search_tool import WebSearchTool
-from tools.paper_discovery_tool import PaperDiscoveryTool
-
-# ==================== 状态定义 ====================
+# 本地服务和工具
+from services.rag_service import RAGService  # RAG服务
+from services.storage_service import StorageService  # PDF 处理服务
+from tools.web_search_tool import WebSearchTool  # 网络搜索工具
+from tools.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
 
 class AgentState(TypedDict):
-    """Agent 状态定义"""
-    # 用户输入
-    user_query: str
-    user_id: str
-    paper_id: Optional[str]
+    """ Agent 状态定义 """
+    user_query: str  # 用户的问题
+    user_id: str  # 用户标识符
+    paper_id: str  # 当前正在阅读的论文ID
     
-    # 对话历史
-    chat_history: List[Dict]
+    chat_history: List[Dict]  # 历史对话记录 （MVP）
     
-    # RAG 检索结果
-    local_context: List[Dict]
-    local_context_text: str
+    local_context: List[Dict]  # 从本地知识库检索到的相关段落列表
+    local_context_text: str  # 格式化后的本地上下文文本
     
-    # 评估结果
-    is_sufficient: bool
-    missing_info: str
+    is_sufficient: bool  # 本地信息是否足够回答问题
+    missing_info: str  # 如果信息不足，描述缺少什么信息
     
-    # 工具调用
-    tool_calls: List[Dict]
-    external_context: List[Dict]
+    tool_calls: List[Dict]  # 调用的工具列表
+    external_context: List[Dict]  # 从外部工具获取的信息
     
-    # 最终回答
-    final_response: str
-    citations: List[Dict]
+    final_response: str  # 生成的最终答案
+    citations: List[Dict]  # 引用来源列表（本地文档页码、章节等）
     
-    # 元数据
-    steps: List[str]  # 记录执行步骤
-    current_step: str
-
+    steps: List[str]  # 记录执行的步骤名称（用于调试和展示）
+    current_step: str  # 当前正在执行的步骤描述
 
 class AcademicAgentService:
-    """学术论文阅读助手 Agent"""
+    """ 学术论文阅读助手 Agent """
     
     def __init__(self, 
                  rag_service: RAGService,
                  openai_api_key: Optional[str] = None,
+                 openai_api_base: Optional[str] = None,
                  model: str = "gpt-3.5-turbo",
                  temperature: float = 0.7):
         """
-        Args:
-            rag_service: RAG 服务实例
-            openai_api_key: OpenAI API Key
-            model: 使用的模型
-            temperature: 温度参数
+        初始化 Agent 服务    
         """
         self.rag_service = rag_service
-        
-        # 初始化 LLM
+
         api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
+        api_base = openai_api_base or os.getenv('OPENAI_API_BASE') 
         if api_key:
+            # 初始化 OpenAI 聊天模型
             self.llm = ChatOpenAI(
                 model=model,
                 temperature=temperature,
-                api_key=api_key
+                api_key=api_key,
+                base_url = api_base
             )
             self.has_llm = True
         else:
+            # 没有 API Key，进入 Demo 模式（返回模拟数据）
             self.llm = None
             self.has_llm = False
             print("Warning: OpenAI API key not found. Agent will use demo mode.")
@@ -92,7 +84,6 @@ class AcademicAgentService:
         self.web_search = WebSearchTool()
         self.paper_discovery = PaperDiscoveryTool()
         
-        # 构建工作流图
         self.workflow = self._build_workflow()
     
     def _build_workflow(self) -> StateGraph:
@@ -100,10 +91,10 @@ class AcademicAgentService:
         workflow = StateGraph(AgentState)
         
         # 添加节点
-        workflow.add_node("rag_retrieval", self._rag_retrieval_node)
-        workflow.add_node("sufficiency_judge", self._sufficiency_judge_node)
-        workflow.add_node("tool_planning", self._tool_planning_node)
-        workflow.add_node("synthesize", self._synthesize_node)
+        workflow.add_node("rag_retrieval", self._rag_retrieval_node)  # 节点1: RAG检索
+        workflow.add_node("sufficiency_judge", self._sufficiency_judge_node)  # 节点2: 评估
+        workflow.add_node("tool_planning", self._tool_planning_node)  # 节点3: 工具调用
+        workflow.add_node("synthesize", self._synthesize_node)  # 节点4: 综合生成
         
         # 设置入口点
         workflow.set_entry_point("rag_retrieval")
@@ -126,8 +117,6 @@ class AcademicAgentService:
         
         return workflow.compile()
     
-    # ==================== 节点实现 ====================
-    
     def _rag_retrieval_node(self, state: AgentState) -> AgentState:
         """节点 1: RAG 检索"""
         state['steps'].append('RAG 检索')
@@ -135,21 +124,32 @@ class AcademicAgentService:
         
         user_query = state['user_query']
         user_id = state['user_id']
+        paper_id = state['paper_id']
         
         # 执行检索
-        results = self.rag_service.retrieve(query=user_query, user_id=user_id, top_k=5)
+        results = self.rag_service.retrieve(query=user_query, user_id=user_id, paper_id=paper_id, top_k=5)
         
+        # 保存原始检索结果
         state['local_context'] = results
         
         # 格式化为文本
         context_parts = []
         for i, result in enumerate(results, 1):
+            section = result.get('section', 'unknown')
+            page = result.get('page', 'N/A')
+    
+            if section == 'unknown' and 'metadata' in result:
+                section = result['metadata'].get('section', 'unknown')
+            if page == 'N/A' and 'metadata' in result:
+                page = result['metadata'].get('page', 'N/A')
+    
             context_parts.append(
-                f"[来源 {i}] 章节: {result['metadata'].get('section', 'unknown')}, "
-                f"页码: {result['metadata'].get('page', 'N/A')}\n"
+                f"[来源 {i}] 章节: {section}, "
+                f"页码: {page}\n"
                 f"{result['parent_content']}\n"
             )
         
+        # 合并所有段落
         state['local_context_text'] = '\n'.join(context_parts) if context_parts else '未找到相关内容'
         
         return state
@@ -161,7 +161,7 @@ class AcademicAgentService:
         
         if not self.has_llm:
             # Demo 模式：简单判断
-            state['is_sufficient'] = len(state['local_context']) >= 3
+            state['is_sufficient'] = len(state['local_context']) >= 1
             state['missing_info'] = '' if state['is_sufficient'] else '需要更多外部信息'
             return state
         
@@ -173,19 +173,20 @@ class AcademicAgentService:
 {state['user_query']}
 
 本地上下文：
-{state['local_context_text'][:3000]}
+{state['local_context_text'][:3000]} 
 
 请判断：
 1. 如果本地上下文包含足够的信息可以完整、准确地回答用户问题，输出 JSON：{{"sufficient": true, "missing": ""}}
 2. 如果本地上下文不足以回答问题，输出 JSON：{{"sufficient": false, "missing": "缺少的具体信息描述"}}
 
-只输出 JSON，不要有其他内容。
+只输出 JSON，不要有其他内容，输出的缺少的信息尽量简洁。
 """
         
         try:
             response = self.llm.invoke([HumanMessage(content=judge_prompt)])
             result = json.loads(response.content.strip())
             
+            # 更新状态
             state['is_sufficient'] = result.get('sufficient', False)
             state['missing_info'] = result.get('missing', '')
         
@@ -217,27 +218,32 @@ class AcademicAgentService:
 用户问题：
 {state['user_query']}
 
-本地上下文：
-{state['local_context_text'][:2000]}
-
 缺少的信息：
 {state['missing_info']}
 
 可用工具：
-1. web_search: 搜索互联网获取最新信息、背景知识或概念定义
-2. search_papers: 在 ArXiv 上搜索学术论文
-3. fetch_paper: 下载并阅读特定的 ArXiv 论文（需要论文 ID）
+1. web_search: 搜索互联网获取最新信息、背景知识、概念定义或实时数据
+   - 适用场景：查找基础概念、最新新闻、技术文档、通用知识
+   - 返回：网页标题、内容摘要、来源链接
 
-请选择最合适的工具并提供查询参数。输出 JSON 格式：
+2. search_papers: 在学术数据库（ArXiv、Semantic Scholar）中搜索论文
+   - 适用场景：查找相关研究、了解学术进展、获取论文详情
+   - 返回：论文标题、作者、摘要、发表日期、引用数、相关性评分、PDF链接
+   - 支持：自然语言查询、ArXiv分类（如 'cat:cs.CL'）、标题搜索（如 'ti:"transformer"'）
+
+请根据缺失的信息类型选择最合适的工具，并提供精确的查询参数。
+
+输出 JSON 格式：
 {{
     "tool": "工具名称",
-    "query": "查询字符串或论文 ID"
+    "query": "查询字符串"
 }}
 
 只输出 JSON，不要有其他内容。
 """
         
         try:
+            # LLM 决定使用哪个工具以及如何调用
             response = self.llm.invoke([HumanMessage(content=tool_prompt)])
             tool_plan = json.loads(response.content.strip())
             
@@ -246,24 +252,23 @@ class AcademicAgentService:
             
             # 执行工具
             if tool_name == 'web_search':
+                # 网络搜索
                 results = self.web_search.search(query)
                 state['external_context'] = results
                 state['current_step'] = f'已完成网络搜索: {query}'
             
             elif tool_name == 'search_papers':
-                results = self.paper_discovery.search_arxiv(query)
+                # ArXiv 论文搜索
+                results = self.paper_discovery.search_papers(query)
                 state['external_context'] = results
                 state['current_step'] = f'已完成论文搜索: {query}'
             
-            elif tool_name == 'fetch_paper':
-                result = self.paper_fetcher.fetch_and_parse(query)
-                state['external_context'] = [result]
-                state['current_step'] = f'已抓取论文: {query}'
-            
             else:
+                # 未知工具，返回空结果
                 state['external_context'] = []
         
         except Exception as e:
+            # 工具执行出错，降级到 demo 模式
             print(f"Tool execution error: {e}")
             state['external_context'] = self._demo_tool_execution(state)
         
@@ -327,6 +332,7 @@ class AcademicAgentService:
                 else:
                     messages.append(AIMessage(content=msg['content']))
             
+            # 添加当前问题和上下文
             messages.append(HumanMessage(content=synthesis_prompt))
             
             response = self.llm.invoke(messages)
@@ -334,6 +340,7 @@ class AcademicAgentService:
             state['citations'] = self._extract_citations(state)
         
         except Exception as e:
+            # 生成出错，降级到 demo 模式
             print(f"Synthesis error: {e}")
             state['final_response'] = self._demo_response(state)
             state['citations'] = self._extract_citations(state)
@@ -342,12 +349,68 @@ class AcademicAgentService:
     
     def _format_external_context(self, external_context: List[Dict]) -> str:
         """格式化外部上下文"""
+
+        if not external_context:
+            return ""
+        
         parts = []
+        # 最多使用前3个结果（避免 prompt 过长）
         for i, item in enumerate(external_context[:3], 1):
-            if 'snippet' in item:
-                parts.append(f"[{i}] {item.get('title', 'N/A')}\n{item['snippet']}")
-            elif 'abstract' in item:
-                parts.append(f"[{i}] {item.get('title', 'N/A')}\n{item['abstract'][:300]}")
+            source_type = item.get('source', 'unknown')
+            
+            if source_type in ['arxiv', 'semantic_scholar'] or 'paper_id' in item:
+                # 构建论文信息
+                paper_info = [
+                    f"[论文 {i}] {item.get('title', 'N/A')}",
+                    f"发表日期: {item.get('published', 'N/A')}",
+                    f"引用数: {item.get('citations', 0)}",
+                ]
+                
+                # 过滤空字符串
+                paper_info = [info for info in paper_info if info]
+                
+                # 添加评分信息（如果有）
+                if 'relevance_score' in item:
+                    paper_info.append(
+                        f"评分 - 相关性: {item.get('relevance_score', 0):.2f}, "
+                        f"时效性: {item.get('recency_score', 0):.2f}, "
+                        f"引用影响: {item.get('citation_impact', 0):.2f}"
+                    )
+                
+                # 添加摘要（截断到300字符）
+                abstract = item.get('abstract', '')
+                if abstract:
+                    # 移除可能的省略号后缀
+                    abstract = abstract.rstrip('.')
+                    if len(abstract) > 300:
+                        abstract = abstract[:300] + '...'
+                    paper_info.append(f"摘要: {abstract}")
+                
+                parts.append('\n'.join(paper_info))
+            
+            elif 'snippet' in item:
+                web_info = [
+                    f"[网页 {i}] {item.get('title', 'N/A')}",
+                    f"内容: {item['snippet']}"
+                ]
+                
+                if item.get('url'):
+                    web_info.append(f"来源: {item['url']}")
+                
+                parts.append('\n'.join(web_info))
+            
+            # ========== 通用格式（其他数据源） ==========
+            else:
+                # 尝试提取标题和内容
+                title = item.get('title', item.get('name', 'N/A'))
+                content = item.get('content', item.get('description', item.get('abstract', '')))
+                
+                if content:
+                    if len(content) > 400:
+                        content = content[:400] + '...'
+                    parts.append(f"[来源 {i}] {title}\n{content}")
+                else:
+                    parts.append(f"[来源 {i}] {title}")
         
         return '\n\n'.join(parts)
     
@@ -357,12 +420,55 @@ class AcademicAgentService:
         
         # 从本地上下文提取
         for result in state.get('local_context', []):
+            page = result.get('page', result.get('metadata', {}).get('page', 0))
+            section = result.get('section', result.get('metadata', {}).get('section', 'unknown'))
+            content = result.get('content', '')
+            
             citations.append({
-                'source': 'local',
-                'page': result['metadata'].get('page', 0),
-                'section': result['metadata'].get('section', 'unknown'),
-                'text': result['content'][:200] + '...'
+                'source_type': 'local',  # 来源类型：本地文档
+                'page': page,  # 页码
+                'section': section,  # 章节
             })
+        
+        # ========== 从外部上下文提取引用 ==========
+        for item in state.get('external_context', []):
+            source_type = item.get('source', 'external')
+            
+            # 论文类型的引用
+            if source_type in ['arxiv', 'semantic_scholar'] or 'paper_id' in item:
+                authors = item.get('authors', [])
+                authors_str = ', '.join(authors[:3])
+                if len(authors) > 3:
+                    authors_str += ' et al.'
+                
+                citations.append({
+                    'source_type': 'paper',
+                    'paper_id': item.get('paper_id', ''),
+                    'title': item.get('title', ''),
+                    'authors': authors_str,
+                    'published': item.get('published', ''),
+                    'citations': item.get('citations', 0),
+                    'url': item.get('url', ''),
+                    'pdf_url': item.get('pdf_url', '')
+                })
+            
+            # 网络搜索的引用
+            elif 'snippet' in item:
+                citations.append({
+                    'source_type': 'web',
+                    'title': item.get('title', ''),
+                    'snippet': item.get('snippet', '')[:200],
+                    'url': item.get('url', '')
+                })
+            
+            # 通用外部来源
+            else:
+                citations.append({
+                    'source_type': 'external',
+                    'title': item.get('title', item.get('name', '')),
+                    'content': str(item.get('content', item.get('description', '')))[:200],
+                    'url': item.get('url', '')
+                })
         
         return citations
     
@@ -375,7 +481,7 @@ class AcademicAgentService:
     def chat(self, 
              user_query: str,
              user_id: str = "default",
-             paper_id: Optional[str] = None,
+             paper_id: str = None,
              chat_history: Optional[List[Dict]] = None) -> Dict:
         """
         与 Agent 对话
@@ -383,15 +489,16 @@ class AcademicAgentService:
         Args:
             user_query: 用户问题
             user_id: 用户 ID
-            paper_id: 当前阅读的论文 ID（可选）
+            paper_id: 当前阅读的论文 ID
             chat_history: 对话历史
         
         Returns:
+            字典，包含：
             {
-                'response': '最终回答',
-                'citations': [...],
-                'steps': [...],  # 执行步骤
-                'context_used': {...}  # 使用的上下文
+                'response': str,  # 最终生成的回答
+                'citations': List[Dict],  # 引用来源列表
+                'steps': List[str],  # 执行的步骤（用于调试和展示）
+                'context_used': Dict  # 使用的上下文统计信息
             }
         """
         # 初始化状态
@@ -417,9 +524,9 @@ class AcademicAgentService:
             final_state = self.workflow.invoke(initial_state)
             
             return {
-                'response': final_state['final_response'],
-                'citations': final_state['citations'],
-                'steps': final_state['steps'],
+                'response': final_state['final_response'],  # 最终答案
+                'citations': final_state['citations'],  # 引用来源
+                'steps': final_state['steps'],  # 执行步骤记录
                 'context_used': {
                     'local_chunks': len(final_state['local_context']),
                     'external_sources': len(final_state['external_context'])
@@ -466,11 +573,13 @@ class AcademicAgentService:
         
         # 执行工作流并yield中间状态
         try:
+            # workflow.stream() 返回一个生成器，每完成一个节点就 yield 一次
             for state in self.workflow.stream(initial_state):
                 # 提取当前步骤信息
                 node_name = list(state.keys())[0]
                 node_state = state[node_name]
                 
+                # Yield 当前步骤的信息
                 yield {
                     'type': 'step',
                     'step': node_state.get('current_step', node_name),
@@ -487,6 +596,7 @@ class AcademicAgentService:
             }
         
         except Exception as e:
+            # ========== 错误处理 ==========
             yield {
                 'type': 'error',
                 'error': str(e)

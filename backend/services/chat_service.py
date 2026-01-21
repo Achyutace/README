@@ -5,6 +5,8 @@
 1. 创建和管理聊天会话
 2. 存储聊天消息历史
 3. 生成会话标题（基于关键词）
+
+TODO 目前的对话历史管理完全依赖前端，这部分需要等对话历史存数据库写好之后再启用
 """
 
 import uuid
@@ -69,7 +71,13 @@ class ChatService:
         
         return sessions
     
-    def add_message(self, session_id: str, role: str, content: str, citations: Optional[List[dict]] = None) -> dict:
+    def add_message(self, 
+                    session_id: str, 
+                    role: str, 
+                    content: str, 
+                    citations: Optional[List[dict]] = None,
+                    steps: Optional[List[str]] = None,
+                    metadata: Optional[dict] = None) -> dict:
         """
         添加消息到会话
         
@@ -77,7 +85,9 @@ class ChatService:
             session_id: 会话ID
             role: 角色 ('user' 或 'assistant')
             content: 消息内容
-            citations: 引用来源（可选）
+            citations: 引用来源（可选，对应 Agent 的 citations）
+            steps: 执行步骤（可选，对应 Agent 的 steps）
+            metadata: 额外元数据（可选，如 context_used）
         
         Returns:
             消息对象
@@ -90,6 +100,8 @@ class ChatService:
             'role': role,
             'content': content,
             'citations': citations or [],
+            'steps': steps or [],
+            'metadata': metadata or {},
             'timestamp': datetime.now().isoformat()
         }
         
@@ -105,6 +117,19 @@ class ChatService:
             session['title'] = self._generate_title(content)
         
         return message
+
+    def get_chat_history_for_agent(self, session_id: str, limit: int = 10) -> List[dict]:
+        """
+        获取符合 Agent 接口要求的对话历史格式
+        格式: [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+        """
+        messages = self.messages.get(session_id, [])
+        # 只取角色和内容，并限制轮数防止 prompt 过长
+        history = [
+            {'role': m['role'], 'content': m['content']} 
+            for m in messages[-limit:]
+        ]
+        return history
     
     def get_messages(self, session_id: str) -> List[dict]:
         """获取会话的所有消息"""

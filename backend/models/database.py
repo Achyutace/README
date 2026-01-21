@@ -173,10 +173,34 @@ class Database:
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
     
+    @staticmethod
+    def calculate_stream_hash(file_stream) -> str:
+        """
+        计算文件流的 SHA256 哈希值
+        
+        Args:
+            file_stream: 文件流对象（如 Flask 的 FileStorage.stream）
+            
+        Returns:
+            文件流的 SHA256 哈希值
+        """
+        sha256_hash = hashlib.sha256()
+        # 保存当前位置
+        current_position = file_stream.tell()
+        # 重置到开头
+        file_stream.seek(0)
+        # 读取并计算哈希
+        for byte_block in iter(lambda: file_stream.read(4096), b""):
+            sha256_hash.update(byte_block)
+        # 恢复原来的位置
+        file_stream.seek(current_position)
+        return sha256_hash.hexdigest()
+    
     # ==================== PDF 文件操作 ====================
     
     def add_pdf_file(self, file_path: str, filename: str, user_id: str = None, 
-                     page_count: int = 0, metadata: Dict = None) -> str:
+                     page_count: int = 0, metadata: Dict = None,
+                     file_hash: Optional[str] = None) -> str:
         """
         添加 PDF 文件记录
         
@@ -186,11 +210,13 @@ class Database:
             user_id: 用户ID
             page_count: 页数
             metadata: 元数据
+            file_hash: 预计算的哈希值
             
         Returns:
             文件哈希值
         """
-        file_hash = self.calculate_file_hash(file_path)
+        if not file_hash:
+            file_hash = self.calculate_file_hash(file_path)
         file_size = Path(file_path).stat().st_size
         
         conn = self.get_connection()
