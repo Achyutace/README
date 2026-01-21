@@ -38,6 +38,7 @@ const visiblePages = new Set<number>() // 当前可见页面集合
 const showTooltip = ref(false) // 是否显示选中文本的工具提示
 const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
 const isProgrammaticScrolling = ref(false) // 标记是否正在进行程序化滚动
+const scrollTargetPage = ref<number | null>(null) // 程序滚动目标页
 
 // 点击/拖动检测相关
 const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
@@ -134,11 +135,15 @@ watch(
   () => pdfStore.currentPage, // 监听当前页号
   (page) => {
     isProgrammaticScrolling.value = true
+    scrollTargetPage.value = page
     scrollToPage(page) // 页面变更时滚动到对应位置
-    // 给定足够的时间让平滑滚动完成，避免冲突
+    // 安全回退：3秒后强制释放，防止卡死
     setTimeout(() => {
-      isProgrammaticScrolling.value = false
-    }, 800)
+      if (scrollTargetPage.value === page) {
+        isProgrammaticScrolling.value = false
+        scrollTargetPage.value = null
+      }
+    }, 3000)
   }
 )
 
@@ -539,17 +544,43 @@ function handleTextSelection() {
 
   if (!rects.length) return
 
-  const rect = range.getBoundingClientRect() // 选区位置矩形
+  // 过滤掉被包含的矩形（去除重复或嵌套的高亮）
+  const uniqueRects = rects.filter((rect, index, self) => {
+    return !self.some((other, otherIndex) => {
+      if (index === otherIndex) return false
+
+      const isSame = Math.abs(other.left - rect.left) < 0.001 &&
+                     Math.abs(other.top - rect.top) < 0.001 &&
+                     Math.abs(other.width - rect.width) < 0.001 &&
+                     Math.abs(other.height - rect.height) < 0.001
+      
+      if (isSame) {
+        // 如果完全相同，保留索引较小的那个
+        return otherIndex < index
+      }
+
+      // 检查当前 rect 是否被 other 包含
+      // 容差处理，避免浮点数精度问题
+      const epsilon = 0.001
+      const isContained = other.left <= rect.left + epsilon &&
+                          other.top <= rect.top + epsilon &&
+                          (other.left + other.width) >= (rect.left + rect.width) - epsilon &&
+                          (other.top + other.height) >= (rect.top + rect.height) - epsilon
+      return isContained
+    })
+  })
+
+  const selectionRect = range.getBoundingClientRect() // 选区位置矩形
 
   pdfStore.setSelectedText(text, {
-    x: rect.left + rect.width / 2,
-    y: rect.top - 10
+    x: selectionRect.left + selectionRect.width / 2,
+    y: selectionRect.top - 10
   })
-  pdfStore.setSelectionInfo({ page: pageNumber, rects })
+  pdfStore.setSelectionInfo({ page: pageNumber, rects: uniqueRects })
 
   tooltipPosition.value = {
-    x: rect.left + rect.width / 2,
-    y: rect.top - 10
+    x: selectionRect.left + selectionRect.width / 2,
+    y: selectionRect.top - 10
   }
   showTooltip.value = true // 打开提示
 }
@@ -611,6 +642,31 @@ function getHighlightColor(color: string) {
   return hexToRgba(color, 0.35)
 }
 
+function getBoundingBoxStyle(rects: { left: number, top: number, width: number, height: number }[]) {
+  if (!rects || rects.length === 0) return {}
+
+  let minLeft = Infinity
+  let minTop = Infinity
+  let maxRight = -Infinity
+  let maxBottom = -Infinity
+
+  rects.forEach(rect => {
+    minLeft = Math.min(minLeft, rect.left)
+    minTop = Math.min(minTop, rect.top)
+    maxRight = Math.max(maxRight, rect.left + rect.width)
+    maxBottom = Math.max(maxBottom, rect.top + rect.height)
+  })
+
+  // 稍微扩展一点边距，让框看起来更像“包含”
+  // 但既然是百分比，这里直接用计算出的边界
+  return {
+    left: `${minLeft * 100}%`,
+    top: `${minTop * 100}%`,
+    width: `${(maxRight - minLeft) * 100}%`,
+    height: `${(maxBottom - minTop) * 100}%`
+  }
+}
+
 function scrollToPage(page: number) {
   if (!containerRef.value) return // 无容器则返回
   const refs = pageRefs.get(page) // 获取目标页引用
@@ -635,15 +691,20 @@ function scrollToPage(page: number) {
   })
 }
 
-function handleScroll(){
-  if (isProgrammaticScrolling.value) return // 忽略程序滚动引发的事件
+function handleUserInteraction() {
+  if (isProgrammaticScrolling.value) {
+    isProgrammaticScrolling.value = false
+    scrollTargetPage.value = null
+  }
+}
 
+function handleScroll(){
   if (!containerRef.value) return // 无容器则返回
 
   updateVisiblePages() // 滚动时触发可见检测
 
-  if (isProgrammaticScrolling.value) return // 忽略程序滚动引发的事件
-
+  // 这里的 isProgrammaticScrolling 检查移到下面，结合 nearestPage 判断
+  
   const pages = Array.from(containerRef.value.querySelectorAll('.pdf-page')) as HTMLElement[] // 收集所有页面元素
   if (!pages.length) return // 无页面则返回
 
@@ -659,10 +720,24 @@ function handleScroll(){
     }
   })
 
+  // 如果处于程序滚动模式
+  if (isProgrammaticScrolling.value) {
+    // 检查是否到达目标页
+    if (scrollTargetPage.value !== null && nearestPage === scrollTargetPage.value) {
+        // 到达目标，解除锁定
+        isProgrammaticScrolling.value = false
+        scrollTargetPage.value = null
+    } else {
+        // 未到达目标，忽略中间状态更新
+        return
+    }
+  }
+
   if (nearestPage !== pdfStore.currentPage && nearestPage <= pdfStore.totalPages) {
     pdfStore.goToPage(nearestPage) // 同步状态中的当前页
   }
 }
+
 
 onBeforeUnmount(() => {
   cleanup() // 组件卸载前清理资源
@@ -680,6 +755,8 @@ onBeforeUnmount(() => {
       @mousedown="handleMouseDown"
       @mouseup="handleMouseUp"
       @scroll="handleScroll"
+      @wheel="handleUserInteraction"
+      @touchstart="handleUserInteraction"
     >
       <!-- 居中内容区，控制最大宽度与行间距 -->
       <div class="space-y-4 flex flex-col items-center">
@@ -698,7 +775,6 @@ onBeforeUnmount(() => {
                 v-for="(rect, idx) in hl.rects"
                 :key="`${hl.id}-${idx}`"
                 class="highlight-rect absolute pointer-events-none"
-                :class="{ 'selected': pdfStore.selectedHighlight?.id === hl.id }"
                 :style="{
                   left: `${rect.left * 100}%`,
                   top: `${rect.top * 100}%`,
@@ -706,6 +782,12 @@ onBeforeUnmount(() => {
                   height: `${rect.height * 100}%`,
                   backgroundColor: getHighlightColor(hl.color)
                 }"
+              />
+              <!-- 选中的高亮显示整体外包框 -->
+              <div
+                v-if="pdfStore.selectedHighlight?.id === hl.id"
+                class="highlight-selected-box absolute pointer-events-none"
+                :style="getBoundingBoxStyle(hl.rects)"
               />
             </template>
           </div>
@@ -761,11 +843,13 @@ onBeforeUnmount(() => {
   background: rgba(255, 235, 59, 0.4);
   border-radius: 4px;
 }
-.highlight-rect.selected {
-  border: 2px dashed #4a5568; /* 选中时显示虚线边框 */
-  box-shadow: 0 0 4px rgba(0,0,0,0.1);
-}
 
+.highlight-selected-box {
+  border: 2px dashed #4a5568; /* 选中时显示的大框虚线边框 */
+  box-shadow: 0 0 4px rgba(0,0,0,0.1);
+  background-color: transparent;
+  z-index: 2; /* 确保在普通高亮之上 */
+}
 
 :deep(.textLayer span) {
   cursor: text; /* 文字层中文字光标样式 */
