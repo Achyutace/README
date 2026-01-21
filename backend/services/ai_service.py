@@ -16,32 +16,6 @@ class AiService:
         if HAS_OPENAI and os.getenv('OPENAI_API_KEY'):
             self.client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-    def extract_keywords(self, text: str) -> list:
-        """Extract keywords from text."""
-        if self.client:
-            try:
-                response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a helpful assistant that extracts key terms and concepts from academic papers. Return a JSON array of objects with 'term' and 'definition' fields."
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Extract 5-10 key terms and their definitions from this text:\n\n{text[:4000]}"
-                        }
-                    ],
-                    temperature=0.3
-                )
-                content = response.choices[0].message.content
-                return self._parse_keywords(content)
-            except Exception as e:
-                print(f"OpenAI error: {e}")
-
-        # Fallback: Demo mode
-        return self._demo_extract_keywords(text)
-
     def generate_roadmap(self, text: str) -> dict:
         """Generate a concept roadmap from text."""
         if self.client:
@@ -168,25 +142,6 @@ class AiService:
         # Fallback: Demo mode
         return self._demo_chat(message)
 
-    def _parse_keywords(self, content: str) -> list:
-        """Parse keywords from AI response."""
-        # Simple parsing - in production use proper JSON parsing
-        keywords = []
-        lines = content.split('\n')
-        for line in lines:
-            if ':' in line or '-' in line:
-                parts = re.split(r'[:\-]', line, 1)
-                if len(parts) == 2:
-                    term = parts[0].strip().strip('*').strip('"').strip("'")
-                    definition = parts[1].strip()
-                    if term and definition:
-                        keywords.append({
-                            'term': term,
-                            'definition': definition,
-                            'occurrences': []
-                        })
-        return keywords[:10]
-
     def _parse_bullets(self, content: str) -> list:
         """Parse bullet points from AI response."""
         bullets = []
@@ -221,14 +176,6 @@ class AiService:
             })
 
         return sentences
-
-    def _demo_extract_keywords(self, text: str) -> list:
-        """Demo mode: return sample keywords."""
-        return [
-            {'term': 'Machine Learning', 'definition': '机器学习是一种人工智能方法', 'occurrences': []},
-            {'term': 'Neural Network', 'definition': '神经网络是一种计算模型', 'occurrences': []},
-            {'term': 'Deep Learning', 'definition': '深度学习是机器学习的一个分支', 'occurrences': []},
-        ]
 
     def _parse_json_roadmap(self, text: str) -> dict:
         import json

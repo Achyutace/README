@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Keyword, Summary, Translation, ChatMessage, Roadmap } from '../types'
+import type { Summary, Translation, ChatMessage, Roadmap } from '../types'
 
 // 1. 创建 Axios 实例，配置基础设置
 const api = axios.create({
@@ -54,12 +54,6 @@ export const pdfApi = {
  * AI 功能相关 API 模块
  */
 export const aiApi = {
-  // 提取 PDF 关键词
-  extractKeywords: async (pdfId: string): Promise<Keyword[]> => {
-    const { data } = await api.post<{ keywords: Keyword[] }>('/ai/keywords', { pdfId })
-    return data.keywords
-  },
-
   // 生成学习路线图
   generateRoadmap: async (pdfId: string): Promise<Roadmap> => {
     const { data } = await api.post<{ roadmap: Roadmap }>('/ai/roadmap', { pdfId })

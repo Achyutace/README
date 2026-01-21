@@ -244,45 +244,6 @@ def get_image_data(image_id):
 
 # ==================== AI 功能相关路由 ====================
 
-@app.route('/api/ai/keywords', methods=['POST'])
-def extract_keywords():
-    """
-    提取关键词接口
-
-    从 PDF 文档中提取关键术语和定义
-
-    请求体：
-    {
-        "pdfId": "PDF 标识符"
-    }
-
-    返回：
-    {
-        "keywords": [
-            {
-                "term": "术语名称",
-                "definition": "术语定义",
-                "occurrences": []
-            }
-        ]
-    }
-    """
-    data = request.get_json()
-    pdf_id = data.get('pdfId')
-
-    if not pdf_id:
-        return jsonify({'error': 'pdfId is required'}), 400
-
-    try:
-        text = pdf_service.extract_text(pdf_id)['text']
-        keywords = ai_service.extract_keywords(text)
-        return jsonify({'keywords': keywords})
-    except FileNotFoundError:
-        return jsonify({'error': 'PDF not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/ai/roadmap', methods=['POST'])
 def generate_roadmap():
     """
