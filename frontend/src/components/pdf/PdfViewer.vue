@@ -202,45 +202,109 @@ async function renderPage(pageNumber: number) {
 
   try {
     const annotations = await page.getAnnotations()
-    renderLinkLayer(annotations, viewport, refs.linkLayer)
+    renderLinkLayer(annotations, viewport, refs.linkLayer, refs.textLayer)
   } catch (err) {
     console.error('Error rendering link layer:', err)
   }
 }
 
-function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement) {
+type LinkOverlayRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+function normalizeUrl(raw: string): string | null {
+  const trimmed = raw.trim().replace(/[),.;]+$/g, '') // 去掉末尾标点避免误判
+  if (!trimmed) return null
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (/^www\./i.test(trimmed)) return `https://${trimmed}`
+  return null
+}
+
+function appendLinkOverlay(container: HTMLElement, rect: LinkOverlayRect, href: string, title?: string) {
+  const link = document.createElement('a')
+  link.href = href
+  link.target = '_blank'
+  link.rel = 'noreferrer noopener'
+  link.title = title || href
+  link.style.display = 'block'
+  link.style.left = `${rect.left}px`
+  link.style.top = `${rect.top}px`
+  link.style.width = `${rect.width}px`
+  link.style.height = `${rect.height}px`
+  link.style.position = 'absolute'
+  link.className = 'hover:bg-yellow-200/20 cursor-pointer'
+  container.appendChild(link)
+}
+
+function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
+  const urlRegex = /\b((?:https?:\/\/|www\.)[^\s<>"'()]+[^\s<>"'().])/gi
+  const layerRect = textLayer.getBoundingClientRect()
+  const spans = Array.from(textLayer.querySelectorAll('span'))
+
+  spans.forEach(span => {
+    const textNode = span.firstChild
+    const text = span.textContent || ''
+    if (!textNode || !text) return
+
+    let match: RegExpExecArray | null
+    while ((match = urlRegex.exec(text)) !== null) {
+      const href = normalizeUrl(match[0])
+      if (!href) continue
+
+      const range = document.createRange()
+      range.setStart(textNode, match.index)
+      range.setEnd(textNode, match.index + match[0].length)
+      const rect = range.getBoundingClientRect()
+      range.detach()
+
+      if (!rect.width || !rect.height) continue
+
+      appendLinkOverlay(
+        container,
+        {
+          left: rect.left - layerRect.left,
+          top: rect.top - layerRect.top,
+          width: rect.width,
+          height: rect.height
+        },
+        href,
+        match[0]
+      )
+    }
+  })
+}
+
+function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement, textLayer?: HTMLElement) {
   container.innerHTML = '' // 清空链接层
   container.style.width = `${viewport.width}px` // 设置宽度
   container.style.height = `${viewport.height}px` // 设置高度
   
   annotations.forEach(annotation => {
-    // 仅处理包含 URL 的外部链接
     if (annotation.subtype === 'Link' && annotation.url) {
-      const link = document.createElement('a')
-      link.href = annotation.url
-      link.target = '_blank'
-      link.title = annotation.url || 'External Link'
-      
-      // 转换 PDF 坐标系到 Viewport 坐标系
-      // annotation.rect 是 [x1, y1, x2, y2]
       const rect = viewport.convertToViewportRectangle(annotation.rect)
       const [x1, y1, x2, y2] = rect
-      
-      const width = Math.abs(x2 - x1)
-      const height = Math.abs(y2 - y1)
-      const left = Math.min(x1, x2)
-      const top = Math.min(y1, y2)
-      
-      link.style.left = `${left}px`
-      link.style.top = `${top}px`
-      link.style.width = `${width}px`
-      link.style.height = `${height}px`
-      link.style.position = 'absolute'
-      link.className = 'hover:bg-yellow-200/20 cursor-pointer' // 简单的悬停反馈
-      
-      container.appendChild(link)
+
+      appendLinkOverlay(
+        container,
+        {
+          left: Math.min(x1, x2),
+          top: Math.min(y1, y2),
+          width: Math.abs(x2 - x1),
+          height: Math.abs(y2 - y1)
+        },
+        annotation.url,
+        annotation.url || 'External Link'
+      )
     }
   })
+
+  // 从纯文本中额外检测 URL，生成可点击覆盖层
+  if (textLayer) {
+    renderTextUrlOverlays(textLayer, container)
+  }
 }
 
 async function loadPdf(url: string) {
@@ -460,7 +524,7 @@ onBeforeUnmount(() => {
             </template>
           </div>
           <div class="textLayer absolute inset-0" /> 
-          <div class="linkLayer absolute inset-0 pointer-events-none" /> <!-- 链接层，本身不响应事件，内部 a 标签响应 -->
+          <div class="linkLayer absolute inset-0" /> <!-- 链接层允许点击内部链接 -->
         </div>
       </div>
     </div>
@@ -500,6 +564,11 @@ onBeforeUnmount(() => {
   z-index: 1;
 }
 
+.linkLayer {
+  z-index: 3;
+  pointer-events: none; /* 让非链接区域透传，文本仍可选中 */
+}
+
 .highlight-rect {
   background: rgba(255, 235, 59, 0.4);
   border-radius: 4px;
@@ -510,6 +579,6 @@ onBeforeUnmount(() => {
 }
 
 :deep(.linkLayer a) {
-  pointer-events: auto; /* 确保链接可点击 */
+  pointer-events: auto; /* 仅链接可点击，其他区域透传 */
 }
 </style>

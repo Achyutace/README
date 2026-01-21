@@ -111,13 +111,7 @@ function handleColorSelect(color: string) {
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
         </svg>
-        <span class="flex items-center gap-1">
-          高亮
-          <span
-            class="w-3 h-3 rounded-full border border-white/70 inline-block"
-            :style="{ backgroundColor: pdfStore.highlightColor }">
-          </span>
-        </span>
+        <span class="flex items-center">高亮</span>
       </button>
 
       <div class="relative">
