@@ -2,13 +2,11 @@
 import { ref } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { aiApi } from '../../api'
-import { usePdfStore, type Highlight } from '../../stores/pdf'
+import { usePdfStore } from '../../stores/pdf'
 
 const props = defineProps<{
   position: { x: number; y: number }
   text: string
-  mode?: 'selection' | 'highlight'
-  highlight?: Highlight | null
 }>()
 
 const emit = defineEmits<{
@@ -62,13 +60,7 @@ function handleCopy() {
 }
 
 function handleHighlight() {
-  if (props.mode === 'highlight' && props.highlight) {
-    // 取消高亮
-    pdfStore.removeHighlight(props.highlight.id)
-  } else {
-    // 添加高亮
-    pdfStore.addHighlightFromSelection()
-  }
+  pdfStore.addHighlightFromSelection()
   emit('close')
 }
 
@@ -78,13 +70,7 @@ function toggleColorPicker(event: MouseEvent) {
 }
 
 function handleColorSelect(color: string) {
-  if (props.mode === 'highlight' && props.highlight) {
-    // 更新已有高亮的颜色
-    pdfStore.updateHighlightColor(props.highlight.id, color)
-  } else {
-    // 设置新高亮的默认颜色
-    pdfStore.setHighlightColor(color)
-  }
+  pdfStore.setHighlightColor(color)
   isColorPickerOpen.value = false
 }
 </script>
@@ -122,24 +108,21 @@ function handleColorSelect(color: string) {
         @click="handleHighlight"
         class="px-3 py-2 hover:bg-gray-700 transition-colors flex items-center gap-1.5 text-sm"
       >
-        <svg v-if="mode !== 'highlight'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
         </svg>
-        <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-        <span class="flex items-center">{{ mode === 'highlight' ? '取消高亮' : '高亮' }}</span>
+        <span class="flex items-center">高亮</span>
       </button>
 
       <div class="relative">
         <button
           @click.stop="toggleColorPicker"
           class="px-2 py-2 hover:bg-gray-700 transition-colors flex items-center gap-1 text-sm"
-          :title="mode === 'highlight' ? '更改高亮颜色' : '选择高亮颜色'"
+          title="选择高亮颜色"
         >
           <span
             class="w-5 h-5 rounded-full border border-white/60 shadow-sm block"
-            :style="{ backgroundColor: mode === 'highlight' && highlight ? highlight.color : pdfStore.highlightColor }"
+            :style="{ backgroundColor: pdfStore.highlightColor }"
           ></span>
         </button>
 
