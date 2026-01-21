@@ -1,21 +1,35 @@
 import os
 import re
 from datetime import datetime
-
-# Try to import OpenAI, but make it optional for demo mode
-try:
-    from openai import OpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-
+import httpx
+from openai import OpenAI
 
 class AiService:
     def __init__(self):
-        self.client = None
-        if HAS_OPENAI and os.getenv('OPENAI_API_KEY'):
-            self.client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-
+        # 1. 尝试从环境变量获取代理设置
+        # 如果你使用了代理（例如 v2ray, clash），请确保设置了 OPENAI_API_BASE 或 http_proxy
+        
+        # 2. 初始化 OpenAI 客户端
+        # 注意: openai>=1.0.0 不再接受 proxies 参数
+        # 它会自动读取系统的 HTTP_PROXY 和 HTTPS_PROXY 环境变量
+        
+        # 如果你需要显式指定代理（因为报错看起来像是内部创建 http_client 时出了问题）
+        # 我们可以自定义一个 httpx.Client 传进去
+        
+        proxy_url = os.getenv("http_proxy") or os.getenv("https_proxy")
+        
+        if proxy_url:
+            http_client = httpx.Client(proxies=proxy_url)
+            self.client = OpenAI(
+                api_key=os.getenv('OPENAI_API_KEY'),
+                http_client=http_client
+            )
+        else:
+            # 标准初始化
+            self.client = OpenAI(
+                api_key=os.getenv('OPENAI_API_KEY')
+            )
+            
     def generate_roadmap(self, text: str) -> dict:
         """Generate a concept roadmap from text."""
         if self.client:

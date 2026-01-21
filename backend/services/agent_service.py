@@ -91,7 +91,6 @@ class AcademicAgentService:
         # 初始化工具
         self.web_search = WebSearchTool()
         self.paper_discovery = PaperDiscoveryTool()
-        self.paper_fetcher = PaperFetcherTool()
         
         # 构建工作流图
         self.workflow = self._build_workflow()
