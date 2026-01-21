@@ -243,16 +243,110 @@ class PdfService:
             base64_str = base64.b64encode(image_bytes).decode('utf-8')
             mime_type = f"image/{image_ext}"
             
-            return {
+            result = {
                 "id": image_id,
                 "mimeType": mime_type,
                 "base64": f"data:{mime_type};base64,{base64_str}"
             }
-            
+
+            # 写入缓存
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+
+            return result
+
         except Exception as e:
             # 记录错误或抛出
             print(f"Error fetching image {image_id}: {e}")
             return None
-        
-    
-    
+
+    def list_pdfs(self) -> list[dict]:
+        """
+        列出所有已上传的PDF文件
+
+        Returns:
+            PDF列表 [{'id': str, 'filename': str, 'pageCount': int, 'uploadTime': str}, ...]
+        """
+        pdfs = []
+
+        # 从上传目录扫描
+        if os.path.exists(self.upload_folder):
+            for filename in os.listdir(self.upload_folder):
+                if filename.endswith('.pdf'):
+                    filepath = os.path.join(self.upload_folder, filename)
+                    # 从文件名提取PDF ID（格式: {pdf_id}_{original_name}.pdf）
+                    parts = filename.split('_', 1)
+                    if len(parts) >= 2:
+                        pdf_id = parts[0]
+                        original_name = parts[1]
+                    else:
+                        pdf_id = filename.replace('.pdf', '')
+                        original_name = filename
+
+                    try:
+                        doc = fitz.open(filepath)
+                        page_count = len(doc)
+                        doc.close()
+
+                        # 获取文件修改时间
+                        mtime = os.path.getmtime(filepath)
+                        from datetime import datetime
+                        upload_time = datetime.fromtimestamp(mtime).isoformat()
+
+                        pdfs.append({
+                            'id': pdf_id,
+                            'filename': original_name,
+                            'pageCount': page_count,
+                            'uploadTime': upload_time
+                        })
+                    except Exception as e:
+                        print(f"Error reading PDF {filename}: {e}")
+                        continue
+
+        return pdfs
+
+    def delete_pdf(self, pdf_id: str) -> bool:
+        """
+        删除PDF文件及其相关缓存
+
+        Args:
+            pdf_id: PDF标识符
+
+        Returns:
+            是否删除成功
+        """
+        try:
+            # 从注册表删除
+            if pdf_id in self.pdf_registry:
+                del self.pdf_registry[pdf_id]
+
+            # 查找并删除文件
+            filepath = None
+            for filename in os.listdir(self.upload_folder):
+                if filename.startswith(pdf_id):
+                    filepath = os.path.join(self.upload_folder, filename)
+                    break
+
+            if filepath and os.path.exists(filepath):
+                os.remove(filepath)
+
+            # 删除相关缓存文件
+            cache_files = [
+                os.path.join(self.paragraphs_cache, f"{pdf_id}.json"),
+            ]
+
+            # 删除图片缓存（可能有多个）
+            if os.path.exists(self.images_cache):
+                for cache_file in os.listdir(self.images_cache):
+                    if cache_file.startswith(pdf_id):
+                        cache_files.append(os.path.join(self.images_cache, cache_file))
+
+            for cache_file in cache_files:
+                if os.path.exists(cache_file):
+                    os.remove(cache_file)
+
+            return True
+
+        except Exception as e:
+            print(f"Error deleting PDF {pdf_id}: {e}")
+            return False
