@@ -248,6 +248,51 @@ function appendLinkOverlay(container: HTMLElement, rect: LinkOverlayRect, href: 
   container.appendChild(link)
 }
 
+function appendInternalLinkOverlay(container: HTMLElement, rect: LinkOverlayRect, destPage: number, title?: string) {
+  const link = document.createElement('div')
+  link.dataset.destPage = String(destPage)
+  link.title = title || `跳转到第 ${destPage} 页`
+  link.style.display = 'block'
+  link.style.left = `${rect.left}px`
+  link.style.top = `${rect.top}px`
+  link.style.width = `${rect.width}px`
+  link.style.height = `${rect.height}px`
+  link.style.position = 'absolute'
+  link.className = 'hover:bg-blue-200/30 cursor-pointer internal-link'
+  link.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    pdfStore.goToPage(destPage)
+  })
+  container.appendChild(link)
+}
+
+async function resolveDestination(dest: any): Promise<number | null> {
+  if (!pdfDoc.value) return null
+
+  try {
+    let destArray = dest
+
+    // 如果是命名目标（字符串），需要先解析
+    if (typeof dest === 'string') {
+      destArray = await pdfDoc.value.getDestination(dest)
+    }
+
+    if (!destArray || !Array.isArray(destArray)) return null
+
+    // 目标数组的第一个元素是页面引用
+    const pageRef = destArray[0]
+    if (!pageRef) return null
+
+    // 获取页码
+    const pageIndex = await pdfDoc.value.getPageIndex(pageRef)
+    return pageIndex + 1 // 转为1-based页码
+  } catch (err) {
+    console.error('Error resolving destination:', err)
+    return null
+  }
+}
+
 function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
   const urlRegex = /\b((?:https?:\/\/|www\.)[^\s<>"'()]+[^\s<>"'().])/gi
   const layerRect = textLayer.getBoundingClientRect()
@@ -286,29 +331,40 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
   })
 }
 
-function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement, textLayer?: HTMLElement) {
+async function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement, textLayer?: HTMLElement) {
   container.innerHTML = '' // 清空链接层
   container.style.width = `${viewport.width}px` // 设置宽度
   container.style.height = `${viewport.height}px` // 设置高度
-  
-  annotations.forEach(annotation => {
-    if (annotation.subtype === 'Link' && annotation.url) {
-      const rect = viewport.convertToViewportRectangle(annotation.rect)
-      const [x1, y1, x2, y2] = rect
 
-      appendLinkOverlay(
-        container,
-        {
-          left: Math.min(x1, x2),
-          top: Math.min(y1, y2),
-          width: Math.abs(x2 - x1),
-          height: Math.abs(y2 - y1)
-        },
-        annotation.url,
-        annotation.url || 'External Link'
-      )
+  for (const annotation of annotations) {
+    if (annotation.subtype !== 'Link') continue
+
+    const rect = viewport.convertToViewportRectangle(annotation.rect)
+    const [x1, y1, x2, y2] = rect
+    const overlayRect = {
+      left: Math.min(x1, x2),
+      top: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1)
     }
-  })
+
+    if (annotation.url) {
+      // 外部链接
+      appendLinkOverlay(container, overlayRect, annotation.url, annotation.url || 'External Link')
+    } else if (annotation.dest) {
+      // 内部链接（如论文引用）
+      const destPage = await resolveDestination(annotation.dest)
+      if (destPage) {
+        appendInternalLinkOverlay(container, overlayRect, destPage, `跳转到第 ${destPage} 页`)
+      }
+    } else if (annotation.action?.dest) {
+      // 带action的内部链接
+      const destPage = await resolveDestination(annotation.action.dest)
+      if (destPage) {
+        appendInternalLinkOverlay(container, overlayRect, destPage, `跳转到第 ${destPage} 页`)
+      }
+    }
+  }
 
   // 从纯文本中额外检测 URL，生成可点击覆盖层
   if (textLayer) {
@@ -363,7 +419,7 @@ function handleMouseUp(event: MouseEvent) {
 
   // 检查是否点击到了链接（链接优先级最高）
   const target = event.target as HTMLElement
-  if (target.tagName === 'A' || target.closest('a')) {
+  if (target.tagName === 'A' || target.closest('a') || target.classList.contains('internal-link') || target.closest('.internal-link')) {
     return // 让链接自己处理点击
   }
 
@@ -701,7 +757,8 @@ onBeforeUnmount(() => {
   cursor: text; /* 文字层中文字光标样式 */
 }
 
-:deep(.linkLayer a) {
+:deep(.linkLayer a),
+:deep(.linkLayer .internal-link) {
   pointer-events: auto; /* 仅链接可点击，其他区域透传 */
 }
 </style>
