@@ -16,7 +16,8 @@ README AI 辅助阅读应用 - Flask 后端服务
 import os
 import shutil
 import json
-from flask import Flask, request, jsonify
+from pathlib import Path
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
@@ -35,17 +36,81 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================== 应用配置 ====================
-# 设置 PDF 上传目录为 backend/uploads/
-app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
+# 获取项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent
+STORAGE_ROOT = PROJECT_ROOT / 'storage'
+
+# 创建存储目录结构
+(STORAGE_ROOT / 'users').mkdir(parents=True, exist_ok=True)
+(STORAGE_ROOT / 'shared').mkdir(parents=True, exist_ok=True)
+(STORAGE_ROOT / 'temp').mkdir(parents=True, exist_ok=True)
+
+# 配置路径
+app.config['STORAGE_ROOT'] = str(STORAGE_ROOT)
+app.config['USERS_FOLDER'] = str(STORAGE_ROOT / 'users')
+app.config['SHARED_FOLDER'] = str(STORAGE_ROOT / 'shared')
+app.config['TEMP_FOLDER'] = str(STORAGE_ROOT / 'temp')
 # 限制上传文件最大为 50MB
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-# 确保上传目录存在，不存在则创建
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+def get_user_id():
+    """
+    从请求中获取用户ID
+    优先级：Header > Query Parameter > Default
+    """
+    # 从 Header
+    user_id = request.headers.get('X-User-Id')
+    if user_id:
+        return user_id
+    
+    # 从查询参数获取
+    user_id = request.args.get('userId')
+    if user_id:
+        return user_id
+    
+    # 默认用户（开发环境）
+    return 'default_user'
+
+
+def get_user_storage_path(user_id: str) -> Path:
+    """
+    获取用户的存储根目录
+    自动创建必要的子目录
+    """
+    user_path = Path(app.config['USERS_FOLDER']) / user_id
+    
+    # 创建用户目录结构
+    (user_path / 'uploads').mkdir(parents=True, exist_ok=True)
+    (user_path / 'cache' / 'paragraphs').mkdir(parents=True, exist_ok=True)
+    (user_path / 'cache' / 'translations').mkdir(parents=True, exist_ok=True)
+    (user_path / 'cache' / 'images').mkdir(parents=True, exist_ok=True)
+    (user_path / 'uploads' / 'vectors').mkdir(parents=True, exist_ok=True)
+    (user_path / 'metadata').mkdir(parents=True, exist_ok=True)
+    
+    return user_path
+
+
+def get_pdf_service_for_user(user_id: str) -> PdfService:
+    """
+    为指定用户创建 PdfService 实例
+    """
+    user_path = get_user_storage_path(user_id)
+    upload_folder = str(user_path / 'uploads')
+    cache_folder = str(user_path / 'cache')
+    return PdfService(upload_folder, cache_folder)
+
+
+@app.before_request
+def before_request():
+    """
+    在每个请求前执行，设置用户上下文
+    """
+    g.user_id = get_user_id()
+    g.user_path = get_user_storage_path(g.user_id)
+
 
 # ==================== 服务实例化 ====================
-# PDF 服务：负责文件存储、文本提取等
-pdf_service = PdfService(app.config['UPLOAD_FOLDER'])
 # AI 服务：负责调用 OpenAI API 实现各种 AI 功能
 ai_service = AiService()
 # RAG 服务：负责文档索引和检索
@@ -60,7 +125,11 @@ def health_check():
     健康检查接口
     用于确认服务是否正常运行
     """
-    return jsonify({'status': 'ok'})
+    return jsonify({
+        'status': 'ok',
+        'userId': g.user_id,
+        'userPath': str(g.user_path)
+    })
 
 
 # ==================== PDF 相关路由 ====================
@@ -71,12 +140,15 @@ def upload_pdf():
     上传 PDF 文件接口
     
     请求：multipart/form-data，包含 'file' 字段
+    请求头（可选）：X-User-Id（用户标识）
+    查询参数（可选）：userId（用户标识）
     
     返回：
     {
         "id": "唯一标识符",
         "filename": "文件名",
-        "pageCount": 总页数
+        "pageCount": 总页数,
+        "userId": "用户ID"
     }
     
     错误码：
@@ -97,6 +169,9 @@ def upload_pdf():
         return jsonify({'error': 'Only PDF files are allowed'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 调用 PDF 服务保存并处理文件
         # 返回包含 id, filename, pageCount 的字典
         result = pdf_service.save_and_process(file)
@@ -104,13 +179,12 @@ def upload_pdf():
         # 索引到 RAG 系统
         pdf_id = result['id']
         filepath = pdf_service.get_filepath(pdf_id)
-        user_id = request.args.get('userId', 'default')  # 从查询参数获取用户ID
         
         try:
             index_result = rag_service.index_paper(
                 pdf_path=filepath,
                 paper_id=pdf_id,
-                user_id=user_id
+                user_id=g.user_id
             )
             result['indexed'] = True
             result['chunks'] = index_result.get('chunks_created', 0)
@@ -118,6 +192,7 @@ def upload_pdf():
             print(f"RAG indexing warning: {e}")
             result['indexed'] = False
         
+        result['userId'] = g.user_id
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -150,6 +225,9 @@ def get_pdf_text(pdf_id):
     404 - PDF 文件不存在
     500 - 文本提取失败
     """
+    # 获取当前用户的 PDF 服务实例
+    pdf_service = get_pdf_service_for_user(g.user_id)
+    
     # 获取可选的页码参数
     page = request.args.get('page', type=int)
     try:
@@ -176,6 +254,9 @@ def get_pdf_info(pdf_id):
         "fileSize": 文件大小（字节）
     }
     """
+    # 获取当前用户的 PDF 服务实例
+    pdf_service = get_pdf_service_for_user(g.user_id)
+    
     try:
         result = pdf_service.get_info(pdf_id)
         return jsonify(result)
@@ -233,6 +314,9 @@ def generate_roadmap():
         return jsonify({'error': 'pdfId is required'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 提取 PDF 的全文本内容
         text = pdf_service.extract_text(pdf_id)['text']
         # 调用 AI 服务生成路线图
@@ -278,6 +362,9 @@ def generate_summary():
         return jsonify({'error': 'pdfId is required'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 提取 PDF 的全文本内容
         text = pdf_service.extract_text(pdf_id)['text']
         # 调用 AI 服务生成摘要
@@ -377,6 +464,9 @@ def chat():
         return jsonify({'error': 'pdfId and message are required'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 提取 PDF 的全文本作为上下文
         text = pdf_service.extract_text(pdf_id)['text']
         # 调用 AI 服务进行对话，传入文档内容、用户问题和历史记录

@@ -1,14 +1,40 @@
 import os
 import uuid
+import json
+import hashlib
+from pathlib import Path
 import fitz  # PyMuPDF
 from werkzeug.utils import secure_filename
 import base64
 
 
 class PdfService:
-    def __init__(self, upload_folder: str):
+    def __init__(self, upload_folder: str, cache_folder: str = None):
+        """
+        初始化 PDF 服务
+        
+        Args:
+            upload_folder: PDF 文件上传目录
+            cache_folder: 缓存文件目录（可选）
+        """
         self.upload_folder = upload_folder
         self.pdf_registry: dict[str, dict] = {}
+        
+        # 设置缓存目录
+        if cache_folder:
+            self.cache_folder = cache_folder
+        else:
+            self.cache_folder = os.path.join(os.path.dirname(upload_folder), 'cache')
+        
+        # 创建缓存子目录
+        self.paragraphs_cache = os.path.join(self.cache_folder, 'paragraphs')
+        self.translations_cache = os.path.join(self.cache_folder, 'translations')
+        self.images_cache = os.path.join(self.cache_folder, 'images')
+        self.vectors_cache = os.path.join(self.cache_folder, 'vectors')
+        
+        for cache_dir in [self.paragraphs_cache, self.translations_cache, 
+                          self.images_cache, self.vectors_cache]:
+            os.makedirs(cache_dir, exist_ok=True)
 
     def save_and_process(self, file) -> dict:
         """Save uploaded PDF and extract basic info."""
@@ -124,7 +150,15 @@ class PdfService:
         预处理：
         解析PDF段落结构：识别PDF段落
         返回：包含段落ID、文本内容、页面信息和坐标范围的列表。
+        使用缓存加速重复请求。
         """
+        # 尝试从缓存读取
+        cache_file = os.path.join(self.paragraphs_cache, f"{pdf_id}.json")
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        # 缓存未命中，开始解析
         filepath = self.get_filepath(pdf_id)
         doc = fitz.open(filepath)
         paragraphs = []
@@ -177,6 +211,11 @@ class PdfService:
                 })
 
         doc.close()
+        
+        # 写入缓存
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(paragraphs, f, ensure_ascii=False, indent=2)
+        
         return paragraphs
     
     def get_images_list(self, pdf_id: str) -> list[dict]:
@@ -219,7 +258,14 @@ class PdfService:
         """
         根据图片ID获取Base64编码数据。
         ID格式需严格匹配 get_images_list 生成的格式。
+        使用缓存加速重复请求。
         """
+        # 尝试从缓存读取
+        cache_file = os.path.join(self.images_cache, f"{image_id}.json")
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
         try:
             # 解析 ID
             # 格式: {pdf_id}__xref__{xref}
@@ -243,11 +289,17 @@ class PdfService:
             base64_str = base64.b64encode(image_bytes).decode('utf-8')
             mime_type = f"image/{image_ext}"
             
-            return {
+            result = {
                 "id": image_id,
                 "mimeType": mime_type,
                 "base64": f"data:{mime_type};base64,{base64_str}"
             }
+            
+            # 写入缓存
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            return result
             
         except Exception as e:
             # 记录错误或抛出
