@@ -82,18 +82,18 @@ export const aiApi = {
   // 与 PDF 进行对话（RAG 模式）
   // pdfId: 关联的文档 ID
   // message: 当前用户输入
-  // history: 历史对话记录，用于保持上下文
+  // sessionId: 会话ID（可选，不提供则创建新会话）
   chat: async (
     pdfId: string,
     message: string,
-    history: Array<{ role: string; content: string }>
-  ): Promise<{ response: string; citations: ChatMessage['citations'] }> => {
+    sessionId?: string
+  ): Promise<{ sessionId: string; response: string; citations: ChatMessage['citations'] }> => {
     const { data } = await api.post('/ai/chat', {
       pdfId,
       message,
-      history,
+      sessionId,
     })
-    return data // 返回 AI 的答复内容及引用的原文位置(citations)
+    return data // 返回会话ID、AI回复内容及引用位置
   },
 }
 

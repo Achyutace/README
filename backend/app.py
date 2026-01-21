@@ -143,10 +143,10 @@ def get_pdf_text(pdf_id):
 def get_pdf_info(pdf_id):
     """
     获取 PDF 基本信息接口
-    
+
     路径参数：
     - pdf_id: PDF 的唯一标识符
-    
+
     返回：
     {
         "filename": "文件名",
@@ -163,7 +163,125 @@ def get_pdf_info(pdf_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/pdf/<pdf_id>/paragraphs', methods=['GET'])
+def get_pdf_paragraphs(pdf_id):
+    """
+    获取 PDF 段落结构接口
+
+    解析 PDF 并返回段落列表，包含文本内容和坐标信息
+
+    返回：
+    {
+        "paragraphs": [
+            {
+                "id": "段落ID",
+                "page": 页码,
+                "bbox": { "x0": 0, "y0": 0, "x1": 100, "y1": 50 },
+                "content": "段落文本",
+                "wordCount": 字数
+            }
+        ]
+    }
+    """
+    try:
+        paragraphs = pdf_service.parse_paragraphs(pdf_id)
+        return jsonify({'paragraphs': paragraphs})
+    except FileNotFoundError:
+        return jsonify({'error': 'PDF not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pdf/<pdf_id>/images', methods=['GET'])
+def get_pdf_images(pdf_id):
+    """
+    获取 PDF 图片列表接口
+
+    返回 PDF 中所有图片的元数据（不含图片内容）
+
+    返回：
+    {
+        "images": [
+            {
+                "id": "图片ID",
+                "page": 页码,
+                "bbox": { "x0": 0, "y0": 0, "x1": 100, "y1": 100 }
+            }
+        ]
+    }
+    """
+    try:
+        images = pdf_service.get_images_list(pdf_id)
+        return jsonify({'images': images})
+    except FileNotFoundError:
+        return jsonify({'error': 'PDF not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pdf/image/<image_id>', methods=['GET'])
+def get_image_data(image_id):
+    """
+    获取图片数据接口
+
+    根据图片 ID 获取 Base64 编码的图片数据
+
+    返回：
+    {
+        "id": "图片ID",
+        "mimeType": "image/png",
+        "base64": "data:image/png;base64,..."
+    }
+    """
+    try:
+        image_data = pdf_service.get_image_data(image_id)
+        if image_data is None:
+            return jsonify({'error': 'Image not found'}), 404
+        return jsonify(image_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== AI 功能相关路由 ====================
+
+@app.route('/api/ai/keywords', methods=['POST'])
+def extract_keywords():
+    """
+    提取关键词接口
+
+    从 PDF 文档中提取关键术语和定义
+
+    请求体：
+    {
+        "pdfId": "PDF 标识符"
+    }
+
+    返回：
+    {
+        "keywords": [
+            {
+                "term": "术语名称",
+                "definition": "术语定义",
+                "occurrences": []
+            }
+        ]
+    }
+    """
+    data = request.get_json()
+    pdf_id = data.get('pdfId')
+
+    if not pdf_id:
+        return jsonify({'error': 'pdfId is required'}), 400
+
+    try:
+        text = pdf_service.extract_text(pdf_id)['text']
+        keywords = ai_service.extract_keywords(text)
+        return jsonify({'keywords': keywords})
+    except FileNotFoundError:
+        return jsonify({'error': 'PDF not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/ai/roadmap', methods=['POST'])
 def generate_roadmap():
