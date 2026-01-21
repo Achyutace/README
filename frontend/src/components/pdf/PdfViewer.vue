@@ -37,6 +37,7 @@ const visiblePages = new Set<number>() // 当前可见页面集合
 
 const showTooltip = ref(false) // 是否显示选中文本的工具提示
 const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
+const isProgrammaticScrolling = ref(false) // 标记是否正在进行程序化滚动
 
 function handlePageContainerRef(
   pageNumber: number, // 当前页码
@@ -109,19 +110,6 @@ const updateVisiblePages = useDebounceFn(() => {
 }, 100)
 
 watch(
-  () => pdfStore.currentPdfUrl, // 监听当前 PDF 地址
-  (url) => {
-    if (url) {
-      loadPdf(url) // 地址存在则加载 PDF
-    } else {
-      console.log('No PDF URL provided.') // 调试日志
-      cleanup() // 地址清空则重置状态
-    }
-  },
-  { immediate: true }
-)
-
-watch(
   () => pdfStore.scale, // 监听缩放比例
   () => {
     // 缩放时清除所有现有任务并重新检测可见区域进行渲染
@@ -136,7 +124,12 @@ watch(
 watch(
   () => pdfStore.currentPage, // 监听当前页号
   (page) => {
+    isProgrammaticScrolling.value = true
     scrollToPage(page) // 页面变更时滚动到对应位置
+    // 给定足够的时间让平滑滚动完成，避免冲突
+    setTimeout(() => {
+      isProgrammaticScrolling.value = false
+    }, 800)
   }
 )
 
@@ -310,18 +303,35 @@ function handleClickOutside() {
 function scrollToPage(page: number) {
   if (!containerRef.value) return // 无容器则返回
   const refs = pageRefs.get(page) // 获取目标页引用
-  if (!refs) return // 无引用则返回
 
-  containerRef.value.scrollTo({
-    top: refs.container.offsetTop - 12, // 滚动到页容器并预留间距
-    behavior: 'smooth' // 平滑滚动
+  if (refs) {
+    containerRef.value.scrollTo({
+      top: refs.container.offsetTop - 12,
+      behavior: 'smooth'
+    })
+    return
+  }
+
+  // 如果页面引用尚未准备好，等待下一次 DOM 更新后再尝试
+  nextTick(() => {
+    const retryRefs = pageRefs.get(page)
+    if (retryRefs) {
+      containerRef.value?.scrollTo({
+        top: retryRefs.container.offsetTop - 12,
+        behavior: 'smooth'
+      })
+    }
   })
 }
 
-function handleScroll() {
+function handleScroll(){
+  if (isProgrammaticScrolling.value) return // 忽略程序滚动引发的事件
+
   if (!containerRef.value) return // 无容器则返回
 
   updateVisiblePages() // 滚动时触发可见检测
+
+  if (isProgrammaticScrolling.value) return // 忽略程序滚动引发的事件
 
   const pages = Array.from(containerRef.value.querySelectorAll('.pdf-page')) as HTMLElement[] // 收集所有页面元素
   if (!pages.length) return // 无页面则返回

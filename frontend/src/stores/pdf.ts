@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+const DEFAULT_SCALE = 1.6
+
 export const usePdfStore = defineStore('pdf', () => {
   const currentPdfUrl = ref<string | null>(null)
   const currentPage = ref(1)
   const totalPages = ref(0)
-  const scale = ref(1.0)
+  const scale = ref(DEFAULT_SCALE)
   const isLoading = ref(false)
 
   const autoHighlight = ref(false)
@@ -20,6 +22,7 @@ export const usePdfStore = defineStore('pdf', () => {
   function setCurrentPdf(url: string) {
     currentPdfUrl.value = url
     currentPage.value = 1
+    scale.value = DEFAULT_SCALE
     isLoading.value = true
   }
 
