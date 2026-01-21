@@ -319,6 +319,10 @@ function handleTextSelection() {
 }
 
 function handleClickOutside() {
+  const selection = window.getSelection()
+  // Keep the action menu open when there is still a text selection
+  if (selection && selection.toString().trim()) return
+
   showTooltip.value = false // 隐藏提示
   pdfStore.clearSelection() // 清空选中文本
 }
