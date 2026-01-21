@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from services.pdf_service import PdfService
 from services.chat_service import ChatService 
 from services.rag_service import RAGService
+from services.roadmap_service import AIService
 from services.agent_service import AcademicAgentService
 
 # 加载环境变量（如 OpenAI API Key）
@@ -113,6 +114,7 @@ def before_request():
 # ==================== 服务实例化 ====================
 # 聊天服务：负责管理聊天会话和消息历史
 chat_service = ChatService()
+ai_service = AIService()
 # RAG 服务：负责文档索引和检索
 rag_service = RAGService()
 # Agent 服务：负责智能对话和工具调用
