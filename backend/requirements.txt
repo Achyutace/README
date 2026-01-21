@@ -1,6 +1,23 @@
-flask==3.0.0
-flask-cors==4.0.0
-PyMuPDF==1.23.7
-openai==1.6.1
-python-dotenv==1.0.0
-werkzeug==3.0.1
+# Flask Web Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+werkzeug>=3.0.0
+python-dotenv>=1.0.0
+
+# PDF Processing
+PyMuPDF>=1.23.0
+
+# OpenAI
+openai>=1.6.0
+
+# LangChain & Agent (可选，用于高级对话功能)
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.10
+langgraph>=0.0.20
+
+# Vector Database (可选，用于RAG检索)
+chromadb>=0.4.0
+
+# Image Processing (可选，用于OCR)
+Pillow>=10.0.0
