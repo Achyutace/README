@@ -279,6 +279,80 @@ class Database:
             results.append(result)
         return results
     
+    def delete_pdf_file(self, file_hash: str) -> Dict[str, int]:
+        """
+        删除 PDF 文件及其所有关联数据
+        
+        由于设置了外键级联删除（ON DELETE CASCADE），删除 PDF 文件时会自动删除：
+        - pdf_paragraphs（段落）
+        - pdf_images（图片记录）
+        - user_notes（笔记）
+        - user_highlights（高亮）
+        
+        Args:
+            file_hash: 文件哈希值
+            
+        Returns:
+            删除统计信息字典
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        stats = {
+            'pdf_deleted': 0,
+            'paragraphs_deleted': 0,
+            'images_deleted': 0,
+            'notes_deleted': 0,
+            'highlights_deleted': 0
+        }
+        
+        try:
+            # 统计关联数据数量（在删除前）
+            cursor.execute('SELECT COUNT(*) FROM pdf_paragraphs WHERE file_hash = ?', (file_hash,))
+            stats['paragraphs_deleted'] = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM pdf_images WHERE file_hash = ?', (file_hash,))
+            stats['images_deleted'] = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM user_notes WHERE file_hash = ?', (file_hash,))
+            stats['notes_deleted'] = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM user_highlights WHERE file_hash = ?', (file_hash,))
+            stats['highlights_deleted'] = cursor.fetchone()[0]
+            
+            # 删除 PDF 文件（级联删除会自动处理关联数据）
+            cursor.execute('DELETE FROM pdf_files WHERE file_hash = ?', (file_hash,))
+            stats['pdf_deleted'] = cursor.rowcount
+            
+            conn.commit()
+        
+        except Exception as e:
+            conn.rollback()
+            raise e
+        
+        finally:
+            conn.close()
+        
+        return stats
+    
+    def check_pdf_exists(self, file_hash: str) -> bool:
+        """
+        检查 PDF 文件是否存在
+        
+        Args:
+            file_hash: 文件哈希值
+            
+        Returns:
+            文件是否存在
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM pdf_files WHERE file_hash = ?', (file_hash,))
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count > 0
+    
     # ==================== 段落操作 ====================
     
     def add_paragraph(self, file_hash: str, page_number: int, paragraph_index: int,

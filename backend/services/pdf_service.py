@@ -1,3 +1,10 @@
+"""
+PDF服务
+1. PDF upload
+2. PDF delete
+3. PDF 
+
+"""
 import os
 import uuid
 import json
@@ -6,7 +13,6 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from werkzeug.utils import secure_filename
 import base64
-
 
 class PdfService:
     def __init__(self, upload_folder: str, cache_folder: str = None):

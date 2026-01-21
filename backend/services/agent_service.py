@@ -2,7 +2,7 @@
 Agent Service - 学术论文阅读助手 Agent [对话用]
 
 使用 LangGraph 实现的多节点工作流：
-1. RAG 检索（强制执行）
+1. RAG 检索
 2. 相关性与充分性评估
 3. 工具规划与执行[联网搜索+笔记编辑+切换对话历史+读取完整文本]
 4. 综合生成
@@ -20,10 +20,9 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolExecutor
 
 from services.rag_service import RAGService
+from services.pdf_service import PdfService
 from tools.web_search_tool import WebSearchTool
 from tools.paper_discovery_tool import PaperDiscoveryTool
-from tools.paper_fetcher_tool import PaperFetcherTool
-
 
 # ==================== 状态定义 ====================
 

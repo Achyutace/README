@@ -88,6 +88,70 @@ class StorageService:
         """
         return self.db.list_pdf_files(user_id=self.user_id, limit=limit)
     
+    def delete_pdf(self, file_hash: str, delete_physical_file: bool = True) -> Dict:
+        """
+        删除 PDF 文件及其所有关联数据
+        
+        Args:
+            file_hash: 文件哈希值
+            delete_physical_file: 是否删除物理文件（默认 True）
+            
+        Returns:
+            删除结果字典
+        """
+        # 获取文件信息
+        pdf_info = self.get_pdf_info(file_hash)
+        if not pdf_info:
+            return {
+                'success': False,
+                'error': 'PDF file not found'
+            }
+        
+        # 获取图片列表（用于删除物理图片文件）
+        images = self.get_images(file_hash)
+        
+        # 删除数据库记录（级联删除关联数据）
+        stats = self.db.delete_pdf_file(file_hash)
+        
+        result = {
+            'success': True,
+            'stats': stats,
+            'physical_file_deleted': False,
+            'image_files_deleted': 0
+        }
+        
+        # 删除物理文件
+        if delete_physical_file:
+            try:
+                file_path = Path(pdf_info['file_path'])
+                if file_path.exists():
+                    file_path.unlink()
+                    result['physical_file_deleted'] = True
+            except Exception as e:
+                result['physical_file_delete_error'] = str(e)
+        
+        # 删除图片文件
+        if images:
+            try:
+                self.delete_images(file_hash)
+                result['image_files_deleted'] = len(images)
+            except Exception as e:
+                result['image_files_delete_error'] = str(e)
+        
+        return result
+    
+    def check_pdf_exists(self, file_hash: str) -> bool:
+        """
+        检查 PDF 文件是否存在
+        
+        Args:
+            file_hash: 文件哈希值
+            
+        Returns:
+            文件是否存在
+        """
+        return self.db.check_pdf_exists(file_hash)
+    
     # ==================== 段落管理 ====================
     
     def save_paragraphs(self, file_hash: str, page_number: int, 
