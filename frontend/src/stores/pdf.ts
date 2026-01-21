@@ -3,6 +3,21 @@ import { ref, computed } from 'vue'
 
 const DEFAULT_SCALE = 1.6
 
+type NormalizedRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+type Highlight = {
+  id: string
+  page: number
+  rects: NormalizedRect[]
+  text: string
+  color: string
+}
+
 export const usePdfStore = defineStore('pdf', () => {
   const currentPdfUrl = ref<string | null>(null)
   const currentPage = ref(1)
@@ -16,6 +31,9 @@ export const usePdfStore = defineStore('pdf', () => {
 
   const selectedText = ref<string>('')
   const selectionPosition = ref<{ x: number; y: number } | null>(null)
+  const selectionInfo = ref<{ page: number; rects: NormalizedRect[] } | null>(null)
+  const highlights = ref<Highlight[]>([])
+  const highlightColor = ref('#F6E05E') // bright yellow by default
 
   const scalePercent = computed(() => Math.round(scale.value * 100))
 
@@ -66,9 +84,35 @@ export const usePdfStore = defineStore('pdf', () => {
     selectionPosition.value = position || null
   }
 
+  function setSelectionInfo(info: { page: number; rects: NormalizedRect[] } | null) {
+    selectionInfo.value = info
+  }
+
   function clearSelection() {
     selectedText.value = ''
     selectionPosition.value = null
+    selectionInfo.value = null
+  }
+
+  function addHighlightFromSelection() {
+    if (!selectionInfo.value || !selectedText.value) return
+
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    highlights.value.push({
+      id,
+      page: selectionInfo.value.page,
+      rects: selectionInfo.value.rects,
+      text: selectedText.value,
+      color: highlightColor.value
+    })
+  }
+
+  function getHighlightsByPage(page: number) {
+    return highlights.value.filter(h => h.page === page)
+  }
+
+  function setHighlightColor(color: string) {
+    highlightColor.value = color
   }
 
   function toggleAutoHighlight() {
@@ -95,6 +139,9 @@ export const usePdfStore = defineStore('pdf', () => {
     imageDescription,
     selectedText,
     selectionPosition,
+    selectionInfo,
+    highlights,
+    highlightColor,
     setCurrentPdf,
     setTotalPages,
     goToPage,
@@ -104,7 +151,11 @@ export const usePdfStore = defineStore('pdf', () => {
     zoomOut,
     setScale,
     setSelectedText,
+    setSelectionInfo,
     clearSelection,
+    addHighlightFromSelection,
+    getHighlightsByPage,
+    setHighlightColor,
     toggleAutoHighlight,
     toggleAutoTranslate,
     toggleImageDescription,

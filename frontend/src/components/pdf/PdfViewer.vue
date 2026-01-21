@@ -277,27 +277,85 @@ function cleanup() {
 
 function handleTextSelection() {
   const selection = window.getSelection() // 获取当前窗口选择
-  if (selection && selection.toString().trim()) {
-    const text = selection.toString().trim() // 选中文本
-    const range = selection.getRangeAt(0) // 第一个选区
-    const rect = range.getBoundingClientRect() // 选区位置矩形
+  if (!selection || !selection.toString().trim()) return
 
-    pdfStore.setSelectedText(text, {
-      x: rect.left + rect.width / 2, // 记录提示横坐标
-      y: rect.top - 10 // 记录提示纵坐标
-    })
+  const text = selection.toString().trim()
+  const range = selection.getRangeAt(0)
+  const pageEl = findPageElement(range.commonAncestorContainer)
 
-    tooltipPosition.value = {
-      x: rect.left + rect.width / 2, // 工具提示横坐标
-      y: rect.top - 10 // 工具提示纵坐标
-    }
-    showTooltip.value = true // 打开提示
+  if (!pageEl || !pageEl.dataset.page) return
+
+  const pageNumber = Number(pageEl.dataset.page)
+  const textLayer = pageEl.querySelector('.textLayer') as HTMLDivElement | null
+  if (!textLayer) return
+
+  const layerRect = textLayer.getBoundingClientRect()
+  if (!layerRect.width || !layerRect.height) return
+
+  const rects = Array.from(range.getClientRects())
+    .map((rect) => ({
+      left: (rect.left - layerRect.left) / layerRect.width,
+      top: (rect.top - layerRect.top) / layerRect.height,
+      width: rect.width / layerRect.width,
+      height: rect.height / layerRect.height,
+    }))
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+
+  if (!rects.length) return
+
+  const rect = range.getBoundingClientRect() // 选区位置矩形
+
+  pdfStore.setSelectedText(text, {
+    x: rect.left + rect.width / 2,
+    y: rect.top - 10
+  })
+  pdfStore.setSelectionInfo({ page: pageNumber, rects })
+
+  tooltipPosition.value = {
+    x: rect.left + rect.width / 2,
+    y: rect.top - 10
   }
+  showTooltip.value = true // 打开提示
 }
 
 function handleClickOutside() {
   showTooltip.value = false // 隐藏提示
   pdfStore.clearSelection() // 清空选中文本
+}
+
+function findPageElement(node: Node | null): HTMLElement | null {
+  let current: Node | null = node
+  while (current) {
+    if (current instanceof HTMLElement && current.classList.contains('pdf-page')) {
+      return current
+    }
+    current = current.parentElement || current.parentNode
+  }
+  return null
+}
+
+function hexToRgba(color: string, alpha = 0.35) {
+  const hex = color.replace('#', '')
+  const fallback = `rgba(246, 224, 94, ${alpha})`
+
+  if (hex.length !== 3 && hex.length !== 6) return fallback
+
+  const normalized = hex.length === 3
+    ? hex.split('').map(ch => ch + ch).join('')
+    : hex
+
+  const intVal = Number.parseInt(normalized, 16)
+  if (Number.isNaN(intVal)) return fallback
+
+  const r = (intVal >> 16) & 255
+  const g = (intVal >> 8) & 255
+  const b = intVal & 255
+
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function getHighlightColor(color: string) {
+  return hexToRgba(color, 0.35)
 }
 
 function scrollToPage(page: number) {
@@ -378,8 +436,25 @@ onBeforeUnmount(() => {
           :key="page" 
           class="pdf-page relative bg-white shadow-lg border border-gray-200 overflow-hidden shrink-0" 
           :ref="(el, refs) => handlePageContainerRef(page, el, refs)" 
+          :data-page="page"
         >
           <canvas class="block mx-auto" /> 
+          <div class="highlightLayer absolute inset-0 pointer-events-none">
+            <template v-for="hl in pdfStore.getHighlightsByPage(page)" :key="hl.id">
+              <div
+                v-for="(rect, idx) in hl.rects"
+                :key="`${hl.id}-${idx}`"
+                class="highlight-rect absolute pointer-events-none"
+                :style="{
+                  left: `${rect.left * 100}%`,
+                  top: `${rect.top * 100}%`,
+                  width: `${rect.width * 100}%`,
+                  height: `${rect.height * 100}%`,
+                  backgroundColor: getHighlightColor(hl.color)
+                }"
+              />
+            </template>
+          </div>
           <div class="textLayer absolute inset-0" /> 
           <div class="linkLayer absolute inset-0 pointer-events-none" /> <!-- 链接层，本身不响应事件，内部 a 标签响应 -->
         </div>
@@ -415,6 +490,15 @@ onBeforeUnmount(() => {
 
 .textLayer {
   pointer-events: auto; /* 允许文字层响应鼠标事件 */
+}
+
+.highlightLayer {
+  z-index: 1;
+}
+
+.highlight-rect {
+  background: rgba(255, 235, 59, 0.4);
+  border-radius: 4px;
 }
 
 :deep(.textLayer span) {
