@@ -1,6 +1,6 @@
-# Moonlight PDF Reader - PowerShell Start Script
+# README PDF Reader - PowerShell Start Script
 
-Write-Host "Starting Moonlight PDF Reader..." -ForegroundColor Green
+Write-Host "Starting README PDF Reader..." -ForegroundColor Green
 
 # 初始化 conda（如果需要）
 if (Get-Command conda -ErrorAction SilentlyContinue) {
@@ -32,7 +32,7 @@ $frontendJob = Start-Job -ScriptBlock {
 
 Write-Host ""
 Write-Host "===================================" -ForegroundColor Cyan
-Write-Host "Moonlight PDF Reader is running!" -ForegroundColor Green
+Write-Host "README PDF Reader is running!" -ForegroundColor Green
 Write-Host "Frontend: http://localhost:5173" -ForegroundColor White
 Write-Host "Backend:  http://localhost:5000" -ForegroundColor White
 Write-Host "===================================" -ForegroundColor Cyan

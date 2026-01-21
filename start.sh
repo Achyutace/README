@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Moonlight PDF Reader - Start Script
+# README PDF Reader - Start Script
 
 rm -rf backend/uploads
 mkdir backend/uploads
 
-echo "Starting Moonlight PDF Reader..."
+echo "Starting README PDF Reader..."
 
 # Start backend
 echo "Starting backend server..."
@@ -32,7 +32,7 @@ cd ..
 
 echo ""
 echo "==================================="
-echo "Moonlight PDF Reader is running!"
+echo "README PDF Reader is running!"
 echo "Frontend: http://localhost:5173"
 echo "Backend:  http://localhost:5000"
 echo "==================================="

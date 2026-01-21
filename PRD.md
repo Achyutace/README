@@ -6,7 +6,7 @@
 
 功能模块：
 
-Logo 区： 显示应用名称（Moonlight）。
+Logo 区： 显示应用名称（README）。
 
 文献管理：
 

@@ -1,4 +1,4 @@
-# Project: Moonlight Clone (Web PDF Reader)
+# Project: README Clone (Web PDF Reader)
 
 ## Core Goal
 构建一个专注于学术论文阅读的 Web 应用，核心布局为“左侧导航 + 中间 PDF + 右侧 AI 辅助”。

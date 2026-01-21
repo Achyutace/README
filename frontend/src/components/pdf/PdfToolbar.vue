@@ -1,9 +1,55 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
+import { useAiStore } from '../../stores/ai'
+import { useLibraryStore } from '../../stores/library'
+import { VueFlow, useVueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
 
 const pdfStore = usePdfStore()
+const aiStore = useAiStore()
+const libraryStore = useLibraryStore()
 const pageInput = ref('')
+const showRoadmap = ref(false)
+const selectedNode = ref<any>(null)
+
+const { onNodeClick } = useVueFlow()
+
+async function loadRoadmap() {
+  if (libraryStore.currentDocument) {
+    await aiStore.fetchRoadmap(libraryStore.currentDocument.id)
+  }
+}
+
+onNodeClick((event) => {
+  selectedNode.value = event.node.data
+})
+
+function closeDetail() {
+  selectedNode.value = null
+}
+
+function closeRoadmap() {
+  showRoadmap.value = false
+  selectedNode.value = null
+}
+
+function exportRoadmap() {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(aiStore.roadmap, null, 2));
+  const downloadAnchorNode = document.createElement('a');
+  downloadAnchorNode.setAttribute("href", dataStr);
+  downloadAnchorNode.setAttribute("download", "roadmap.json");
+  document.body.appendChild(downloadAnchorNode);
+  downloadAnchorNode.click();
+  downloadAnchorNode.remove();
+}
+
+watch(showRoadmap, (val) => {
+  if (val && !aiStore.roadmap) {
+    loadRoadmap()
+  }
+})
 
 function handlePageInput() {
   const page = parseInt(pageInput.value)
@@ -15,124 +61,213 @@ function handlePageInput() {
 </script>
 
 <template>
-  <div class="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm">
-    <!-- Left: Zoom Controls -->
-    <div class="flex items-center gap-2">
-      <button
-        @click="pdfStore.zoomOut"
-        class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-        title="缩小"
-      >
-        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
-        </svg>
-      </button>
-      <span class="text-sm font-medium text-gray-700 min-w-[4rem] text-center">
-        {{ pdfStore.scalePercent }}%
-      </span>
-      <button
-        @click="pdfStore.zoomIn"
-        class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-        title="放大"
-      >
-        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
-    </div>
-
-    <!-- Center: Page Navigation -->
-    <div class="flex items-center gap-2">
-      <button
-        @click="pdfStore.prevPage"
-        :disabled="pdfStore.currentPage <= 1"
-        class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        title="上一页"
-      >
-        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-        </svg>
-      </button>
-
-      <div class="flex items-center gap-1">
-        <input
-          v-model="pageInput"
-          type="text"
-          :placeholder="String(pdfStore.currentPage)"
-          @keyup.enter="handlePageInput"
-          class="w-12 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500"
-        />
-        <span class="text-sm text-gray-500">/</span>
-        <span class="text-sm text-gray-700">{{ pdfStore.totalPages || '-' }}</span>
+  <div class="relative">
+    <div class="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm">
+      <!-- Left: Zoom Controls -->
+      <div class="flex items-center gap-2">
+        <button
+          @click="pdfStore.zoomOut"
+          class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          title="缩小"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+          </svg>
+        </button>
+        <span class="text-sm font-medium text-gray-700 min-w-[4rem] text-center">
+          {{ pdfStore.scalePercent }}%
+        </span>
+        <button
+          @click="pdfStore.zoomIn"
+          class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          title="放大"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
       </div>
 
-      <button
-        @click="pdfStore.nextPage"
-        :disabled="pdfStore.currentPage >= pdfStore.totalPages"
-        class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        title="下一页"
-      >
-        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-        </svg>
-      </button>
+      <!-- Center: Page Navigation -->
+      <div class="flex items-center gap-2">
+        <button
+          @click="pdfStore.prevPage"
+          :disabled="pdfStore.currentPage <= 1"
+          class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title="上一页"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        <div class="flex items-center gap-1">
+          <input
+            v-model="pageInput"
+            type="text"
+            :placeholder="String(pdfStore.currentPage)"
+            @keyup.enter="handlePageInput"
+            class="w-12 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500"
+          />
+          <span class="text-sm text-gray-500">/</span>
+          <span class="text-sm text-gray-700">{{ pdfStore.totalPages || '-' }}</span>
+        </div>
+
+        <button
+          @click="pdfStore.nextPage"
+          :disabled="pdfStore.currentPage >= pdfStore.totalPages"
+          class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title="下一页"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Right: Roadmap Button -->
+      <div class="flex items-center gap-1">
+        <button
+          @click="showRoadmap = !showRoadmap"
+          :class="[
+            'px-3 py-1.5 text-sm rounded-lg transition-colors',
+            showRoadmap
+              ? 'bg-primary-100 text-primary-700'
+              : 'hover:bg-gray-100 text-gray-600'
+          ]"
+          title="思维导图"
+        >
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+            </svg>
+            Roadmap
+          </span>
+        </button>
+      </div>
     </div>
 
-    <!-- Right: Feature Toggles -->
-    <div class="flex items-center gap-1">
-      <button
-        @click="pdfStore.toggleAutoHighlight"
-        :class="[
-          'px-3 py-1.5 text-sm rounded-lg transition-colors',
-          pdfStore.autoHighlight
-            ? 'bg-primary-100 text-primary-700'
-            : 'hover:bg-gray-100 text-gray-600'
-        ]"
-        title="自动高亮"
-      >
-        <span class="flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-          </svg>
-          高亮
-        </span>
-      </button>
+    <!-- Roadmap Popup -->
+    <div
+      v-if="showRoadmap"
+      class="absolute top-full right-0 mt-2 w-[600px] h-[500px] bg-white rounded-lg shadow-xl border border-gray-200 z-50 flex flex-col overflow-hidden"
+    >
+      <!-- Popup Header -->
+      <div class="px-4 py-3 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+        <div>
+          <h3 class="text-sm font-medium text-gray-700">思维导图</h3>
+          <p class="text-xs text-gray-500">点击节点查看相关细节</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            @click="exportRoadmap"
+            class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded transition-colors"
+            title="导出为 JSON"
+          >
+            Export
+          </button>
+          <button
+            @click="closeRoadmap"
+            class="text-gray-400 hover:text-gray-600 p-1"
+            title="关闭"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
 
-      <button
-        @click="pdfStore.toggleImageDescription"
-        :class="[
-          'px-3 py-1.5 text-sm rounded-lg transition-colors',
-          pdfStore.imageDescription
-            ? 'bg-primary-100 text-primary-700'
-            : 'hover:bg-gray-100 text-gray-600'
-        ]"
-        title="图片说明"
-      >
-        <span class="flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          图解
-        </span>
-      </button>
+      <!-- Popup Content -->
+      <div class="flex-1 relative">
+        <!-- Loading State -->
+        <div v-if="aiStore.isLoadingRoadmap" class="absolute inset-0 flex items-center justify-center">
+          <div class="flex flex-col items-center gap-2">
+            <div class="animate-spin w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full"></div>
+            <span class="text-sm text-gray-500">生成 Roadmap 中...</span>
+          </div>
+        </div>
 
-      <button
-        @click="pdfStore.toggleAutoTranslate"
-        :class="[
-          'px-3 py-1.5 text-sm rounded-lg transition-colors',
-          pdfStore.autoTranslate
-            ? 'bg-primary-100 text-primary-700'
-            : 'hover:bg-gray-100 text-gray-600'
-        ]"
-        title="自动翻译"
-      >
-        <span class="flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-          </svg>
-          翻译
-        </span>
-      </button>
+        <!-- Roadmap Display -->
+        <div v-else-if="aiStore.roadmap" class="w-full h-full">
+          <VueFlow
+            :nodes="aiStore.roadmap.nodes"
+            :edges="aiStore.roadmap.edges"
+            class="basicflow"
+            :default-viewport="{ zoom: 1.2 }"
+            :min-zoom="0.2"
+            :max-zoom="4"
+            fit-view-on-init
+          >
+            <Background pattern-color="#aaa" :gap="8" />
+            <Controls />
+          </VueFlow>
+
+          <!-- Node Detail Panel -->
+          <div
+            v-if="selectedNode"
+            class="absolute inset-x-0 bottom-0 bg-white border-t border-gray-200 shadow-lg p-4 max-h-[40%] overflow-y-auto"
+          >
+            <div class="flex justify-between items-start mb-2">
+              <h4 class="font-bold text-gray-800">{{ selectedNode.label }}</h4>
+              <button @click="closeDetail" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p class="text-sm text-gray-600 mb-3">{{ selectedNode.description }}</p>
+            <div v-if="selectedNode.papers && selectedNode.papers.length > 0">
+              <h5 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">相关论文 & 链接</h5>
+              <ul class="space-y-2">
+                <li v-for="(paper, idx) in selectedNode.papers" :key="idx" class="text-sm border-l-2 border-primary-200 pl-3">
+                  <a :href="paper.link" target="_blank" class="font-medium text-primary-600 hover:text-primary-800 hover:underline block truncate">
+                    {{ paper.title }}
+                  </a>
+                  <span class="text-xs text-gray-400">{{ paper.year || 'N/A' }}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div v-else class="absolute inset-0 flex items-center justify-center p-8 text-center bg-gray-50">
+          <p class="text-sm text-gray-500">暂无 Roadmap 数据<br>请选择文档开始分析</p>
+        </div>
+      </div>
     </div>
+
+    <!-- Backdrop -->
+    <div
+      v-if="showRoadmap"
+      class="fixed inset-0 z-40"
+      @click="closeRoadmap"
+    ></div>
   </div>
 </template>
+
+<style>
+.vue-flow__node {
+  font-size: 12px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  width: auto;
+  text-align: center;
+  cursor: pointer;
+}
+
+.vue-flow__node.selected {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.vue-flow__handle {
+  width: 6px;
+  height: 6px;
+  background: #bbb;
+}
+</style>
