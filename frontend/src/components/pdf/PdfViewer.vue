@@ -39,6 +39,15 @@ const showTooltip = ref(false) // 是否显示选中文本的工具提示
 const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
 const isProgrammaticScrolling = ref(false) // 标记是否正在进行程序化滚动
 
+// 点击/拖动检测相关
+const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
+const CLICK_THRESHOLD = 5 // 移动距离小于此值视为点击
+const CLICK_TIME_THRESHOLD = 300 // 点击时间小于此值视为点击（毫秒）
+
+// 循环选择高亮相关
+const highlightsAtCurrentPoint = ref<ReturnType<typeof pdfStore.getHighlightsAtPoint>>([])
+const currentHighlightIndex = ref(0)
+
 function handlePageContainerRef(
   pageNumber: number, // 当前页码
   ref: Element | ComponentPublicInstance | null, // Vue 传入的泛型引用
@@ -339,9 +348,108 @@ function cleanup() {
   pdfDoc.value = null // 释放文档实例
 }
 
+function handleMouseDown(event: MouseEvent) {
+  // 记录鼠标按下位置和时间
+  mouseDownInfo.value = {
+    x: event.clientX,
+    y: event.clientY,
+    time: Date.now()
+  }
+}
+
+function handleMouseUp(event: MouseEvent) {
+  const downInfo = mouseDownInfo.value
+  mouseDownInfo.value = null
+
+  // 检查是否点击到了链接（链接优先级最高）
+  const target = event.target as HTMLElement
+  if (target.tagName === 'A' || target.closest('a')) {
+    return // 让链接自己处理点击
+  }
+
+  // 判断是点击还是拖动
+  const isClick = downInfo &&
+    Math.abs(event.clientX - downInfo.x) < CLICK_THRESHOLD &&
+    Math.abs(event.clientY - downInfo.y) < CLICK_THRESHOLD &&
+    Date.now() - downInfo.time < CLICK_TIME_THRESHOLD
+
+  if (isClick) {
+    // 这是一个点击操作
+    handleClick(event)
+  } else {
+    // 这是一个拖动选择操作
+    handleTextSelection()
+  }
+}
+
+function handleClick(event: MouseEvent) {
+  // 查找点击位置对应的页面
+  const pageEl = findPageElement(event.target as Node)
+  if (!pageEl || !pageEl.dataset.page) {
+    // 点击在页面外部，清除选择
+    handleClickOutside()
+    return
+  }
+
+  const pageNumber = Number(pageEl.dataset.page)
+  const textLayer = pageEl.querySelector('.textLayer') as HTMLDivElement | null
+  if (!textLayer) return
+
+  const layerRect = textLayer.getBoundingClientRect()
+  if (!layerRect.width || !layerRect.height) return
+
+  // 计算归一化坐标
+  const normalizedX = (event.clientX - layerRect.left) / layerRect.width
+  const normalizedY = (event.clientY - layerRect.top) / layerRect.height
+
+  // 查找该位置的所有高亮
+  const highlightsAtPoint = pdfStore.getHighlightsAtPoint(pageNumber, normalizedX, normalizedY)
+
+  if (highlightsAtPoint.length === 0) {
+    // 点击的是未高亮区域，清除选择
+    handleClickOutside()
+    return
+  }
+
+  // 检查是否是同一位置的重复点击（循环选择）
+  const isSamePoint = highlightsAtCurrentPoint.value.length > 0 &&
+    highlightsAtCurrentPoint.value.some(h => highlightsAtPoint.some(hp => hp.id === h.id))
+
+  if (isSamePoint && highlightsAtPoint.length > 1) {
+    // 循环到下一个高亮
+    currentHighlightIndex.value = (currentHighlightIndex.value + 1) % highlightsAtPoint.length
+  } else {
+    // 新位置，重置索引
+    highlightsAtCurrentPoint.value = highlightsAtPoint
+    currentHighlightIndex.value = 0
+  }
+
+  // 选中当前索引的高亮
+  const selectedHighlight = highlightsAtPoint[currentHighlightIndex.value]
+  if (!selectedHighlight) return
+
+  // 计算高亮的显示位置（用于工具提示）
+  const firstRect = selectedHighlight.rects[0]
+  if (!firstRect) return
+
+  const tooltipX = layerRect.left + (firstRect.left + firstRect.width / 2) * layerRect.width
+  const tooltipY = layerRect.top + firstRect.top * layerRect.height - 10
+
+  pdfStore.selectHighlight(selectedHighlight, { x: tooltipX, y: tooltipY })
+
+  tooltipPosition.value = { x: tooltipX, y: tooltipY }
+  showTooltip.value = true
+
+  // 清除任何文本选择
+  window.getSelection()?.removeAllRanges()
+}
+
 function handleTextSelection() {
   const selection = window.getSelection() // 获取当前窗口选择
   if (!selection || !selection.toString().trim()) return
+
+  // 清除高亮选择状态
+  pdfStore.clearHighlightSelection()
 
   const text = selection.toString().trim()
   const range = selection.getRangeAt(0)
@@ -386,9 +494,22 @@ function handleClickOutside() {
   const selection = window.getSelection()
   // Keep the action menu open when there is still a text selection
   if (selection && selection.toString().trim()) return
+  // Keep the menu open when editing a highlight
+  if (pdfStore.isEditingHighlight) return
 
   showTooltip.value = false // 隐藏提示
   pdfStore.clearSelection() // 清空选中文本
+  pdfStore.clearHighlightSelection() // 清空高亮选择
+  highlightsAtCurrentPoint.value = []
+  currentHighlightIndex.value = 0
+}
+
+function closeTooltip() {
+  showTooltip.value = false
+  pdfStore.clearSelection()
+  pdfStore.clearHighlightSelection()
+  highlightsAtCurrentPoint.value = []
+  currentHighlightIndex.value = 0
 }
 
 function findPageElement(node: Node | null): HTMLElement | null {
@@ -489,12 +610,12 @@ onBeforeUnmount(() => {
   <div class="flex flex-col h-full bg-gray-100">
     <!-- 主内容区，显示 PDF 页面的滚动容器 -->
     <div
-      v-if="pdfStore.currentPdfUrl" 
-      ref="containerRef" 
-      class="flex-1 overflow-auto p-4" 
-      @mouseup="handleTextSelection" 
-      @click="handleClickOutside" 
-      @scroll="handleScroll" 
+      v-if="pdfStore.currentPdfUrl"
+      ref="containerRef"
+      class="flex-1 overflow-auto p-4"
+      @mousedown="handleMouseDown"
+      @mouseup="handleMouseUp"
+      @scroll="handleScroll"
     >
       <!-- 居中内容区，控制最大宽度与行间距 -->
       <div class="space-y-4 flex flex-col items-center">
@@ -546,7 +667,9 @@ onBeforeUnmount(() => {
       v-if="showTooltip && pdfStore.selectedText"
       :position="tooltipPosition"
       :text="pdfStore.selectedText"
-      @close="handleClickOutside"
+      :mode="pdfStore.isEditingHighlight ? 'highlight' : 'selection'"
+      :highlight="pdfStore.selectedHighlight"
+      @close="closeTooltip"
     />
   </div>
 </template>
