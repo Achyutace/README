@@ -1,367 +1,262 @@
 """
-RAG Service - 为当前阅读的单篇论文提供上下文检索
-专注于支持 AI Chat 对当前文档的理解和问答
-
-设计思路：
-1. RAGService 读取缓存数据，计算向量并提供智能检索
-2. 向量数据按需计算，缓存在内存中（当前文档）
-
-预期的缓存文件结构：
-backend/cache/{pdf_id}/
-  ├── paragraphs.json    # PdfService.parse_paragraphs() 输出
-  │   示例: [{"id": "pdf_chk_xxx_1_0", "page": 1, "content": "Abstract...", "bbox": {...}}, ...]
-  ├── images_meta.json   # PdfService.get_images_list() 输出
-  │   示例: [{"id": "xxx__xref__123", "page": 2, "bbox": {...}}, ...]
-  └── metadata.json      # PdfService.get_info() 输出
-      示例: {"id": "xxx", "pageCount": 10, "metadata": {"title": "...", ...}}
+RAG Service - 为单篇论文提供上下文检索
 """
 
-import re
+import os
+import hashlib
 from typing import List, Dict, Optional
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-
-
-class PaperChunk:
-    """论文文本块"""
-    def __init__(self, content: str, section: str, page: int, chunk_index: int):
-        self.content = content
-        self.section = section
-        self.page = page
-        self.chunk_index = chunk_index
-        self.embedding = None  
-
-
-class SectionClassifier:
-    """章节分类器 - 基于段落文本识别章节类型"""
-    
-    SECTION_PATTERNS = {
-        'abstract': r'^(abstract|summary)\s*$',
-        'introduction': r'^(1\.?\s*)?(introduction|background)\s*$',
-        'related_work': r'^(\d+\.?\s*)?(related work|literature review)\s*$',
-        'method': r'^(\d+\.?\s*)?(method|methodology|approach|model)\s*$',
-        'experiments': r'^(\d+\.?\s*)?(experiment|evaluation|results)\s*$',
-        'conclusion': r'^(\d+\.?\s*)?(conclusion|discussion|future work)\s*$',
-        'references': r'^(reference|bibliography)\s*$',
-    }
-    
-    @classmethod
-    def classify_paragraph(cls, paragraph: Dict) -> str:
-        """
-        分类段落所属章节
-        
-        Args:
-            paragraph: PdfService.parse_paragraphs() 返回的段落字典
-            
-        Returns:
-            章节类型 ('abstract', 'introduction', 'method', 等) 或 'content'
-        """
-        text = paragraph['content']
-        first_line = text.split('\n')[0].strip().lower()
-        
-        # 检查是否匹配章节标题模式
-        for section_type, pattern in cls.SECTION_PATTERNS.items():
-            if re.match(pattern, first_line, re.IGNORECASE):
-                return section_type
-        
-        return 'content'  # 默认为正文内容
-
+from langchain_community.vectorstores import Chroma  
 
 class RAGService:
     """
     RAG 服务
+
+    - store_chunks: 存储文本块到向量库
+    - retrieve: 根据查询检索相关文本
+    - delete_paper: 删除论文向量数据
+    - check_exists: 检查论文是否已存储
+    - calculate_file_hash: 计算文件哈希值
     """
     
-    def __init__(self, cache_dir: str = "./backend/cache", 
-                 chunk_size: int = 800, 
-                 chunk_overlap: int = 100):
+    def __init__(self, 
+                 chroma_dir: str = "./storage/chroma_db"):
         """
         Args:
-            cache_dir: 缓存根目录
-            chunk_size: 文本块大小（用于进一步切分长段落）
-            chunk_overlap: 块之间的重叠
+            chroma_dir: Chroma 数据库目录
         """
-        self.cache_dir = cache_dir
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+        self.chroma_dir = chroma_dir
         
-        # 文本分割器（用于切分超长段落）
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
-        )
+        # 嵌入模型
+        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         
-        # 嵌入模型（按需初始化）
-        self.embeddings = None
-        
-        # 当前加载的文档数据（内存缓存）
-        self.current_pdf_id = None
-        self.current_chunks = []   # 处理后的文本块
-        self.chunks_embeddings = None  # 文本块的向量表示
-        self.current_metadata = None  # 论文元数据
+        # 确保 Chroma 目录存在
+        os.makedirs(chroma_dir, exist_ok=True)
     
-    
-    def load_paper(self, pdf_id: str) -> Dict:
+    @staticmethod
+    def calculate_file_hash(file_path: str) -> str:
         """
-        从缓存加载论文数据到内存
         
         Args:
-            pdf_id: PDF 文件ID（对应 cache 子目录名）
+            file_path: 文件路径
             
+        Returns:
+            文件的 SHA256 哈希值
+        """
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    
+    def store_chunks(self, 
+                     file_hash: str, 
+                     chunks: List[Dict]) -> Dict:
+        """
+        存储文本块到向量库
+        
+        Args:
+            file_hash: PDF 文件哈希值
+            chunks: 文本块列表，每个元素格式：
+                {
+                    'content': str,      # 文本内容（必需）
+                    'page': int,         # 页码（必需）
+                    'section': str,      # 章节类型（可选，默认 'content'）
+                    'metadata': Dict     # 其他元数据（可选）
+                }
+        
         Returns:
             {
                 'success': bool,
-                'metadata': {...},
-                'chunks_count': int,
-                'paragraphs_count': int
+                'message': str,
+                'chunks_count': int
             }
         """
-        import json
-        import os
-        
         try:
-            cache_path = os.path.join(self.cache_dir, pdf_id)
-            
-            # 1. 读取缓存的段落数据
-            paragraphs_file = os.path.join(cache_path, "paragraphs.json")
-            if not os.path.exists(paragraphs_file):
+            if not chunks:
                 return {
                     'success': False,
-                    'error': f'Cache not found: {paragraphs_file}. Please preprocess PDF first.'
+                    'message': 'No chunks provided'
                 }
             
-            with open(paragraphs_file, 'r', encoding='utf-8') as f:
-                paragraphs = json.load(f)
+            # 准备数据
+            texts = []
+            metadatas = []
+            ids = []
             
-            # 2. 读取元数据
-            metadata_file = os.path.join(cache_path, "metadata.json")
-            if os.path.exists(metadata_file):
-                with open(metadata_file, 'r', encoding='utf-8') as f:
-                    self.current_metadata = json.load(f)
-            else:
-                self.current_metadata = {'id': pdf_id}
-            
-            # 3. 创建文本块
-            chunks = []
-            chunk_index = 0
-            
-            for para in paragraphs:
-                para_content = para['content']
-                para_page = para['page']
+            for i, chunk in enumerate(chunks):
+                texts.append(chunk['content'])
                 
-                # 对超长段落进行切分
-                if len(para_content) > self.chunk_size:
-                    sub_chunks = self.text_splitter.split_text(para_content)
-                else:
-                    sub_chunks = [para_content]
+                # 构建元数据
+                meta = {
+                    'file_hash': file_hash,  # 使用 file_hash 
+                    'page': chunk.get('page', 0),
+                    'section': chunk.get('section', 'content'),
+                    'chunk_index': i
+                }
+                # 合并额外的元数据
+                if 'metadata' in chunk:
+                    meta.update(chunk['metadata'])
                 
-                for chunk_text in sub_chunks:
-                    # 使用轻量级分类器识别章节类型
-                    section_type = SectionClassifier.classify_paragraph(para)
-                    
-                    chunk = PaperChunk(
-                        content=chunk_text,
-                        section=section_type,
-                        page=para_page,
-                        chunk_index=chunk_index
-                    )
-                    chunks.append(chunk)
-                    chunk_index += 1
+                metadatas.append(meta)
+                ids.append(f"{file_hash}_chunk_{i}")
             
-            # 4. 保存到内存
-            self.current_pdf_id = pdf_id
-            self.current_chunks = chunks
-            self.chunks_embeddings = None  # 重置向量缓存
+            # 先删除旧数据
+            self._delete_from_chroma(file_hash)
+            
+            # 存储到 Chroma
+            vectorstore = Chroma(
+                collection_name=f"paper_{file_hash[:16]}",  # 使用前16位避免名称过长
+                embedding_function=self.embeddings,
+                persist_directory=self.chroma_dir
+            )
+            
+            vectorstore.add_texts(
+                texts=texts,
+                metadatas=metadatas,
+                ids=ids
+            )
             
             return {
                 'success': True,
-                'metadata': self.current_metadata,
-                'chunks_count': len(chunks),
-                'paragraphs_count': len(paragraphs)
+                'message': f'Successfully stored {len(chunks)} chunks for {file_hash}',
+                'chunks_count': len(chunks)
             }
             
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e)
+                'message': f'Error storing chunks: {str(e)}',
+                'chunks_count': 0
             }
     
-    def _ensure_embeddings(self):
-        """确保嵌入模型已初始化"""
-        if self.embeddings is None:
-            self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
     
-    def _compute_chunk_embeddings(self):
-        """计算所有文本块的向量表示"""
-        if self.chunks_embeddings is not None:
-            return  # 已经计算过
-        
-        if not self.current_chunks:
-            return
-        
-        self._ensure_embeddings()
-        
-        # 批量计算嵌入
-        texts = [chunk.content for chunk in self.current_chunks]
-        embeddings = self.embeddings.embed_documents(texts)
-        self.chunks_embeddings = np.array(embeddings)
-        
-        # 保存到每个 chunk
-        for i, chunk in enumerate(self.current_chunks):
-            chunk.embedding = embeddings[i]
-    
-    def retrieve(self, query: str, top_k: int = 3, 
-                 section_filter: Optional[str] = None,
-                 page_filter: Optional[int] = None) -> List[Dict]:
+    def retrieve(self, 
+                 file_hash: str, 
+                 query: str, 
+                 top_k: int = 4,
+                 filters: Optional[Dict] = None) -> List[Dict]:
         """
-        检索相关上下文
+        根据查询检索相关文本
         
         Args:
-            query: 用户查询或选中的文本
+            file_hash: PDF 文件哈希值
+            query: 用户查询文本
             top_k: 返回结果数量
-            section_filter: 章节过滤（如 'method', 'introduction'）
-            page_filter: 页码过滤
+            filters: 过滤条件，例如 {'section': 'method', 'page': 5}
             
         Returns:
             [
                 {
                     'content': '检索到的文本块',
-                    'section': '章节类型',
                     'page': 页码,
-                    'score': 相似度分数
+                    'section': 章节类型,
+                    'chunk_index': 块索引,
+                    'score': 相似度分数 (0-1),
+                    'metadata': {...}  # 其他元数据
                 },
                 ...
             ]
         """
-        if not self.current_chunks:
-            return []
-        
         try:
-            # 1. 计算文本块向量（如果还没计算）
-            self._compute_chunk_embeddings()
+            vectorstore = Chroma(
+                collection_name=f"paper_{file_hash[:16]}",
+                embedding_function=self.embeddings,
+                persist_directory=self.chroma_dir
+            )
             
-            # 2. 计算查询向量
-            self._ensure_embeddings()
-            query_embedding = np.array(self.embeddings.embed_query(query)).reshape(1, -1)
+            # 构建过滤条件
+            where_filter = {'file_hash': file_hash}
+            if filters:
+                where_filter.update(filters)
             
-            # 3. 计算相似度
-            similarities = cosine_similarity(query_embedding, self.chunks_embeddings)[0]
+            # 检索
+            results = vectorstore.similarity_search_with_score(
+                query=query,
+                k=top_k,
+                filter=where_filter if len(where_filter) > 1 else None
+            )
             
-            # 4. 应用过滤
-            filtered_indices = []
-            for i, chunk in enumerate(self.current_chunks):
-                if section_filter and chunk.section != section_filter:
-                    continue
-                if page_filter and chunk.page != page_filter:
-                    continue
-                filtered_indices.append(i)
-            
-            # 5. 排序并获取 top_k
-            if not filtered_indices:
-                filtered_indices = list(range(len(self.current_chunks)))
-            
-            filtered_similarities = [(i, similarities[i]) for i in filtered_indices]
-            filtered_similarities.sort(key=lambda x: x[1], reverse=True)
-            top_indices = [i for i, _ in filtered_similarities[:top_k]]
-            
-            # 6. 构造返回结果
-            results = []
-            for idx in top_indices:
-                chunk = self.current_chunks[idx]
-                results.append({
-                    'content': chunk.content,
-                    'section': chunk.section,
-                    'page': chunk.page,
-                    'chunk_index': chunk.chunk_index,
-                    'score': float(similarities[idx])
+            # 格式化结果
+            formatted_results = []
+            for doc, score in results:
+                formatted_results.append({
+                    'content': doc.page_content,
+                    'page': doc.metadata.get('page', 0),
+                    'section': doc.metadata.get('section', 'content'),
+                    'chunk_index': doc.metadata.get('chunk_index', 0),
+                    'score': float(1 - score),  # Chroma 返回距离，转换为相似度
+                    'metadata': doc.metadata
                 })
             
-            return results
+            return formatted_results
             
         except Exception as e:
             print(f"Retrieval error: {e}")
             return []
     
     
-    def get_section_content(self, section_type: str) -> Optional[str]:
+    def delete_paper(self, file_hash: str) -> Dict:
         """
-        获取特定章节的完整内容
+        删除论文的向量数据
         
         Args:
-            section_type: 章节类型 (如 'abstract', 'introduction', 'method')
+            file_hash: PDF 文件哈希值
             
         Returns:
-            章节内容文本，如果不存在返回 None
+            {
+                'success': bool,
+                'message': str
+            }
         """
-        if not self.current_chunks:
-            return None
-        
-        # 收集该章节的所有块
-        section_chunks = [
-            chunk for chunk in self.current_chunks 
-            if chunk.section == section_type
-        ]
-        
-        if not section_chunks:
-            return None
-        
-        # 按顺序拼接
-        section_chunks.sort(key=lambda x: x.chunk_index)
-        return "\n\n".join(chunk.content for chunk in section_chunks)
+        try:
+            self._delete_from_chroma(file_hash)
+            return {
+                'success': True,
+                'message': f'Successfully deleted paper {file_hash}'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error deleting paper: {str(e)}'
+            }
     
-    def get_page_context(self, page_number: int, window: int = 0) -> str:
+    
+    def check_exists(self, file_hash: str) -> bool:
         """
-        获取特定页面的上下文
+        检查论文是否已存储在向量库中
         
         Args:
-            page_number: 页码
-            window: 前后扩展的页数
+            file_hash: PDF 文件哈希值
             
         Returns:
-            页面内容文本
+            True if exists, False otherwise
         """
-        if not self.current_chunks:
-            return ""
-        
-        # 获取目标页面范围的所有块
-        start_page = max(1, page_number - window)
-        end_page = page_number + window
-        
-        relevant_chunks = [
-            chunk for chunk in self.current_chunks
-            if start_page <= chunk.page <= end_page
-        ]
-        
-        relevant_chunks.sort(key=lambda x: (x.page, x.chunk_index))
-        
-        return "\n\n".join(chunk.content for chunk in relevant_chunks)
+        try:
+            vectorstore = Chroma(
+                collection_name=f"paper_{file_hash[:16]}",
+                embedding_function=self.embeddings,
+                persist_directory=self.chroma_dir
+            )
+            collection = vectorstore._collection
+            return collection.count() > 0
+        except:
+            return False
     
     
-    def get_metadata(self) -> Optional[Dict]:
-        """获取当前论文的元数据"""
-        return self.current_metadata
-    
-    def get_full_text(self) -> str:
-        """
-        获取当前论文的全文（从所有chunks拼接）
-        
-        Returns:
-            完整文本内容
-        """
-        if not self.current_chunks:
-            return ""
-        
-        # 按顺序拼接所有块
-        sorted_chunks = sorted(self.current_chunks, key=lambda x: (x.page, x.chunk_index))
-        return "\n\n".join(chunk.content for chunk in sorted_chunks)
-    
-    def clear(self):
-        """清空当前加载的文档"""
-        self.current_pdf_id = None
-        self.current_chunks = []
-        self.chunks_embeddings = None
-        self.current_metadata = None
+    def _delete_from_chroma(self, file_hash: str):
+        """从 Chroma 删除指定论文的所有数据"""
+        try:
+            vectorstore = Chroma(
+                collection_name=f"paper_{file_hash[:16]}",
+                embedding_function=self.embeddings,
+                persist_directory=self.chroma_dir
+            )
+            
+            # 删除集合
+            vectorstore.delete_collection()
+            
+        except Exception as e:
+            # 如果集合不存在，忽略错误
+            pass

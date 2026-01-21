@@ -23,7 +23,7 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 from services.pdf_service import PdfService
-from services.ai_service import AiService
+from backend.services.roadmap_service import AiService
 from services.rag_service import RAGService
 from services.agent_service import AcademicAgentService
 
