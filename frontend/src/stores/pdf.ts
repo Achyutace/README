@@ -18,6 +18,8 @@ type Highlight = {
   color: string
 }
 
+export type { Highlight, NormalizedRect }
+
 export const usePdfStore = defineStore('pdf', () => {
   const currentPdfUrl = ref<string | null>(null)
   const currentPage = ref(1)
@@ -34,6 +36,8 @@ export const usePdfStore = defineStore('pdf', () => {
   const selectionInfo = ref<{ page: number; rects: NormalizedRect[] } | null>(null)
   const highlights = ref<Highlight[]>([])
   const highlightColor = ref('#F6E05E') // bright yellow by default
+  const selectedHighlight = ref<Highlight | null>(null) // 当前选中的高亮
+  const isEditingHighlight = ref(false) // 是否在编辑高亮模式
 
   const scalePercent = computed(() => Math.round(scale.value * 100))
 
@@ -115,6 +119,40 @@ export const usePdfStore = defineStore('pdf', () => {
     highlightColor.value = color
   }
 
+  function selectHighlight(highlight: Highlight, position: { x: number; y: number }) {
+    selectedHighlight.value = highlight
+    isEditingHighlight.value = true
+    selectedText.value = highlight.text
+    selectionPosition.value = position
+  }
+
+  function clearHighlightSelection() {
+    selectedHighlight.value = null
+    isEditingHighlight.value = false
+  }
+
+  function removeHighlight(id: string) {
+    highlights.value = highlights.value.filter(h => h.id !== id)
+    clearHighlightSelection()
+  }
+
+  function updateHighlightColor(id: string, color: string) {
+    const highlight = highlights.value.find(h => h.id === id)
+    if (highlight) {
+      highlight.color = color
+    }
+  }
+
+  function getHighlightsAtPoint(page: number, x: number, y: number): Highlight[] {
+    return highlights.value.filter(h => {
+      if (h.page !== page) return false
+      return h.rects.some(rect => {
+        return x >= rect.left && x <= rect.left + rect.width &&
+               y >= rect.top && y <= rect.top + rect.height
+      })
+    })
+  }
+
   function toggleAutoHighlight() {
     autoHighlight.value = !autoHighlight.value
   }
@@ -142,6 +180,8 @@ export const usePdfStore = defineStore('pdf', () => {
     selectionInfo,
     highlights,
     highlightColor,
+    selectedHighlight,
+    isEditingHighlight,
     setCurrentPdf,
     setTotalPages,
     goToPage,
@@ -156,6 +196,11 @@ export const usePdfStore = defineStore('pdf', () => {
     addHighlightFromSelection,
     getHighlightsByPage,
     setHighlightColor,
+    selectHighlight,
+    clearHighlightSelection,
+    removeHighlight,
+    updateHighlightColor,
+    getHighlightsAtPoint,
     toggleAutoHighlight,
     toggleAutoTranslate,
     toggleImageDescription,
