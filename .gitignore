@@ -36,5 +36,7 @@ backend/.env
 .claude/
 .anthropic/
 
-#qlc's gitignore
+# .sh
 mystart.sh
+# Storage
+storage/

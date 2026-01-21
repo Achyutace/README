@@ -1,6 +1,27 @@
 flask==3.0.0
 flask-cors==4.0.0
 PyMuPDF==1.23.7
-openai==1.6.1
 python-dotenv==1.0.0
 werkzeug==3.0.1
+Pillow==10.2.0
+
+# OpenAI & LangChain
+openai==1.12.0
+langchain==0.1.9
+langchain-openai==0.0.5
+langchain-community==0.0.21
+langgraph==0.0.25
+
+# Vector database for RAG
+chromadb==0.4.22
+
+# Tools
+tavily-python==0.3.3
+arxiv==2.1.0
+
+# Additional utilities
+requests==2.31.0
+tiktoken==0.5.2
+pydantic==2.6.1
+numpy<2.0.0
+scikit-learn==1.4.0

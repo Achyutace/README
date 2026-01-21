@@ -15,14 +15,17 @@ README AI 辅助阅读应用 - Flask 后端服务
 
 import os
 import shutil
-from flask import Flask, request, jsonify
+import json
+from pathlib import Path
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 from services.pdf_service import PdfService
-from services.ai_service import AiService
-from services.chat_service import ChatService
+from services.chat_service import ChatService 
+from services.rag_service import RAGService
+from services.agent_service import AcademicAgentService
 
 # 加载环境变量（如 OpenAI API Key）
 load_dotenv()
@@ -33,21 +36,87 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================== 应用配置 ====================
-# 设置 PDF 上传目录为 backend/uploads/
-app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
+# 获取项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent
+STORAGE_ROOT = PROJECT_ROOT / 'storage'
+
+# 创建存储目录结构
+(STORAGE_ROOT / 'users').mkdir(parents=True, exist_ok=True)
+(STORAGE_ROOT / 'shared').mkdir(parents=True, exist_ok=True)
+(STORAGE_ROOT / 'temp').mkdir(parents=True, exist_ok=True)
+
+# 配置路径
+app.config['STORAGE_ROOT'] = str(STORAGE_ROOT)
+app.config['USERS_FOLDER'] = str(STORAGE_ROOT / 'users')
+app.config['SHARED_FOLDER'] = str(STORAGE_ROOT / 'shared')
+app.config['TEMP_FOLDER'] = str(STORAGE_ROOT / 'temp')
 # 限制上传文件最大为 50MB
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-# 确保上传目录存在，不存在则创建
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+def get_user_id():
+    """
+    从请求中获取用户ID
+    优先级：Header > Query Parameter > Default
+    """
+    # 从 Header
+    user_id = request.headers.get('X-User-Id')
+    if user_id:
+        return user_id
+    
+    # 从查询参数获取
+    user_id = request.args.get('userId')
+    if user_id:
+        return user_id
+    
+    # 默认用户（开发环境）
+    return 'default_user'
+
+
+def get_user_storage_path(user_id: str) -> Path:
+    """
+    获取用户的存储根目录
+    自动创建必要的子目录
+    """
+    user_path = Path(app.config['USERS_FOLDER']) / user_id
+    
+    # 创建用户目录结构
+    (user_path / 'uploads').mkdir(parents=True, exist_ok=True)
+    (user_path / 'cache' / 'paragraphs').mkdir(parents=True, exist_ok=True)
+    (user_path / 'cache' / 'translations').mkdir(parents=True, exist_ok=True)
+    (user_path / 'cache' / 'images').mkdir(parents=True, exist_ok=True)
+    (user_path / 'uploads' / 'vectors').mkdir(parents=True, exist_ok=True)
+    (user_path / 'metadata').mkdir(parents=True, exist_ok=True)
+    
+    return user_path
+
+
+def get_pdf_service_for_user(user_id: str) -> PdfService:
+    """
+    为指定用户创建 PdfService 实例
+    """
+    user_path = get_user_storage_path(user_id)
+    upload_folder = str(user_path / 'uploads')
+    cache_folder = str(user_path / 'cache')
+    return PdfService(upload_folder, cache_folder)
+
+
+@app.before_request
+def before_request():
+    """
+    在每个请求前执行，设置用户上下文
+    """
+    g.user_id = get_user_id()
+    g.user_path = get_user_storage_path(g.user_id)
+
 
 # ==================== 服务实例化 ====================
-# PDF 服务：负责文件存储、文本提取等
-pdf_service = PdfService(app.config['UPLOAD_FOLDER'])
-# AI 服务：负责调用 OpenAI API 实现各种 AI 功能
-ai_service = AiService()
 # 聊天服务：负责管理聊天会话和消息历史
 chat_service = ChatService()
+# RAG 服务：负责文档索引和检索
+rag_service = RAGService()
+# Agent 服务：负责智能对话和工具调用
+agent_service = AcademicAgentService(rag_service)
 
 
 @app.route('/api/health', methods=['GET'])
@@ -56,7 +125,11 @@ def health_check():
     健康检查接口
     用于确认服务是否正常运行
     """
-    return jsonify({'status': 'ok'})
+    return jsonify({
+        'status': 'ok',
+        'userId': g.user_id,
+        'userPath': str(g.user_path)
+    })
 
 
 # ==================== PDF 相关路由 ====================
@@ -67,12 +140,15 @@ def upload_pdf():
     上传 PDF 文件接口
     
     请求：multipart/form-data，包含 'file' 字段
+    请求头（可选）：X-User-Id（用户标识）
+    查询参数（可选）：userId（用户标识）
     
     返回：
     {
         "id": "唯一标识符",
         "filename": "文件名",
-        "pageCount": 总页数
+        "pageCount": 总页数,
+        "userId": "用户ID"
     }
     
     错误码：
@@ -93,9 +169,30 @@ def upload_pdf():
         return jsonify({'error': 'Only PDF files are allowed'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 调用 PDF 服务保存并处理文件
         # 返回包含 id, filename, pageCount 的字典
         result = pdf_service.save_and_process(file)
+        
+        # 索引到 RAG 系统
+        pdf_id = result['id']
+        filepath = pdf_service.get_filepath(pdf_id)
+        
+        try:
+            index_result = rag_service.index_paper(
+                pdf_path=filepath,
+                paper_id=pdf_id,
+                user_id=g.user_id
+            )
+            result['indexed'] = True
+            result['chunks'] = index_result.get('chunks_created', 0)
+        except Exception as e:
+            print(f"RAG indexing warning: {e}")
+            result['indexed'] = False
+        
+        result['userId'] = g.user_id
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -128,6 +225,9 @@ def get_pdf_text(pdf_id):
     404 - PDF 文件不存在
     500 - 文本提取失败
     """
+    # 获取当前用户的 PDF 服务实例
+    pdf_service = get_pdf_service_for_user(g.user_id)
+    
     # 获取可选的页码参数
     page = request.args.get('page', type=int)
     try:
@@ -154,6 +254,9 @@ def get_pdf_info(pdf_id):
         "fileSize": 文件大小（字节）
     }
     """
+    # 获取当前用户的 PDF 服务实例
+    pdf_service = get_pdf_service_for_user(g.user_id)
+    
     try:
         result = pdf_service.get_info(pdf_id)
         return jsonify(result)
@@ -211,6 +314,9 @@ def generate_roadmap():
         return jsonify({'error': 'pdfId is required'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 提取 PDF 的全文本内容
         text = pdf_service.extract_text(pdf_id)['text']
         # 调用 AI 服务生成路线图
@@ -256,6 +362,9 @@ def generate_summary():
         return jsonify({'error': 'pdfId is required'}), 400
 
     try:
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
+        
         # 提取 PDF 的全文本内容
         text = pdf_service.extract_text(pdf_id)['text']
         # 调用 AI 服务生成摘要
@@ -309,7 +418,10 @@ def translate_text():
 @app.route('/api/ai/chat', methods=['POST'])
 def chat():
     """
-    智能对话接口（RAG - Retrieval Augmented Generation）
+    智能对话接口（RAG - Retrieval Augmented Generation）【已废弃】
+    
+    请使用 /api/agent/chat 或 /api/agent/chat/stream 代替
+    这是旧版本的简单 RAG 实现，新版本使用 Agent 框架，支持工具调用
     
     基于 PDF 内容进行上下文感知的问答对话
     AI 会参考文档内容回答用户问题，并提供引用来源
@@ -359,6 +471,8 @@ def chat():
         # 获取历史消息作为上下文
         history = chat_service.get_messages(session_id)
         history_for_ai = [{'role': m['role'], 'content': m['content']} for m in history[:-1]]  # 排除刚添加的消息
+        # 获取当前用户的 PDF 服务实例
+        pdf_service = get_pdf_service_for_user(g.user_id)
         
         # 提取 PDF 的全文本作为上下文
         text = pdf_service.extract_text(pdf_id)['text']
@@ -379,106 +493,182 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 
-# ==================== 聊天会话管理路由 ====================
+# ==================== Agent 智能对话接口 ====================
 
-@app.route('/api/chat/sessions', methods=['GET'])
-def list_chat_sessions():
+@app.route('/api/agent/chat', methods=['POST'])
+def agent_chat():
     """
-    获取聊天会话列表
+    Agent 智能对话接口（新版）
     
-    查询参数：
-    - pdfId: 可选，筛选特定PDF的会话
-    
-    返回：
-    {
-        "sessions": [
-            {
-                "id": "会话ID",
-                "pdfId": "PDF ID",
-                "title": "会话标题",
-                "createdAt": "创建时间",
-                "updatedAt": "更新时间",
-                "messageCount": 消息数量
-            }
-        ]
-    }
-    """
-    pdf_id = request.args.get('pdfId')
-    sessions = chat_service.list_sessions(pdf_id)
-    return jsonify({'sessions': sessions})
-
-
-@app.route('/api/chat/sessions', methods=['POST'])
-def create_chat_session():
-    """
-    创建新的聊天会话
+    使用 Agent 框架实现的高级对话系统：
+    - 自动检索本地知识库
+    - 智能判断是否需要外部工具
+    - 支持联网搜索、论文查找、论文抓取等工具
+    - 提供详细的引用来源
     
     请求体：
     {
-        "pdfId": "PDF 标识符",
-        "title": "会话标题（可选）"
+        "message": "用户问题",
+        "userId": "用户ID（可选，默认 'default'）",
+        "pdfId": "当前阅读的 PDF ID（可选）",
+        "history": [  // 可选，历史对话记录
+            {
+                "role": "user" | "assistant",
+                "content": "对话内容"
+            }
+        ]
     }
     
     返回：
     {
-        "session": {
-            "id": "会话ID",
-            "pdfId": "PDF ID",
-            "title": "会话标题",
-            "createdAt": "创建时间",
-            "updatedAt": "更新时间",
-            "messageCount": 0
+        "response": "AI 的回答内容",
+        "citations": [  // 引用来源
+            {
+                "source": "local" | "external",
+                "page": 页码,
+                "section": "章节",
+                "text": "引用文本"
+            }
+        ],
+        "steps": ["执行步骤1", "执行步骤2", ...],
+        "context_used": {
+            "local_chunks": 3,
+            "external_sources": 1
         }
     }
+    
+    错误码：
+    400 - 缺少必需参数
+    500 - 服务调用失败
     """
     data = request.get_json()
+    message = data.get('message')
+    user_id = data.get('userId', 'default')
     pdf_id = data.get('pdfId')
-    title = data.get('title')
-    
-    if not pdf_id:
-        return jsonify({'error': 'pdfId is required'}), 400
-    
-    session = chat_service.create_session(pdf_id, title)
-    return jsonify({'session': session})
+    history = data.get('history', [])
+
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+
+    try:
+        result = agent_service.chat(
+            user_query=message,
+            user_id=user_id,
+            paper_id=pdf_id,
+            chat_history=history
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/chat/sessions/<session_id>', methods=['GET'])
-def get_chat_session(session_id):
+@app.route('/api/agent/chat/stream', methods=['POST'])
+def agent_chat_stream():
     """
-    获取特定会话的详细信息和消息历史
+    Agent 流式对话接口
+    
+    与 /api/agent/chat 功能相同，但使用 Server-Sent Events (SSE) 流式返回
+    可以实时看到 Agent 的执行过程（检索、工具调用、生成等）
+    
+    请求体：与 /api/agent/chat 相同
+    
+    返回：SSE 流
+    
+    事件类型：
+    - step: 中间步骤更新
+      data: {"type": "step", "step": "正在检索...", "data": {...}}
+    
+    - final: 最终结果
+      data: {"type": "final", "response": "...", "citations": [...], "steps": [...]}
+    
+    - error: 错误
+      data: {"type": "error", "error": "错误信息"}
+    """
+    data = request.get_json()
+    message = data.get('message')
+    user_id = data.get('userId', 'default')
+    pdf_id = data.get('pdfId')
+    history = data.get('history', [])
+
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+
+    def generate():
+        """SSE 生成器"""
+        try:
+            for event in agent_service.stream_chat(
+                user_query=message,
+                user_id=user_id,
+                paper_id=pdf_id,
+                chat_history=history
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return app.response_class(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+# ==================== RAG 管理接口 ====================
+
+@app.route('/api/rag/stats', methods=['GET'])
+def rag_stats():
+    """
+    获取 RAG 知识库统计信息
+    
+    查询参数：
+    - userId: 用户ID（可选，默认 'default'）
     
     返回：
     {
-        "session": {会话信息},
-        "messages": [消息列表]
+        "collection_name": "user_default",
+        "total_chunks": 150,
+        "papers_indexed": 5
     }
     """
-    session = chat_service.get_session(session_id)
-    if not session:
-        return jsonify({'error': 'Session not found'}), 404
+    user_id = request.args.get('userId', 'default')
     
-    messages = chat_service.get_messages(session_id)
-    return jsonify({
-        'session': session,
-        'messages': messages
-    })
+    try:
+        stats = rag_service.get_collection_stats(user_id)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/chat/sessions/<session_id>', methods=['DELETE'])
-def delete_chat_session(session_id):
+@app.route('/api/rag/delete/<pdf_id>', methods=['DELETE'])
+def delete_from_rag(pdf_id):
     """
-    删除聊天会话
+    从 RAG 知识库删除论文
+    
+    路径参数：
+    - pdf_id: PDF 标识符
+    
+    查询参数：
+    - userId: 用户ID（可选，默认 'default'）
     
     返回：
     {
-        "success": true
+        "success": true,
+        "message": "Paper deleted from knowledge base"
     }
     """
-    success = chat_service.delete_session(session_id)
-    if not success:
-        return jsonify({'error': 'Session not found'}), 404
+    user_id = request.args.get('userId', 'default')
     
-    return jsonify({'success': True})
+    try:
+        success = rag_service.delete_paper(pdf_id, user_id)
+        if success:
+            return jsonify({'success': True, 'message': 'Paper deleted from knowledge base'})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to delete paper'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ==================== 工具函数 ====================
