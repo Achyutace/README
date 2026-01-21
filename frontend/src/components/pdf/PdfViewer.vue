@@ -172,6 +172,7 @@ async function renderPage(pageNumber: number) {
   // 文字层和链接层使用逻辑尺寸
   refs.textLayer.style.width = `${Math.floor(viewport.width)}px`
   refs.textLayer.style.height = `${Math.floor(viewport.height)}px`
+  refs.textLayer.style.setProperty('--scale-factor', `${viewport.scale}`)
   refs.textLayer.innerHTML = '' // 重绘前清空文字层
   
   // 链接层同样使用逻辑尺寸（复用 renderLinkLayer 内部逻辑，也可以在此显式重置防止闪烁）
@@ -259,9 +260,16 @@ function appendInternalLinkOverlay(container: HTMLElement, rect: LinkOverlayRect
   link.style.height = `${rect.height}px`
   link.style.position = 'absolute'
   link.className = 'hover:bg-blue-200/30 cursor-pointer internal-link'
+  
+  // 防止与容器的点击处理冲突
+  link.addEventListener('mousedown', (e) => {
+    e.stopPropagation()
+  })
+  
   link.addEventListener('click', (e) => {
     e.preventDefault()
     e.stopPropagation()
+    console.log('Jumping to page:', destPage)
     pdfStore.goToPage(destPage)
   })
   container.appendChild(link)
@@ -690,6 +698,7 @@ onBeforeUnmount(() => {
                 v-for="(rect, idx) in hl.rects"
                 :key="`${hl.id}-${idx}`"
                 class="highlight-rect absolute pointer-events-none"
+                :class="{ 'selected': pdfStore.selectedHighlight?.id === hl.id }"
                 :style="{
                   left: `${rect.left * 100}%`,
                   top: `${rect.top * 100}%`,
@@ -752,6 +761,11 @@ onBeforeUnmount(() => {
   background: rgba(255, 235, 59, 0.4);
   border-radius: 4px;
 }
+.highlight-rect.selected {
+  border: 2px dashed #4a5568; /* 选中时显示虚线边框 */
+  box-shadow: 0 0 4px rgba(0,0,0,0.1);
+}
+
 
 :deep(.textLayer span) {
   cursor: text; /* 文字层中文字光标样式 */
