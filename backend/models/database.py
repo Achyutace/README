@@ -432,6 +432,62 @@ class Database:
         
         return paragraph_id
     
+    def add_paragraphs_batch(self, file_hash: str, paragraphs: List[Dict]) -> int:
+        """
+        批量添加段落
+        
+        Args:
+            file_hash: 文件哈希值
+            paragraphs: 段落列表，每个段落包含:
+                - page: 页码
+                - index: 段落索引（可选，默认使用列表索引）
+                - content: 原文内容
+                - bbox: 边界框坐标（可选）
+                
+        Returns:
+            成功添加的段落数量
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        added_count = 0
+        
+        try:
+            for para in paragraphs:
+                page_number = para.get('page', 1)
+                paragraph_index = para.get('index', 0)
+                original_text = para.get('content', '')
+                bbox = para.get('bbox')
+                
+                if not original_text:
+                    continue
+                
+                try:
+                    cursor.execute('''
+                        INSERT INTO pdf_paragraphs 
+                        (file_hash, page_number, paragraph_index, original_text, bbox)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (file_hash, page_number, paragraph_index, original_text,
+                          json.dumps(bbox) if bbox else None))
+                    added_count += 1
+                except sqlite3.IntegrityError:
+                    # 段落已存在，更新内容
+                    cursor.execute('''
+                        UPDATE pdf_paragraphs 
+                        SET original_text = ?, bbox = ?, updated_time = CURRENT_TIMESTAMP
+                        WHERE file_hash = ? AND page_number = ? AND paragraph_index = ?
+                    ''', (original_text, json.dumps(bbox) if bbox else None,
+                          file_hash, page_number, paragraph_index))
+                    added_count += 1
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+        
+        return added_count
+    
     def update_paragraph_translation(self, file_hash: str, page_number: int,
                                     paragraph_index: int, translation_text: str):
         """

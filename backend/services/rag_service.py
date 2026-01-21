@@ -38,16 +38,24 @@ class RAGService:
     """
     
     def __init__(self, 
-                 chroma_dir: str = "./storage/chroma_db"):
+                 chroma_dir: str = "./storage/chroma_db",
+                 api_base: str = None):
         """
         Args:
             chroma_dir: Chroma 数据库目录
+            api_base: OpenAI API 基础 URL (可选,例如使用代理或其他兼容服务)
         """
         self.chroma_dir = chroma_dir
         
         # 嵌入模型
         if HAS_OPENAI and os.getenv('OPENAI_API_KEY'):
-            self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+            embedding_kwargs = {
+                "model": "text-embedding-3-small"
+            }
+            if api_base or os.getenv('OPENAI_API_BASE'):
+                embedding_kwargs["openai_api_base"] = api_base or os.getenv('OPENAI_API_BASE')
+            
+            self.embeddings = OpenAIEmbeddings(**embedding_kwargs)
             self.has_embeddings = True
         else:
             self.embeddings = None

@@ -30,6 +30,13 @@ class PdfService:
             self.cache_folder = cache_folder
         else:
             self.cache_folder = os.path.join(os.path.dirname(upload_folder), 'cache')
+        
+        # 确保缓存目录存在
+        os.makedirs(self.cache_folder, exist_ok=True)
+        
+        # 设置段落缓存子目录
+        self.paragraphs_cache = os.path.join(self.cache_folder, 'paragraphs')
+        os.makedirs(self.paragraphs_cache, exist_ok=True)
 
     def _find_filepath_by_id(self, pdf_id: str) -> str:
         """
