@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue'
 import { useAiStore } from '../../stores/ai'
+import { useLibraryStore } from '../../stores/library'
 
 const aiStore = useAiStore()
+const libraryStore = useLibraryStore()
 
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -134,27 +136,47 @@ const toggleHistoryPanel = () => {
 }
 
 const loadChatSessions = async () => {
-  // TODO: Call API to load chat sessions
-  // Mock data for now
-  chatSessions.value = [
-    { id: '1', title: 'Chain-of-Thought 推理', updatedAt: '2026-01-21T07:30:00', messageCount: 5 },
-    { id: '2', title: 'Unlearning 方法', updatedAt: '2026-01-21T06:15:00', messageCount: 3 },
-    { id: '3', title: 'VLA 架构分析', updatedAt: '2026-01-20T18:45:00', messageCount: 8 },
-  ]
+  try {
+    const response = await fetch('http://localhost:5000/api/chat/sessions')
+    const data = await response.json()
+    chatSessions.value = data.sessions || []
+  } catch (error) {
+    console.error('Failed to load chat sessions:', error)
+    chatSessions.value = []
+  }
 }
 
-const createNewChat = () => {
+const createNewChat = async () => {
   currentSessionId.value = null
   aiStore.clearChat()
   showHistoryPanel.value = false
 }
 
-const loadChatSession = (sessionId: string) => {
-  // TODO: Call API to load session messages
-  currentSessionId.value = sessionId
-  showHistoryPanel.value = false
-  // Mock: load messages for this session
-  console.log('Loading session:', sessionId)
+const loadChatSession = async (sessionId: string) => {
+  try {
+    const response = await fetch(`http://localhost:5000/api/chat/sessions/${sessionId}`)
+    const data = await response.json()
+    
+    currentSessionId.value = sessionId
+    
+    // Clear current messages and load history
+    aiStore.clearChat()
+    
+    // Add messages to store
+    if (data.messages && data.messages.length > 0) {
+      data.messages.forEach((msg: any) => {
+        aiStore.addChatMessage({
+          role: msg.role,
+          content: msg.content,
+          citations: msg.citations || []
+        })
+      })
+    }
+    
+    showHistoryPanel.value = false
+  } catch (error) {
+    console.error('Failed to load chat session:', error)
+  }
 }
 
 const formatTime = (timestamp: string) => {
@@ -182,10 +204,16 @@ async function sendMessage(message?: string) {
   const content = message || inputMessage.value.trim()
   if (!content) return
 
-  // Add user message
+  // Get current PDF ID from library store
+  const pdfId = libraryStore.currentDocument?.id
+  if (!pdfId) {
+    console.error('No PDF selected')
+    return
+  }
+
   aiStore.addChatMessage({
     role: 'user',
-    content
+    content,
   })
 
   inputMessage.value = ''
@@ -195,27 +223,40 @@ async function sendMessage(message?: string) {
   await nextTick()
   scrollToBottom()
 
-  // Simulate AI response (in production, call API)
-  await new Promise(resolve => setTimeout(resolve, 1500))
+  try {
+    // Call backend API
+    const response = await fetch('http://localhost:5000/api/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        pdfId,
+        sessionId: currentSessionId.value,
+        message: content
+      })
+    })
 
-  // Mock AI response
-  const mockResponses: Record<string, string> = {
-    '这篇文章的核心是什么？': '这篇文章主要研究大型语言模型中 Chain-of-Thought (CoT) 推理的可信度问题。核心问题是：当模型展示其"思考过程"时，这些推理步骤是否真实反映了模型的内部计算过程，还是仅仅是看起来合理的事后解释。',
-    '这篇论文有什么创新点？': '主要创新点包括：\n1. 系统性地定义和分析了 CoT 忠实度的概念\n2. 提出了评估推理链忠实程度的实验框架\n3. 发现了模型可能生成"不忠实"推理的具体情况',
-    '有什么局限性或不足？': '论文的主要局限性包括：\n1. 实验主要基于特定类型的任务，可能无法推广到所有场景\n2. 评估忠实度的方法本身存在一定的主观性\n3. 尚未提出完整的解决方案来确保 CoT 的忠实性',
-    '请解释主要的研究方法': '研究方法主要包括：\n1. 设计对照实验，比较模型在不同条件下的推理行为\n2. 分析推理链中的关键步骤与最终答案的关联性\n3. 通过干预实验测试推理步骤是否真正影响模型决策'
+    const data = await response.json()
+    
+    // Update session ID if it's a new chat
+    if (data.sessionId && !currentSessionId.value) {
+      currentSessionId.value = data.sessionId
+    }
+
+    aiStore.addChatMessage({
+      role: 'assistant',
+      content: data.response,
+      citations: data.citations || []
+    })
+  } catch (error) {
+    console.error('Failed to send message:', error)
+    aiStore.addChatMessage({
+      role: 'assistant',
+      content: '抱歉，发生错误，请稍后重试。',
+      citations: []
+    })
   }
-
-  let response = mockResponses[content]
-  if (!response) {
-    response = `关于"${content}"，这是一个很好的问题。基于论文内容，我的理解是...\n\n[这是一个演示回复，实际使用时会基于 RAG 检索论文内容生成回答]`
-  }
-
-  aiStore.addChatMessage({
-    role: 'assistant',
-    content: response,
-    citations: [{ pageNumber: 1, text: '相关引用段落...' }]
-  })
 
   aiStore.isLoadingChat = false
 
@@ -251,7 +292,7 @@ defineExpose({
       <!-- New Chat Button - Minimalist premium style -->
       <button
         @click="createNewChat"
-        class="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm hover:bg-white border border-gray-200/60 text-gray-700 hover:text-gray-900 rounded-xl transition-all duration-200 shadow-sm hover:shadow"
+        class="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-[#2d2d30] backdrop-blur-sm hover:bg-white dark:hover:bg-[#3e3e42] border border-gray-200/60 dark:border-gray-700/60 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-xl transition-all duration-200 shadow-sm hover:shadow"
         title="新对话"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,17 +309,17 @@ defineExpose({
       @click="showHistoryPanel = false"
     >
       <div
-        class="absolute right-0 top-0 bottom-0 w-80 bg-white/95 backdrop-blur-md shadow-2xl border-l border-gray-200/50"
+        class="absolute right-0 top-0 bottom-0 w-80 bg-white/95 dark:bg-[#252526] backdrop-blur-md shadow-2xl border-l border-gray-200/50 dark:border-gray-800/50"
         @click.stop
       >
         <!-- History Header - Premium style -->
-        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 class="text-sm font-semibold text-gray-800 tracking-wide">聊天记录</h3>
+        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200 tracking-wide">聊天记录</h3>
           <button
             @click="showHistoryPanel = false"
-            class="p-1.5 hover:bg-gray-100 rounded-lg transition-all duration-200"
+            class="p-1.5 hover:bg-gray-100 dark:hover:bg-[#3e3e42] rounded-lg transition-all duration-200"
           >
-            <svg class="w-4 h-4 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -293,12 +334,12 @@ defineExpose({
             v-for="session in chatSessions"
             :key="session.id"
             @click="loadChatSession(session.id)"
-            class="w-full text-left px-5 py-3.5 hover:bg-gray-50/80 border-b border-gray-50 transition-all duration-200 group"
+            class="w-full text-left px-5 py-3.5 hover:bg-gray-50/80 dark:hover:bg-[#2d2d30] border-b border-gray-50 dark:border-gray-800 transition-all duration-200 group"
           >
-            <div class="font-medium text-sm text-gray-800 truncate mb-1.5 group-hover:text-gray-900">
+            <div class="font-medium text-sm text-gray-800 dark:text-gray-200 truncate mb-1.5 group-hover:text-gray-900 dark:group-hover:text-white">
               {{ session.title }}
             </div>
-            <div class="flex items-center justify-between text-xs text-gray-400">
+            <div class="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
               <span>{{ session.messageCount }} 条消息</span>
               <span>{{ formatTime(session.updatedAt) }}</span>
             </div>
@@ -315,12 +356,12 @@ defineExpose({
       <!-- Empty State with Suggested Prompts - Centered premium design -->
       <div v-if="aiStore.chatMessages.length === 0" class="h-full flex flex-col justify-center items-center px-8">
         <div class="text-center mb-8">
-          <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
-            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-[#2d2d30] dark:to-[#3e3e42] flex items-center justify-center">
+            <svg class="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
           </div>
-          <p class="text-sm text-gray-500 font-medium">有什么想问的？</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">有什么想问的？</p>
         </div>
 
         <!-- Suggested Prompts - Centered with max width -->
@@ -329,7 +370,7 @@ defineExpose({
             v-for="prompt in suggestedPrompts"
             :key="prompt"
             @click="sendMessage(prompt)"
-            class="w-full text-center px-5 py-3.5 bg-white hover:bg-gray-50 border border-gray-100 hover:border-gray-200 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 shadow-sm hover:shadow"
+            class="w-full text-center px-5 py-3.5 bg-white dark:bg-[#2d2d30] hover:bg-gray-50 dark:hover:bg-[#3e3e42] border border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-all duration-200 shadow-sm hover:shadow"
           >
             {{ prompt }}
           </button>
@@ -348,7 +389,7 @@ defineExpose({
           <!-- User Message: Clean minimal bubble -->
           <div
             v-if="message.role === 'user'"
-            class="px-5 py-3.5 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100/80 text-gray-800 rounded-br-md border border-gray-100/50"
+            class="px-5 py-3.5 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100/80 dark:from-[#2d2d30] dark:to-[#3e3e42] text-gray-800 dark:text-gray-200 rounded-br-md border border-gray-100/50 dark:border-gray-700/50"
           >
             <p class="text-sm whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
           </div>
@@ -358,7 +399,7 @@ defineExpose({
             v-else
             class="space-y-3"
           >
-            <p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
+            <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
 
             <!-- Citations -->
             <div
@@ -394,7 +435,7 @@ defineExpose({
     </div>
 
     <!-- Input Area - Premium minimal style -->
-    <div class="p-4 border-t border-gray-100 bg-white/50 backdrop-blur-sm" @click.self="closeMenus">
+    <div class="p-4 border-t border-gray-100 dark:border-gray-800 bg-white/50 dark:bg-[#252526]/50 backdrop-blur-sm" @click.self="closeMenus">
       <!-- Preview boxes for selected references and files -->
       <div v-if="selectedReferences.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-1.5 mb-2">
         <!-- Reference previews -->
@@ -586,12 +627,12 @@ defineExpose({
           type="text"
           placeholder="输入问题..."
           @keyup.enter="sendMessage()"
-          class="flex-1 px-5 py-3 border border-gray-200 rounded-2xl focus:outline-none focus:border-gray-300 focus:ring-2 focus:ring-gray-100 text-sm bg-white transition-all duration-200"
+          class="flex-1 px-5 py-3 border border-gray-200 dark:border-gray-700 rounded-2xl focus:outline-none focus:border-gray-300 dark:focus:border-gray-600 focus:ring-2 focus:ring-gray-100 dark:focus:ring-gray-800 text-sm bg-white dark:bg-[#3e3e42] dark:text-gray-200 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
         />
         <button
           @click="sendMessage()"
           :disabled="!inputMessage.trim() || aiStore.isLoadingChat"
-          class="px-5 py-3 bg-gray-900 text-white rounded-2xl hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow"
+          class="px-5 py-3 bg-gray-900 dark:bg-[#0e639c] text-white rounded-2xl hover:bg-gray-800 dark:hover:bg-[#1177bb] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

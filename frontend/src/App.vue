@@ -8,10 +8,12 @@ import ChatTab from './components/ai-panel/ChatTab.vue'
 import { useLibraryStore } from './stores/library'
 import { useAiStore } from './stores/ai'
 import { usePdfStore } from './stores/pdf'
+import { useThemeStore } from './stores/theme'
 
 const libraryStore = useLibraryStore()
 const aiStore = useAiStore()
 const pdfStore = usePdfStore()
+const themeStore = useThemeStore()
 
 // Panel minimize states
 const topMinimized = ref(false)
@@ -157,7 +159,23 @@ const bottomPanelStyle = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50">
+  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
+    <!-- Theme Toggle Button - Fixed position -->
+    <button
+      @click="themeStore.toggleTheme()"
+      class="fixed top-4 right-4 z-50 p-2.5 rounded-lg bg-white/90 dark:bg-[#2d2d30] hover:bg-gray-100 dark:hover:bg-[#3e3e42] border border-gray-200/60 dark:border-gray-700/60 shadow-lg transition-all duration-200"
+      title="切换主题"
+    >
+      <!-- Sun icon (show in dark mode) -->
+      <svg v-if="themeStore.isDarkMode" class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+      </svg>
+      <!-- Moon icon (show in light mode) -->
+      <svg v-else class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+      </svg>
+    </button>
+    
     <!-- Left Sidebar - Library -->
     <LibrarySidebar class="flex-shrink-0" />
 
@@ -165,7 +183,7 @@ const bottomPanelStyle = computed(() => {
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- When both minimized: Top Row = Toolbar + Minimized Bars -->
       <template v-if="bothMinimized">
-        <div class="flex items-stretch bg-white/95 backdrop-blur-sm border-b border-gray-200/60 shadow-sm">
+        <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
           <!-- PDF Toolbar -->
           <div class="flex-1">
             <PdfToolbar v-if="pdfStore.currentPdfUrl" />
@@ -214,7 +232,7 @@ const bottomPanelStyle = computed(() => {
         <div class="flex flex-1 overflow-hidden">
           <!-- Left: PDF Viewer with its toolbar -->
           <div class="flex-1 flex flex-col overflow-hidden">
-            <div class="bg-white/95 backdrop-blur-sm border-b border-gray-200/60 shadow-sm">
+            <div class="bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
               <PdfToolbar v-if="pdfStore.currentPdfUrl" />
               <div v-else class="h-[49px]"></div>
             </div>
@@ -225,14 +243,14 @@ const bottomPanelStyle = computed(() => {
         <aside
           v-if="libraryStore.currentDocument && !bothMinimized"
           ref="sidebarRef"
-          class="flex flex-col border-l border-gray-200/60 bg-white/95 backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
+          class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
           :class="aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : ''"
           :style="!aiStore.isPanelCollapsed ? { width: effectiveSidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div
             v-if="!aiStore.isPanelCollapsed"
-            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 transition-colors z-50"
+            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-gray-600 transition-colors z-50"
             :class="{ 'bg-primary-500': isResizingWidth }"
             @mousedown="startWidthResize"
           >
@@ -241,7 +259,7 @@ const bottomPanelStyle = computed(() => {
 
           <!-- Top Panel: AI Panel -->
           <div 
-            class="flex flex-col border-b border-gray-200 overflow-hidden transition-all duration-200"
+            class="flex flex-col border-b border-gray-200 dark:border-gray-800 overflow-hidden transition-all duration-200"
             :style="topPanelStyle"
           >
             <!-- Minimized Bar for Top Panel -->
@@ -259,18 +277,18 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button -->
-              <div class="flex items-center px-3 py-2 border-b border-gray-100 bg-white">
+              <div class="flex items-center px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
                 <button
                   @click="toggleTopMinimize"
                   class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
                   title="最小化"
                 >
                   <!-- Triangle pointing down (to collapse) -->
-                  <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M7 10l5 5 5-5H7z"/>
                   </svg>
                 </button>
-                <span class="text-sm font-medium text-gray-700">AI 助手</span>
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">AI 助手</span>
               </div>
               <div class="flex-1 overflow-hidden">
                 <AiPanel />
@@ -290,7 +308,7 @@ const bottomPanelStyle = computed(() => {
 
           <!-- Bottom Panel: Chat Box -->
           <div 
-            class="flex flex-col overflow-hidden bg-gray-50 transition-all duration-200"
+            class="flex flex-col overflow-hidden bg-gray-50 dark:bg-[#1e1e1e] transition-all duration-200"
             :style="bottomPanelStyle"
           >
             <!-- Minimized Bar for Bottom Panel -->
@@ -308,7 +326,7 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button and History -->
-              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-white">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526]">
                 <div class="flex items-center">
                   <button
                     @click="toggleBottomMinimize"
@@ -320,15 +338,15 @@ const bottomPanelStyle = computed(() => {
                       <path d="M7 10l5 5 5-5H7z"/>
                     </svg>
                   </button>
-                  <span class="text-sm font-medium text-gray-700">Chat & Ask</span>
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Chat & Ask</span>
                 </div>
                 <!-- History Button (Clock Icon) - Always visible -->
                 <button
-                  class="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                  class="p-1.5 hover:bg-gray-100 dark:hover:bg-[#3e3e42] rounded-lg transition-colors"
                   title="聊天记录"
                   @click="chatTabRef?.toggleHistoryPanel()"
                 >
-                  <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </button>
