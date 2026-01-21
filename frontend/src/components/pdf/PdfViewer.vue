@@ -14,7 +14,6 @@ import 'pdfjs-dist/web/pdf_viewer.css' // 引入 pdf.js 默认样式以展示文
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url' // 使用 ?url 显式引入 worker
 import { usePdfStore } from '../../stores/pdf' // 使用 Pinia 中的 PDF 状态仓库
 import { useLibraryStore } from '../../stores/library' // 使用 Pinia 中的文库状态仓库
-import PdfToolbar from './PdfToolbar.vue' // 导入顶部工具栏组件
 import TextSelectionTooltip from './TextSelectionTooltip.vue' // 导入文字选中提示组件
 
 GlobalWorkerOptions.workerSrc = pdfWorker // 设置 pdf.js 全局 worker 路径
@@ -352,9 +351,6 @@ onBeforeUnmount(() => {
 <template>
   <!-- 组件根容器，纵向排列，占满可用高度 -->
   <div class="flex flex-col h-full bg-gray-100">
-    <!-- PDF 工具栏，提供缩放与导航等控制 -->
-    <PdfToolbar />
-
     <!-- 主内容区，显示 PDF 页面的滚动容器 -->
     <div
       v-if="pdfStore.currentPdfUrl" 

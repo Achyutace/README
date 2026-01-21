@@ -9,23 +9,9 @@ const aiStore = useAiStore()
 </script>
 
 <template>
-  <aside class="w-96 h-full bg-white border-l border-gray-200 flex flex-col">
-    <!-- Header with Tabs -->
+  <div class="h-full bg-white flex flex-col">
+    <!-- Tab Navigation (no header, handled by parent) -->
     <div class="border-b border-gray-200">
-      <div class="flex items-center justify-between px-4 py-3">
-        <h2 class="text-lg font-semibold text-gray-800">AI 助手</h2>
-        <button
-          @click="aiStore.togglePanel"
-          class="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-          title="收起面板"
-        >
-          <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
-
-      <!-- Tab Navigation -->
       <div class="flex px-2">
         <button
           v-for="tab in aiStore.tabs"
@@ -49,5 +35,5 @@ const aiStore = useAiStore()
       <SummaryTab v-else-if="aiStore.activeTab === 'summary'" />
       <TranslationTab v-else-if="aiStore.activeTab === 'translation'" />
     </div>
-  </aside>
+  </div>
 </template>

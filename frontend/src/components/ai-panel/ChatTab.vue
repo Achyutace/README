@@ -222,24 +222,28 @@ watch(() => aiStore.chatMessages.length, () => {
           v-for="message in aiStore.chatMessages"
           :key="message.id"
           :class="[
-            'max-w-[85%]',
-            message.role === 'user' ? 'ml-auto' : 'mr-auto'
+            message.role === 'user' ? 'max-w-[85%] ml-auto' : 'w-full'
           ]"
         >
+          <!-- User Message: lighter bubble -->
           <div
-            :class="[
-              'px-4 py-3 rounded-2xl',
-              message.role === 'user'
-                ? 'bg-primary-600 text-white rounded-br-md'
-                : 'bg-gray-100 text-gray-800 rounded-bl-md'
-            ]"
+            v-if="message.role === 'user'"
+            class="px-4 py-3 rounded-2xl bg-primary-100 text-primary-900 rounded-br-md"
           >
             <p class="text-sm whitespace-pre-wrap">{{ message.content }}</p>
+          </div>
+          
+          <!-- Assistant Message: no frame, like normal text -->
+          <div
+            v-else
+            class="px-2 py-2"
+          >
+            <p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
 
             <!-- Citations -->
             <div
               v-if="message.citations && message.citations.length > 0"
-              class="mt-2 pt-2 border-t border-gray-200"
+              class="mt-3 pt-2 border-t border-gray-200"
             >
               <p class="text-xs text-gray-500 mb-1">引用来源：</p>
               <button
@@ -252,7 +256,7 @@ watch(() => aiStore.chatMessages.length, () => {
               </button>
             </div>
           </div>
-          <p class="text-xs text-gray-400 mt-1 px-1">
+          <p class="text-xs text-gray-400 mt-1 px-1" :class="message.role === 'user' ? 'text-right' : ''">
             {{ message.timestamp.toLocaleTimeString() }}
           </p>
         </div>
