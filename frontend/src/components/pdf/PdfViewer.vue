@@ -283,6 +283,20 @@ function normalizeUrl(raw: string): string | null {
   // 去掉末尾标点避免误判
   trimmed = trimmed.replace(/[),.;:]+$/g, '')
 
+  // 关键修复：如果URL包含有效扩展名，截断扩展名之后的内容
+  // 例如 "example.com/page.html.Y.Bengio" -> "example.com/page.html"
+  // 例如 "example.com/page.htmlY" -> "example.com/page.html"
+  const validExtPattern = /^(.*?\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt|shtml))([^a-z].*)?$/i
+  const extMatch = trimmed.match(validExtPattern)
+  if (extMatch) {
+    // 找到有效扩展名，检查后面是否有多余内容
+    const afterExt = extMatch[3] || ''
+    // 如果扩展名后面跟着非URL路径字符（如大写字母、点号等），截断
+    if (afterExt && /^[.A-Z\s]/.test(afterExt)) {
+      trimmed = extMatch[1]
+    }
+  }
+
   // 修复PDF跨行URL问题：移除末尾错误包含的作者名或其他非URL内容
   // 模式1：数字后面跟着 .大写字母 结尾（作者引用开始，如 "1472.B"）
   trimmed = trimmed.replace(/(\d+[-\d]*)\.[A-Z]$/g, '$1')
@@ -291,8 +305,7 @@ function normalizeUrl(raw: string): string | null {
   trimmed = trimmed.replace(/\.[A-Z]{1,3}$/g, '')
 
   // 模式3：末尾是 .单词 格式但单词不像是URL路径（如 ".Zhang", ".Smith"）
-  // 常见URL路径结尾：.html, .pdf, .php, .asp, .js, .css, .json, .xml 等
-  const validExtensions = /\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt)$/i
+  const validExtensions = /\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt|shtml)$/i
   if (!validExtensions.test(trimmed)) {
     // 如果末尾是 .单词 但不是常见扩展名，可能是误包含的作者名
     trimmed = trimmed.replace(/\.[A-Z][a-z]+$/g, '')
