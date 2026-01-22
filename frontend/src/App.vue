@@ -351,7 +351,7 @@ const bottomPanelStyle = computed(() => {
             :class="{ 'bg-primary-500': isResizingSplit }"
             @mousedown="startSplitResize"
           >
-            <div class="absolute -top-1 -bottom-1 left-0 right-0"></div>
+            <div class="absolute -top-1 -bottom-1 left-0 right-0 dark:bg-gray-800"></div>
           </div>
 
           <!-- Bottom Panel: Chat Box -->

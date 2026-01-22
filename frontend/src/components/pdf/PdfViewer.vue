@@ -948,16 +948,6 @@ onBeforeUnmount(() => {
 <template>
   <!-- 组件根容器，纵向排列，占满可用高度 -->
   <div class="flex flex-col h-full bg-gray-100 relative">
-    <!-- 预加载进度条 -->
-    <div
-      v-if="isPreloading && preloadProgress < 100"
-      class="absolute top-0 left-0 right-0 z-20 h-1 bg-gray-200"
-    >
-      <div
-        class="h-full bg-blue-500 transition-all duration-300"
-        :style="{ width: preloadProgress + '%' }"
-      ></div>
-    </div>
     <!-- 主内容区，显示 PDF 页面的滚动容器 -->
     <div
       v-if="pdfStore.currentPdfUrl"

@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useLibraryStore } from '../../stores/library'
+import MarkdownIt from 'markdown-it'
+
+// 初始化 markdown-it
+const md = new MarkdownIt({
+  html: false,        // 禁用 HTML 标签
+  breaks: true,       // 将换行符转换为 <br>
+  linkify: true,      // 自动识别链接
+  typographer: true,  // 启用智能引号等排版功能
+})
 
 interface NoteCard {
   id: string
@@ -90,19 +99,10 @@ function getFirstLine(text: string): string {
   return firstLine
 }
 
-// Simple markdown renderer (basic support, no bold/italic)
+// 使用 markdown-it 渲染
 function renderMarkdown(text: string): string {
   if (!text) return ''
-
-  return text
-    // Headers (H1 slightly larger, not drastically)
-    .replace(/^### (.+)$/gm, '<div class="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2 mb-1">$1</div>')
-    .replace(/^## (.+)$/gm, '<div class="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2 mb-1">$1</div>')
-    .replace(/^# (.+)$/gm, '<div class="text-sm font-medium text-gray-800 dark:text-gray-200 mt-2 mb-1">$1</div>')
-    // Code blocks
-    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 text-xs">$1</code>')
-    // Line breaks
-    .replace(/\n/g, '<br>')
+  return md.render(text)
 }
 
 // Expose addCard for parent component
@@ -110,7 +110,7 @@ defineExpose({ addCard })
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-white dark:bg-[#1a1a1a]">
+  <div class="h-full flex flex-col bg-white dark:bg-[#2d2d30]">
     <!-- Cards Container -->
     <div class="flex-1 overflow-y-auto py-2 space-y-1">
       <!-- Empty State -->
@@ -122,7 +122,7 @@ defineExpose({ addCard })
       <div
         v-for="card in cards"
         :key="card.id"
-        class="bg-white dark:bg-[#2d2d30] shadow-sm border-t border-b border-gray-200 dark:border-gray-700 overflow-hidden"
+        class="bg-white dark:bg-[#2d2d30] border-t border-b-0 border-gray-200 dark:border-gray-700 overflow-hidden"
       >
         <!-- Editing Mode -->
         <template v-if="card.isEditing">
@@ -180,34 +180,46 @@ defineExpose({ addCard })
               <div class="flex-1 px-3 text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
                 {{ card.title || '无标题' }}
               </div>
-              <!-- Collapse/Expand Button -->
-              <button
-                @click="toggleCollapse(card, $event)"
-                class="px-2 py-1 mr-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                :title="card.isCollapsed ? '展开' : '折叠'"
-              >
-                <svg
-                  class="w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform"
-                  :class="{ 'rotate-180': !card.isCollapsed }"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              <div class="flex items-center">
+                <!-- Delete Button -->
+                <button
+                  @click.stop="deleteCard(card.id)"
+                  class="p-1 mr-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors"
+                  title="删除"
                 >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+                  <svg class="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+                <!-- Collapse/Expand Button -->
+                <button
+                  @click="toggleCollapse(card, $event)"
+                  class="px-2 py-1 mr-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  :title="card.isCollapsed ? '展开' : '折叠'"
+                >
+                  <svg
+                    class="w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform"
+                    :class="{ 'rotate-180': !card.isCollapsed }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
             </div>
-            <div class="px-3 pb-2">
+            <div class="px-3 pb-2 border-b-0">
               <!-- Collapsed: show only first line -->
               <div
                 v-if="card.isCollapsed"
-                class="text-sm text-gray-600 dark:text-gray-400 truncate"
+                class="text-sm text-gray-600 dark:text-gray-400 truncate markdown-content"
                 v-html="renderMarkdown(getFirstLine(card.content)) || '<span class=\'text-gray-400\'>无内容</span>'"
               ></div>
               <!-- Expanded: show all content -->
               <div
                 v-else
-                class="text-sm text-gray-600 dark:text-gray-400"
+                class="text-sm text-gray-600 dark:text-gray-400 markdown-content"
                 v-html="renderMarkdown(card.content) || '<span class=\'text-gray-400\'>无内容</span>'"
               ></div>
             </div>
@@ -219,4 +231,63 @@ defineExpose({ addCard })
 </template>
 
 <style scoped>
+/* Markdown 渲染样式 */
+:deep(.markdown-content) {
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold text-gray-800 dark:text-gray-200 mt-3 mb-1;
+  }
+  h1 { @apply text-base; }
+  h2 { @apply text-sm; }
+  h3, h4, h5, h6 { @apply text-sm; }
+
+  p {
+    @apply my-1;
+  }
+
+  ul, ol {
+    @apply pl-4 my-1;
+  }
+  ul {
+    @apply list-disc;
+  }
+  ol {
+    @apply list-decimal;
+  }
+  li {
+    @apply my-0.5;
+  }
+
+  code {
+    @apply px-1 py-0.5 bg-gray-200 dark:bg-gray-700 text-xs rounded;
+  }
+
+  pre {
+    @apply bg-gray-100 dark:bg-gray-800 p-2 rounded my-2 overflow-x-auto;
+  }
+  pre code {
+    @apply bg-transparent p-0;
+  }
+
+  blockquote {
+    @apply border-l-2 border-gray-300 dark:border-gray-600 pl-2 my-2 text-gray-600 dark:text-gray-400 italic;
+  }
+
+  a {
+    @apply text-primary-600 dark:text-primary-500 hover:underline;
+  }
+
+  hr {
+    @apply my-2 border-gray-200 dark:border-gray-700;
+  }
+
+  table {
+    @apply w-full my-2 text-xs;
+  }
+  th, td {
+    @apply border border-gray-200 dark:border-gray-700 px-2 py-1;
+  }
+  th {
+    @apply bg-gray-100 dark:bg-gray-800;
+  }
+}
 </style>
