@@ -8,6 +8,9 @@ from typing import List, Dict, Optional
 
 from config import settings
 
+# 禁用 ChromaDB 遥测以避免错误
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 try:
     from langchain_openai import OpenAIEmbeddings
     HAS_OPENAI = True
