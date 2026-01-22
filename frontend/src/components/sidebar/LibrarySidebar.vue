@@ -157,7 +157,6 @@ function removeDocument(id: string, event: Event) {
         </div>
         <div v-if="!isCollapsed" class="flex-1">
           <p class="text-sm font-medium">用户</p>
-          <p class="text-xs text-gray-400">免费版</p>
         </div>
       </div>
     </div>
