@@ -28,7 +28,7 @@ async function handleFileUpload(event: Event) {
       try {
         const doc = await libraryStore.addDocument(file)
         libraryStore.selectDocument(doc.id)
-        pdfStore.setCurrentPdf(doc.url)
+        pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID
         aiStore.resetForNewDocument()
       } catch (error) {
         alert('上传失败，请确保后端服务已启动')
@@ -42,13 +42,14 @@ function selectDocument(id: string) {
   const doc = libraryStore.documents.find((d: { id: string }) => d.id === id)
   if (doc) {
     libraryStore.selectDocument(id)
-    pdfStore.setCurrentPdf(doc.url)
+    pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID
     aiStore.resetForNewDocument()
   }
 }
 
 function removeDocument(id: string, event: Event) {
   event.stopPropagation()
+  pdfStore.removeDocumentHighlights(id) // 删除文档时清理对应的高亮
   libraryStore.removeDocument(id)
 }
 </script>

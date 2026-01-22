@@ -111,6 +111,11 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
 watch(
   () => pdfStore.currentPdfUrl, // 监听当前 PDF 地址
   (url) => {
+    // 切换文档时重置UI状态
+    showTooltip.value = false
+    highlightsAtCurrentPoint.value = []
+    currentHighlightIndex.value = 0
+
     if (url) {
       loadPdf(url) // 地址存在则加载 PDF
     } else {
