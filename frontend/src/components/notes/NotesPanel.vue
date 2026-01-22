@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
 import { useLibraryStore } from '../../stores/library'
 
 interface NoteCard {
@@ -7,6 +7,7 @@ interface NoteCard {
   title: string
   content: string
   isEditing: boolean
+  isCollapsed: boolean
   createdAt: number
 }
 
@@ -15,14 +16,23 @@ const cards = ref<NoteCard[]>([])
 
 // Generate unique ID
 function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2)
+  return Date.now().toString(36) + Math.random().toString(36).substring(2)
 }
 
 // Load cards when document changes
 watch(() => libraryStore.currentDocument?.id, (newId) => {
   if (newId) {
     const savedCards = localStorage.getItem(`note-cards-${newId}`)
-    cards.value = savedCards ? JSON.parse(savedCards) : []
+    if (savedCards) {
+      // 兼容旧数据，添加 isCollapsed 默认值
+      const parsed = JSON.parse(savedCards)
+      cards.value = parsed.map((c: any) => ({
+        ...c,
+        isCollapsed: c.isCollapsed ?? false
+      }))
+    } else {
+      cards.value = []
+    }
   } else {
     cards.value = []
   }
@@ -42,6 +52,7 @@ function addCard() {
     title: '',
     content: '',
     isEditing: true,
+    isCollapsed: false,
     createdAt: Date.now()
   }
   cards.value.unshift(newCard)
@@ -60,9 +71,23 @@ function toggleEdit(card: NoteCard) {
   saveCards()
 }
 
+// Toggle collapse state
+function toggleCollapse(card: NoteCard, event: Event) {
+  event.stopPropagation()
+  card.isCollapsed = !card.isCollapsed
+  saveCards()
+}
+
 // Update card and save
 function updateCard() {
   saveCards()
+}
+
+// Get first line of content
+function getFirstLine(text: string): string {
+  if (!text) return ''
+  const firstLine = text.split('\n')[0] || ''
+  return firstLine
 }
 
 // Simple markdown renderer (basic support, no bold/italic)
@@ -73,32 +98,18 @@ function renderMarkdown(text: string): string {
     // Headers (H1 slightly larger, not drastically)
     .replace(/^### (.+)$/gm, '<div class="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2 mb-1">$1</div>')
     .replace(/^## (.+)$/gm, '<div class="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2 mb-1">$1</div>')
-    .replace(/^# (.+)$/gm, '<div class="text-base font-medium text-gray-800 dark:text-gray-200 mt-2 mb-1">$1</div>')
+    .replace(/^# (.+)$/gm, '<div class="text-sm font-medium text-gray-800 dark:text-gray-200 mt-2 mb-1">$1</div>')
     // Code blocks
-    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">$1</code>')
+    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 text-xs">$1</code>')
     // Line breaks
     .replace(/\n/g, '<br>')
 }
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-gray-100 dark:bg-[#1a1a1a]">
-    <!-- Header with Add Button -->
-    <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526] flex items-center justify-between">
-      <span class="text-xs text-gray-500 dark:text-gray-400">{{ cards.length }} 张卡片</span>
-      <button
-        @click="addCard"
-        class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-        title="添加卡片"
-      >
-        <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
-    </div>
-
+  <div class="h-full flex flex-col bg-white dark:bg-[#1a1a1a]">
     <!-- Cards Container -->
-    <div class="flex-1 overflow-y-auto p-2 space-y-1">
+    <div class="flex-1 overflow-y-auto py-2 space-y-1">
       <!-- Empty State -->
       <div v-if="cards.length === 0" class="flex items-center justify-center h-full">
         <div class="text-center">
@@ -116,39 +127,39 @@ function renderMarkdown(text: string): string {
       <div
         v-for="card in cards"
         :key="card.id"
-        class="bg-white dark:bg-[#2d2d30] rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden"
+        class="bg-white dark:bg-[#2d2d30] shadow-sm border-t border-b border-gray-200 dark:border-gray-700 overflow-hidden"
       >
         <!-- Editing Mode -->
         <template v-if="card.isEditing">
-          <div class="p-2">
+          <div class="py-2">
             <input
               v-model="card.title"
               @input="updateCard"
               type="text"
               placeholder="标题"
-              class="w-full px-2 py-1 text-sm font-medium bg-gray-50 dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-600 rounded outline-none focus:border-primary-400 text-gray-800 dark:text-gray-200 placeholder-gray-400"
+              class="w-full px-3 py-1 text-sm font-medium bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
             />
           </div>
           <div class="border-t border-gray-100 dark:border-gray-700"></div>
-          <div class="p-2">
+          <div class="py-2">
             <textarea
               v-model="card.content"
               @input="updateCard"
               placeholder="内容（支持 Markdown）"
               rows="4"
-              class="w-full px-2 py-1 text-sm bg-gray-50 dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-600 rounded outline-none focus:border-primary-400 resize-none text-gray-700 dark:text-gray-300 placeholder-gray-400"
+              class="w-full px-3 py-1 text-sm bg-transparent border-none outline-none resize-none text-gray-600 dark:text-gray-400 placeholder-gray-400"
             ></textarea>
           </div>
-          <div class="px-2 pb-2 flex justify-end gap-1">
+          <div class="px-3 pb-2 flex justify-end gap-1">
             <button
               @click="deleteCard(card.id)"
-              class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+              class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
             >
               删除
             </button>
             <button
               @click="toggleEdit(card)"
-              class="px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
+              class="px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
             >
               完成
             </button>
@@ -161,15 +172,39 @@ function renderMarkdown(text: string): string {
             class="cursor-pointer hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
             @click="toggleEdit(card)"
           >
-            <div class="px-3 py-2">
-              <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+            <div class="py-2 flex items-center justify-between">
+              <div class="flex-1 px-3 text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
                 {{ card.title || '无标题' }}
               </div>
+              <!-- Collapse/Expand Button -->
+              <button
+                @click="toggleCollapse(card, $event)"
+                class="px-2 py-1 mr-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                :title="card.isCollapsed ? '展开' : '折叠'"
+              >
+                <svg
+                  class="w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform"
+                  :class="{ 'rotate-180': !card.isCollapsed }"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
             </div>
             <div class="border-t border-gray-100 dark:border-gray-700"></div>
             <div class="px-3 py-2">
+              <!-- Collapsed: show only first line -->
               <div
-                class="text-xs text-gray-600 dark:text-gray-400 line-clamp-3"
+                v-if="card.isCollapsed"
+                class="text-sm text-gray-600 dark:text-gray-400 truncate"
+                v-html="renderMarkdown(getFirstLine(card.content)) || '<span class=\'text-gray-400\'>无内容</span>'"
+              ></div>
+              <!-- Expanded: show all content -->
+              <div
+                v-else
+                class="text-sm text-gray-600 dark:text-gray-400"
                 v-html="renderMarkdown(card.content) || '<span class=\'text-gray-400\'>无内容</span>'"
               ></div>
             </div>
@@ -181,10 +216,4 @@ function renderMarkdown(text: string): string {
 </template>
 
 <style scoped>
-.line-clamp-3 {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
 </style>
