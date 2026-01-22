@@ -34,6 +34,7 @@ class MapService:
         """Generate a concept roadmap from text."""
         if self.client:
             try:
+        
                 response = self.client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[

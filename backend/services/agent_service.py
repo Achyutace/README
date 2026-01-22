@@ -13,12 +13,12 @@ import json
 from typing import Dict, List, Optional, TypedDict, Annotated
 from datetime import datetime
 
-# LangChain 核心组件
+# LangChain 核心组件 (LangChain 0.3 适配: 使用 langchain_core)
 from langchain_openai import ChatOpenAI  # OpenAI 的聊天模型
-from langchain.schema import HumanMessage, AIMessage, SystemMessage  # 消息类型
-from langchain.tools import Tool  # 工具封装
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage  # 消息类型
+from langchain_core.tools import Tool  # 工具封装
 from langgraph.graph import StateGraph, END  # 状态图和结束节点
-from langgraph.prebuilt import ToolExecutor  # 工具执行器
+# from langgraph.prebuilt import ToolExecutor # 移除：代码中手动执行工具，不需要此组件
 
 # 本地服务和工具
 from services.rag_service import RAGService  # RAG服务
@@ -71,7 +71,7 @@ class AcademicAgentService:
                 model=model,
                 temperature=temperature,
                 api_key=api_key,
-                base_url = api_base
+                base_url=api_base
             )
             self.has_llm = True
         else:
@@ -119,8 +119,9 @@ class AcademicAgentService:
     
     def _rag_retrieval_node(self, state: AgentState) -> AgentState:
         """节点 1: RAG 检索"""
-        state['steps'].append('RAG 检索')
-        state['current_step'] = '正在检索本地知识库...'
+        # 确保 steps 列表已初始化
+        steps = state.get('steps', [])
+        steps.append('RAG 检索')
         
         user_query = state['user_query']
         user_id = state['user_id']
@@ -128,9 +129,6 @@ class AcademicAgentService:
         
         # 执行检索
         results = self.rag_service.retrieve(query=user_query, user_id=user_id, paper_id=paper_id, top_k=5)
-        
-        # 保存原始检索结果
-        state['local_context'] = results
         
         # 格式化为文本
         context_parts = []
@@ -149,21 +147,29 @@ class AcademicAgentService:
                 f"{result['parent_content']}\n"
             )
         
-        # 合并所有段落
-        state['local_context_text'] = '\n'.join(context_parts) if context_parts else '未找到相关内容'
-        
-        return state
+        return {
+            **state,
+            'steps': steps,
+            'current_step': '正在检索本地知识库...',
+            'local_context': results,
+            'local_context_text': '\n'.join(context_parts) if context_parts else '未找到相关内容'
+        }
     
     def _sufficiency_judge_node(self, state: AgentState) -> AgentState:
         """节点 2: 相关性与充分性评估"""
-        state['steps'].append('信息充分性评估')
-        state['current_step'] = '正在评估信息是否充足...'
+        steps = state.get('steps', [])
+        steps.append('信息充分性评估')
         
         if not self.has_llm:
             # Demo 模式：简单判断
-            state['is_sufficient'] = len(state['local_context']) >= 1
-            state['missing_info'] = '' if state['is_sufficient'] else '需要更多外部信息'
-            return state
+            is_sufficient = len(state['local_context']) >= 1
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '正在评估信息是否充足...',
+                'is_sufficient': is_sufficient,
+                'missing_info': '' if is_sufficient else '需要更多外部信息'
+            }
         
         # 使用 LLM 判断
         judge_prompt = f"""
@@ -184,18 +190,32 @@ class AcademicAgentService:
         
         try:
             response = self.llm.invoke([HumanMessage(content=judge_prompt)])
-            result = json.loads(response.content.strip())
+            # 清理可能的 markdown 标记
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif content.startswith("```"):
+                content = content.split("```")[1].split("```")[0].strip()
+                
+            result = json.loads(content)
             
-            # 更新状态
-            state['is_sufficient'] = result.get('sufficient', False)
-            state['missing_info'] = result.get('missing', '')
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '正在评估信息是否充足...',
+                'is_sufficient': result.get('sufficient', False),
+                'missing_info': result.get('missing', '')
+            }
         
         except Exception as e:
             print(f"Judge error: {e}")
-            state['is_sufficient'] = True  # 出错时默认认为足够
-            state['missing_info'] = ''
-        
-        return state
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '评估出错，默认继续...',
+                'is_sufficient': True,  # 出错时默认认为足够
+                'missing_info': ''
+            }
     
     def _should_use_tools(self, state: AgentState) -> str:
         """条件判断：是否需要使用工具"""
@@ -203,13 +223,17 @@ class AcademicAgentService:
     
     def _tool_planning_node(self, state: AgentState) -> AgentState:
         """节点 3: 工具规划与执行"""
-        state['steps'].append('工具调用')
-        state['current_step'] = '信息不足，正在使用外部工具...'
+        steps = state.get('steps', [])
+        steps.append('工具调用')
         
         if not self.has_llm:
             # Demo 模式
-            state['external_context'] = self._demo_tool_execution(state)
-            return state
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '信息不足，正在使用外部工具(Demo)...',
+                'external_context': self._demo_tool_execution(state)
+            }
         
         # 使用 LLM 规划工具调用
         tool_prompt = f"""
@@ -242,10 +266,20 @@ class AcademicAgentService:
 只输出 JSON，不要有其他内容。
 """
         
+        external_context = []
+        current_step_desc = '信息不足，正在使用外部工具...'
+        
         try:
             # LLM 决定使用哪个工具以及如何调用
             response = self.llm.invoke([HumanMessage(content=tool_prompt)])
-            tool_plan = json.loads(response.content.strip())
+            
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif content.startswith("```"):
+                content = content.split("```")[1].split("```")[0].strip()
+                
+            tool_plan = json.loads(content)
             
             tool_name = tool_plan.get('tool')
             query = tool_plan.get('query')
@@ -254,25 +288,27 @@ class AcademicAgentService:
             if tool_name == 'web_search':
                 # 网络搜索
                 results = self.web_search.search(query)
-                state['external_context'] = results
-                state['current_step'] = f'已完成网络搜索: {query}'
+                external_context = results
+                current_step_desc = f'已完成网络搜索: {query}'
             
             elif tool_name == 'search_papers':
                 # ArXiv 论文搜索
                 results = self.paper_discovery.search_papers(query)
-                state['external_context'] = results
-                state['current_step'] = f'已完成论文搜索: {query}'
+                external_context = results
+                current_step_desc = f'已完成论文搜索: {query}'
             
-            else:
-                # 未知工具，返回空结果
-                state['external_context'] = []
-        
         except Exception as e:
             # 工具执行出错，降级到 demo 模式
             print(f"Tool execution error: {e}")
-            state['external_context'] = self._demo_tool_execution(state)
+            external_context = self._demo_tool_execution(state)
+            current_step_desc = '工具执行出错，使用模拟数据'
         
-        return state
+        return {
+            **state,
+            'steps': steps,
+            'current_step': current_step_desc,
+            'external_context': external_context
+        }
     
     def _demo_tool_execution(self, state: AgentState) -> List[Dict]:
         """Demo 模式的工具执行"""
@@ -286,14 +322,18 @@ class AcademicAgentService:
     
     def _synthesize_node(self, state: AgentState) -> AgentState:
         """节点 4: 综合生成"""
-        state['steps'].append('综合生成答案')
-        state['current_step'] = '正在生成最终回答...'
+        steps = state.get('steps', [])
+        steps.append('综合生成答案')
         
         if not self.has_llm:
             # Demo 模式
-            state['final_response'] = self._demo_response(state)
-            state['citations'] = self._extract_citations(state)
-            return state
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '正在生成最终回答(Demo)...',
+                'final_response': self._demo_response(state),
+                'citations': self._extract_citations(state)
+            }
         
         # 构建综合 prompt
         synthesis_prompt = f"""
@@ -323,6 +363,7 @@ class AcademicAgentService:
 回答：
 """
         
+        final_response = ""
         try:
             # 添加对话历史
             messages = []
@@ -336,16 +377,20 @@ class AcademicAgentService:
             messages.append(HumanMessage(content=synthesis_prompt))
             
             response = self.llm.invoke(messages)
-            state['final_response'] = response.content
-            state['citations'] = self._extract_citations(state)
+            final_response = response.content
         
         except Exception as e:
             # 生成出错，降级到 demo 模式
             print(f"Synthesis error: {e}")
-            state['final_response'] = self._demo_response(state)
-            state['citations'] = self._extract_citations(state)
-        
-        return state
+            final_response = self._demo_response(state)
+            
+        return {
+            **state,
+            'steps': steps,
+            'current_step': '正在生成最终回答...',
+            'final_response': final_response,
+            'citations': self._extract_citations(state)
+        }
     
     def _format_external_context(self, external_context: List[Dict]) -> str:
         """格式化外部上下文"""
@@ -422,7 +467,6 @@ class AcademicAgentService:
         for result in state.get('local_context', []):
             page = result.get('page', result.get('metadata', {}).get('page', 0))
             section = result.get('section', result.get('metadata', {}).get('section', 'unknown'))
-            content = result.get('content', '')
             
             citations.append({
                 'source_type': 'local',  # 来源类型：本地文档
@@ -437,8 +481,8 @@ class AcademicAgentService:
             # 论文类型的引用
             if source_type in ['arxiv', 'semantic_scholar'] or 'paper_id' in item:
                 authors = item.get('authors', [])
-                authors_str = ', '.join(authors[:3])
-                if len(authors) > 3:
+                authors_str = ', '.join(authors[:3]) if isinstance(authors, list) else str(authors)
+                if isinstance(authors, list) and len(authors) > 3:
                     authors_str += ' et al.'
                 
                 citations.append({
@@ -485,21 +529,6 @@ class AcademicAgentService:
              chat_history: Optional[List[Dict]] = None) -> Dict:
         """
         与 Agent 对话
-        
-        Args:
-            user_query: 用户问题
-            user_id: 用户 ID
-            paper_id: 当前阅读的论文 ID
-            chat_history: 对话历史
-        
-        Returns:
-            字典，包含：
-            {
-                'response': str,  # 最终生成的回答
-                'citations': List[Dict],  # 引用来源列表
-                'steps': List[str],  # 执行的步骤（用于调试和展示）
-                'context_used': Dict  # 使用的上下文统计信息
-            }
         """
         # 初始化状态
         initial_state: AgentState = {
@@ -535,6 +564,8 @@ class AcademicAgentService:
         
         except Exception as e:
             print(f"Workflow error: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'response': f'抱歉，处理您的问题时出现了错误：{str(e)}',
                 'citations': [],
@@ -549,9 +580,6 @@ class AcademicAgentService:
                     chat_history: Optional[List[Dict]] = None):
         """
         流式对话（生成器）
-        
-        Yields:
-            Dict: 状态更新
         """
         # 初始化状态
         initial_state: AgentState = {
@@ -573,30 +601,29 @@ class AcademicAgentService:
         
         # 执行工作流并yield中间状态
         try:
-            # workflow.stream() 返回一个生成器，每完成一个节点就 yield 一次
-            for state in self.workflow.stream(initial_state):
-                # 提取当前步骤信息
-                node_name = list(state.keys())[0]
-                node_state = state[node_name]
-                
-                # Yield 当前步骤的信息
-                yield {
-                    'type': 'step',
-                    'step': node_state.get('current_step', node_name),
-                    'data': node_state
-                }
-            
-            # 最终结果
-            final_state = state[list(state.keys())[0]]
-            yield {
-                'type': 'final',
-                'response': final_state['final_response'],
-                'citations': final_state['citations'],
-                'steps': final_state['steps']
-            }
+            # workflow.stream() 返回一个生成器
+            for chunk in self.workflow.stream(initial_state):
+                # chunk 是一个字典，key 是节点名，value 是该节点返回的状态更新
+                for node_name, node_state in chunk.items():
+                    # Yield 当前步骤的信息
+                    yield {
+                        'type': 'step',
+                        'step': node_state.get('current_step', node_name),
+                        'data': node_state
+                    }
+                    
+                    # 如果到了最后一步，提取最终结果
+                    if 'final_response' in node_state and node_state['final_response']:
+                        yield {
+                            'type': 'final',
+                            'response': node_state['final_response'],
+                            'citations': node_state['citations'],
+                            'steps': node_state['steps']
+                        }
         
         except Exception as e:
             # ========== 错误处理 ==========
+            print(f"Stream error: {e}")
             yield {
                 'type': 'error',
                 'error': str(e)

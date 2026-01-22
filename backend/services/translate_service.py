@@ -12,12 +12,10 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 try:
-    from langchain_openai import ChatOpenAI
-    from langchain.schema import HumanMessage, SystemMessage
-    HAS_LANGCHAIN = True
+    from openai import OpenAI
+    HAS_OPENAI = True
 except ImportError:
-    HAS_LANGCHAIN = False
-
+    HAS_OPENAI = False
 
 class TranslateService:
     """
@@ -31,30 +29,34 @@ class TranslateService:
 
     def __init__(self,
                  db=None,
-                 model: str = "gpt-3.5-turbo",
-                 temperature: float = 0.3):
+                 model: str = "qwen-plus",
+                 temperature: float = 0.3,
+                 base_url: str = None):
         """
         Args:
             db: 数据库实例（用于存储翻译结果）
             model: 使用的模型
             temperature: 温度参数（翻译任务建议较低）
+            base_url: OpenAI API 基础 URL（可选，用于代理或其他兼容服务）
         """
         self.db = db
         self.model = model
         self.temperature = temperature
 
-        # 初始化 LLM
-        api_key = os.getenv('OPENAI_API_KEY')
-        if api_key and HAS_LANGCHAIN:
-            self.llm = ChatOpenAI(
-                model=model,
-                temperature=temperature,
-                api_key=api_key
-            )
-            self.has_llm = True
+        # 初始化 OpenAI 客户端
+        api_key = os.getenv('TRANSLATE_API_KEY')
+        if api_key and HAS_OPENAI:
+            client_kwargs = {"api_key": api_key}
+            
+            # 支持 base_url 参数或环境变量
+            if base_url or os.getenv('TRANSLATE_API_BASE'):
+                client_kwargs["base_url"] = base_url or os.getenv('TRANSLATE_API_BASE')
+            
+            self.client = OpenAI(**client_kwargs)
+            self.has_client = True
         else:
-            self.llm = None
-            self.has_llm = False
+            self.client = None
+            self.has_client = False
             print("Warning: OpenAI API key not found. Translate service will use demo mode.")
 
     def translate(self, text: str, source_lang: str = "en", target_lang: str = "zh") -> Dict:
@@ -87,7 +89,7 @@ class TranslateService:
                 'sentences': []
             }
 
-        if not self.has_llm:
+        if not self.has_client:
             return self._demo_translate(text, source_lang, target_lang)
 
         try:
@@ -100,12 +102,16 @@ class TranslateService:
 3. 专业术语可以保留原文并在括号中注释
 4. 只输出翻译结果，不要有其他内容"""
 
-            response = self.llm.invoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=text)
-            ])
+            response = self.client.chat.completions.create(
+                model=self.model,
+                temperature=self.temperature,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ]
+            )
 
-            translated_text = response.content.strip()
+            translated_text = response.choices[0].message.content.strip()
 
             # 分句对齐（简单实现）
             sentences = self._align_sentences(text, translated_text)
