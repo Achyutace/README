@@ -25,16 +25,9 @@ class StorageService:
         self.storage_root = Path(storage_root)
         self.user_id = user_id
         
-        # 存储根目录存在
-        self.storage_root.mkdir(parents=True, exist_ok=True)
-        
-        # 创建图片存储目录（按 file_hash 分组）
+        # 设置目录路径（不创建）
         self.images_folder = self.storage_root / 'images'
-        self.images_folder.mkdir(parents=True, exist_ok=True)
-
-        # 创建PDF存储目录 (全局数据共享)
         self.uploads_folder = self.storage_root / 'uploads'
-        self.uploads_folder.mkdir(parents=True, exist_ok=True)
         
         # 初始化数据库（全局共享数据库，通过 user_id 区分用户）
         db_path = self.storage_root / 'app.db'

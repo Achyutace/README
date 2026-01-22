@@ -29,6 +29,7 @@ class Database:
         """获取数据库连接"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # 结果可以通过列名访问
+        conn.execute("PRAGMA foreign_keys = ON")  # 启用外键约束
         return conn
     
     def init_database(self):

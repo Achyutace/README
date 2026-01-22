@@ -27,16 +27,30 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # ==================== 3. 基础配置与路径 ====================
-# 获取当前文件所在目录的父级作为项目根目录
-BASE_DIR = Path(__file__).resolve().parent
-STORAGE_ROOT = BASE_DIR / 'storage'
+# 获取项目根目录（README 目录）
+BASE_DIR = Path(__file__).resolve().parent.parent  
+STORAGE_ROOT = BASE_DIR / 'storage'  # README/storage
 USERS_DIR = STORAGE_ROOT / 'users'
 CHROMA_DIR = STORAGE_ROOT / 'chroma_db'
 
-# 确保基础目录存在
-STORAGE_ROOT.mkdir(exist_ok=True)
-USERS_DIR.mkdir(exist_ok=True)
-CHROMA_DIR.mkdir(exist_ok=True)
+# 初始化磁盘目录结构
+def init_storage_directories():
+    """初始化存储目录结构"""
+    directories = [
+        STORAGE_ROOT,
+        STORAGE_ROOT / 'images',      # 图片存储目录
+        STORAGE_ROOT / 'uploads',     # PDF上传目录
+        USERS_DIR,                     # 用户数据目录
+        CHROMA_DIR,                    # 向量数据库目录
+    ]
+    
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+    
+    print(f" Storage directories initialized at: {STORAGE_ROOT}")
+
+# 执行目录初始化
+init_storage_directories()
 
 # 将配置存入 app.config 以便在其他地方调用
 app.config['STORAGE_ROOT'] = str(STORAGE_ROOT)
