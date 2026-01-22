@@ -283,13 +283,26 @@ function normalizeUrl(raw: string): string | null {
   // 去掉末尾标点避免误判
   trimmed = trimmed.replace(/[),.;:]+$/g, '')
 
-  // 修复PDF跨行URL问题：移除末尾错误包含的作者名首字母
-  // 例如 "https://doi.org/10.18653/v1/p19-1472.B" -> "https://doi.org/10.18653/v1/p19-1472"
-  // 模式：数字或短横线后面跟着 .大写字母 结尾（这通常是作者引用的开始，如 ". B. Zhang"）
-  trimmed = trimmed.replace(/(\d+[-\d]*)\.[A-Z]$/i, '$1')
+  // 修复PDF跨行URL问题：移除末尾错误包含的作者名或其他非URL内容
+  // 模式1：数字后面跟着 .大写字母 结尾（作者引用开始，如 "1472.B"）
+  trimmed = trimmed.replace(/(\d+[-\d]*)\.[A-Z]$/g, '$1')
+
+  // 模式2：URL末尾有多个大写字母（可能是作者名缩写，如 ".ABC"）
+  trimmed = trimmed.replace(/\.[A-Z]{1,3}$/g, '')
+
+  // 模式3：末尾是 .单词 格式但单词不像是URL路径（如 ".Zhang", ".Smith"）
+  // 常见URL路径结尾：.html, .pdf, .php, .asp, .js, .css, .json, .xml 等
+  const validExtensions = /\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt)$/i
+  if (!validExtensions.test(trimmed)) {
+    // 如果末尾是 .单词 但不是常见扩展名，可能是误包含的作者名
+    trimmed = trimmed.replace(/\.[A-Z][a-z]+$/g, '')
+  }
 
   // 再次清理可能残留的末尾标点
   trimmed = trimmed.replace(/[),.;:]+$/g, '')
+
+  // 移除末尾可能的空格和特殊字符
+  trimmed = trimmed.replace(/[\s\u00A0]+$/g, '')
 
   if (!trimmed) return null
   if (/^https?:\/\//i.test(trimmed)) return trimmed
@@ -380,23 +393,64 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
 
   const spanInfos: SpanInfo[] = []
   let fullText = ''
-  let lastSpanBottom = -Infinity
+  let lastSpan: { rect: DOMRect; text: string } | null = null
 
   spans.forEach(span => {
     const text = span.textContent || ''
     if (!text) return
 
-    // 获取span的位置信息，检测是否换行
     const rect = span.getBoundingClientRect()
-    // 如果当前span的顶部明显低于上一个span的底部，说明换行了
-    // 在换行处添加空格，防止跨行URL被错误合并
-    if (lastSpanBottom !== -Infinity && rect.top > lastSpanBottom - 2) {
-      // 如果fullText末尾不是空格，且当前text开头不是空格，添加空格分隔
-      if (fullText.length > 0 && !fullText.endsWith(' ') && !text.startsWith(' ')) {
+
+    // 检测是否需要在span之间添加空格（真正的换行/分隔）
+    if (lastSpan && fullText.length > 0) {
+      const lineHeight = rect.height || 12
+      const yGap = rect.top - lastSpan.rect.top
+
+      // 判断是否是新的一行（Y坐标变化超过行高的一半）
+      const isNewLine = yGap > lineHeight * 0.5
+
+      // 判断X坐标是否连续（用于检测同一行内的断词）
+      // 如果当前span的left接近上一个span的right，说明是连续的
+      const xGap = rect.left - lastSpan.rect.right
+      const isXContinuous = xGap < lineHeight * 0.5 && xGap > -lineHeight * 0.5
+
+      // 检查上一个span是否以连字符结尾（PDF断词）
+      const lastEndsWithHyphen = lastSpan.text.endsWith('-')
+
+      // 检查是否是URL的延续部分（通常URL不会有空格）
+      const lastEndsWithUrlChar = /[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]$/.test(lastSpan.text)
+      const currentStartsWithUrlChar = /^[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]/.test(text)
+      const couldBeUrlContinuation = lastEndsWithUrlChar && currentStartsWithUrlChar
+
+      // 决定是否添加空格：
+      // 1. 如果是新行且X不连续，通常需要空格（除非是URL延续）
+      // 2. 如果上一个以连字符结尾，这是PDF断词，不加空格
+      // 3. 如果末尾是点号后紧跟大写字母（作者引用开始），需要空格
+      const lastText = fullText
+      const isAuthorCitation = /\.\s*$/.test(lastText) === false &&
+                               /\.$/.test(lastSpan.text) &&
+                               /^[A-Z]/.test(text)
+
+      let needsSpace = false
+      if (isNewLine) {
+        // 新行：如果X不连续或看起来像是引用开始，添加空格
+        if (!isXContinuous || isAuthorCitation) {
+          needsSpace = true
+        }
+        // 如果是连字符断词，不加空格
+        if (lastEndsWithHyphen) {
+          needsSpace = false
+          // 移除末尾的连字符
+          fullText = fullText.slice(0, -1)
+        }
+      }
+
+      if (needsSpace && !fullText.endsWith(' ') && !text.startsWith(' ')) {
         fullText += ' '
       }
     }
-    lastSpanBottom = rect.bottom
+
+    lastSpan = { rect, text }
 
     spanInfos.push({
       span,
