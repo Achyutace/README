@@ -422,14 +422,19 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
       const currentStartsWithUrlChar = /^[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]/.test(text)
       const couldBeUrlContinuation = lastEndsWithUrlChar && currentStartsWithUrlChar
 
+      // 检查当前span是否以文件扩展名开头（如 .html, .pdf 等）
+      // 这通常是跨行URL的延续部分
+      const startsWithExtension = /^\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt|shtml)/i.test(text)
+
+      // 检查fullText是否看起来像是一个未完成的URL
+      const looksLikeIncompleteUrl = /https?:\/\/[^\s]*$/.test(fullText) || /www\.[^\s]*$/.test(fullText)
+
       // 决定是否添加空格：
       // 1. 如果是新行且X不连续，通常需要空格（除非是URL延续）
       // 2. 如果上一个以连字符结尾，这是PDF断词，不加空格
       // 3. 如果末尾是点号后紧跟大写字母（作者引用开始），需要空格
-      const lastText = fullText
-      const isAuthorCitation = /\.\s*$/.test(lastText) === false &&
-                               /\.$/.test(lastSpan.text) &&
-                               /^[A-Z]/.test(text)
+      // 4. 如果当前span以文件扩展名开头且上一个像未完成的URL，不加空格
+      const isAuthorCitation = /\.$/.test(lastSpan.text) && /^[A-Z]/.test(text) && !startsWithExtension
 
       let needsSpace = false
       if (isNewLine) {
@@ -442,6 +447,14 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
           needsSpace = false
           // 移除末尾的连字符
           fullText = fullText.slice(0, -1)
+        }
+        // 如果当前以扩展名开头且前面是未完成的URL，不加空格（URL跨行延续）
+        if (startsWithExtension && looksLikeIncompleteUrl) {
+          needsSpace = false
+        }
+        // 如果前面是URL字符结尾，当前是URL字符开头，可能是URL延续
+        if (couldBeUrlContinuation && looksLikeIncompleteUrl) {
+          needsSpace = false
         }
       }
 
