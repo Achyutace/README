@@ -1,5 +1,5 @@
 """
-翻译：
+翻译
 """
 import re
 from flask import Blueprint, request, jsonify, current_app, g
@@ -163,4 +163,73 @@ def get_page_translations(pdf_id, page_number):
 
     except Exception as e:
         current_app.logger.error(f"Get page translations error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@translate_bp.route('/text', methods=['POST'])
+def translate_text():
+    """
+    翻译选中的词句（带上下文）
+    
+    前端发送: { "text": "选中的文本", "pdfId": "..." }
+    后端会从数据库获取前几段文本（包含摘要）作为上下文，帮助 LLM 更准确地翻译
+    
+    适用场景：
+    - 用户在阅读时选中某个词句需要翻译
+    - 需要理解专业术语的上下文含义
+    - 快速查询翻译
+    """
+    data = request.get_json()
+    
+    # 1. 参数校验
+    if not data or 'text' not in data:
+        return jsonify({'error': 'Missing text parameter'}), 400
+    
+    text = data['text']
+    pdf_id = data.get('pdfId')
+    context_paragraphs = data.get('contextParagraphs', 5)  # 默认获取前5段
+    
+    if not text or not text.strip():
+        return jsonify({'error': 'Text cannot be empty'}), 400
+    
+    try:
+        # 2. 获取上下文（如果提供了 PDF ID）
+        context = None
+        
+        if pdf_id:
+            file_hash = get_file_hash(pdf_id)
+            
+            if file_hash:
+                # 从数据库获取前 N 段作为上下文（包含摘要）
+                storage_service = current_app.storage_service
+                paragraphs = storage_service.get_paragraphs(file_hash)
+                
+                if paragraphs:
+                    # 取前几段并拼接
+                    context_parts = []
+                    for para in paragraphs[:context_paragraphs]:
+                        context_parts.append(para['original_text'])
+                    
+                    context = '\n\n'.join(context_parts)
+                    current_app.logger.info(f"Retrieved {len(context_parts)} paragraphs as context")
+            else:
+                current_app.logger.warning(f"PDF file not found for ID: {pdf_id}, will translate without context")
+        
+        # 3. 调用翻译服务
+        translate_service = current_app.translate_service
+        
+        result = translate_service.translate_text(
+            text=text,
+            context=context
+        )
+        
+        return jsonify({
+            'success': True,
+            'originalText': result['originalText'],
+            'translatedText': result['translatedText'],
+            'hasContext': result['hasContext'],
+            'contextLength': result['contextLength']
+        })
+    
+    except Exception as e:
+        current_app.logger.error(f"Text translation error: {e}")
         return jsonify({'error': str(e)}), 500

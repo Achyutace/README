@@ -24,7 +24,6 @@ from langgraph.graph import StateGraph, END  # 状态图和结束节点
 from services.rag_service import RAGService  # RAG服务
 from tools.web_search_tool import WebSearchTool  # 网络搜索工具
 from tools.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
-
 class AgentState(TypedDict):
     """ Agent 状态定义 """
     user_query: str  
@@ -54,7 +53,7 @@ class AcademicAgentService:
                  rag_service: RAGService,  
                  openai_api_key: Optional[str] = None,  
                  openai_api_base: Optional[str] = None,  
-                 model: str = "gpt-3.5-turbo",  
+                 model: str = "qwen-plus",  
                  temperature: float = 0.7):  
         """  
         初始化 Agent 服务      

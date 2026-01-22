@@ -36,7 +36,7 @@ class MapService:
             try:
         
                 response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
+                    model="qwen-plus",
                     messages=[
                         {
                             "role": "system",

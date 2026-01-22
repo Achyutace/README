@@ -249,6 +249,93 @@ class TranslateService:
             result = self.translate(text)
             results.append(result)
         return results
+    
+    def translate_text(self,
+                      text: str,
+                      context: str = None) -> Dict:
+        """
+        翻译选中的词句（带上下文）
+        
+        根据提供的上下文（通常是文档前几段或摘要），
+        帮助 LLM 更准确地理解专业术语和上下文含义
+        
+        Args:
+            text: 待翻译的词句
+            context: 上下文文本（由路由层提供，通常是文档前几段）
+        
+        Returns:
+            {
+                'originalText': str,
+                'translatedText': str,
+                'hasContext': bool,
+                'contextLength': int
+            }
+        """
+        if not text or not text.strip():
+            return {
+                'originalText': text,
+                'translatedText': '',
+                'hasContext': False,
+                'contextLength': 0
+            }
+        
+        if not self.has_client:
+            return self._demo_translate_text(text)
+        
+        has_context = bool(context and context.strip())
+        
+        try:
+            # 构建带上下文的翻译 prompt
+            if has_context:
+                system_prompt = """你是一个专业的学术翻译专家。请根据提供的文档上下文，准确翻译用户选中的词句。
+
+翻译要求：
+1. 理解文档的整体语境和专业领域
+2. 准确翻译专业术语，保持学术规范
+3. 对于专有名词和缩写，可以保留原文并在括号中注释
+4. 只输出翻译结果，不要有任何额外说明或解释"""
+
+                user_prompt = f"""文档上下文（前几段内容，帮助理解专业术语）：
+---
+{context[:2000]}  
+---
+
+请翻译以下选中的文本：
+{text}
+
+翻译结果："""
+            else:
+                # 没有上下文时的简单翻译
+                system_prompt = """你是一个专业的学术翻译专家。请将以下英文文本翻译成中文。
+
+翻译要求：
+1. 保持学术术语的准确性
+2. 专业术语可以保留原文并在括号中注释
+3. 只输出翻译结果，不要有其他内容"""
+                
+                user_prompt = text
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                temperature=self.temperature,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            translated_text = response.choices[0].message.content.strip()
+            
+            return {
+                'originalText': text,
+                'translatedText': translated_text,
+                'hasContext': has_context,
+                'contextLength': len(context) if has_context else 0
+            }
+        
+        except Exception as e:
+            print(f"Text translation error: {e}")
+            return self._demo_translate_text(text)
 
     def _demo_translate(self, text: str, source_lang: str, target_lang: str) -> Dict:
         """Demo 模式的翻译"""
@@ -263,6 +350,17 @@ class TranslateService:
             'sentences': [
                 {'index': 1, 'original': text, 'translated': demo_translation}
             ]
+        }
+    
+    def _demo_translate_text(self, text: str) -> Dict:
+        """Demo 模式的词句翻译"""
+        demo_translation = f"[翻译] {text}"
+        
+        return {
+            'originalText': text,
+            'translatedText': demo_translation,
+            'hasContext': False,
+            'contextLength': 0
         }
 
     def _get_lang_name(self, lang_code: str) -> str:

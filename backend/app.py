@@ -73,7 +73,7 @@ app.rag_service = rag_service
 # 路由中通过 current_app.translate_service 访问
 translate_service = TranslateService(
     db=storage_service.db,
-    model=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
+    model=os.getenv("OPENAI_MODEL", "qwen-plus"),
     temperature=0.3
 )
 app.translate_service = translate_service

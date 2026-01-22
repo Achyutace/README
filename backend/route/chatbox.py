@@ -135,6 +135,72 @@ def send_message():
         current_app.logger.error(f"Chatbox error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@chatbox_bp.route('/simple-chat', methods=['POST'])
+def simple_chat():
+    """
+    接口 B2: 简单对话模式（基于 PDF 全文，非流式）
+    """
+    data = request.get_json()
+    
+    user_query = data.get('message')
+    session_id = data.get('sessionId')
+    pdf_id = data.get('pdfId')
+    user_id = data.get('userId', 'default')
+    
+    if not session_id or not user_query:
+        return jsonify({'error': 'Message and sessionId are required'}), 400
+    
+    try:
+        # 获取服务
+        agent_service, chat_service, storage_service = get_services()
+        
+        # 1. 处理懒创建逻辑
+        handle_lazy_session_creation(storage_service, agent_service, session_id, pdf_id, user_query)
+        
+        # 2. 存储用户消息
+        storage_service.add_chat_message(
+            session_id=session_id,
+            role="user",
+            content=user_query
+        )
+        
+        # 3. 获取并处理历史记录
+        raw_messages = storage_service.get_chat_messages(session_id)
+        history = chat_service.process_history_for_agent(raw_messages, limit=10)
+        
+        # 4. 获取 PDF 全文（如果提供了 PDF ID）
+        context_text = None
+        if pdf_id:
+            # 从数据库获取完整文本（包含原文，不包含翻译）
+            context_text = storage_service.get_full_text(
+                file_hash=pdf_id,
+                include_translation=False
+            )
+        
+        # 5. 调用 Agent 的 simple_chat 方法
+        result = agent_service.simple_chat(
+            user_query=user_query,
+            context_text=context_text,
+            chat_history=history
+        )
+        
+        # 6. 存储 AI 回答
+        storage_service.add_chat_message(
+            session_id=session_id,
+            role="assistant",
+            content=result['response'],
+            citations=result.get('citations')
+        )
+        
+        # 7. 构造返回结果
+        result['sessionId'] = session_id
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        current_app.logger.error(f"Simple chat error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @chatbox_bp.route('/stream', methods=['POST'])
 def stream_message():
     """
