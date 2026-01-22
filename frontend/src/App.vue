@@ -27,12 +27,6 @@ const sidebarWidth = ref(480) // Default w-96 = 384px
 const isResizingWidth = ref(false)
 const MIN_SIDEBAR_WIDTH = 380
 const MAX_SIDEBAR_WIDTH = 650
-const MINIMIZED_WIDTH = 180 // Width when both panels are minimized (half of toolbar width ~360px)
-
-const effectiveSidebarWidth = computed(() => {
-  if (bothMinimized.value) return MINIMIZED_WIDTH
-  return sidebarWidth.value
-})
 
 // Vertical split ratio (0 to 1, representing top panel percentage)
 const splitRatio = ref(0.45)
@@ -91,14 +85,30 @@ const handleThemeButtonClick = () => {
   }
 }
 
+// Keyboard shortcuts handler
+const handleKeyboard = (e: KeyboardEvent) => {
+  // Ctrl+Alt+/ toggle Chat
+  if (e.ctrlKey && e.altKey && e.key === '/') {
+    e.preventDefault()
+    toggleBottomMinimize()
+  }
+  // Ctrl+Alt+N toggle Notes
+  if (e.ctrlKey && e.altKey && (e.key === 'n' || e.key === 'N')) {
+    e.preventDefault()
+    toggleTopMinimize()
+  }
+}
+
 onMounted(() => {
   document.addEventListener('mousemove', onDragThemeButton)
   document.addEventListener('mouseup', stopDragThemeButton)
+  document.addEventListener('keydown', handleKeyboard)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onDragThemeButton)
   document.removeEventListener('mouseup', stopDragThemeButton)
+  document.removeEventListener('keydown', handleKeyboard)
 })
 
 // Toggle minimize for top panel
@@ -242,42 +252,18 @@ const bottomPanelStyle = computed(() => {
 
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden">
-      <!-- Top Row: Toolbar + Minimized Bars (when both minimized) -->
+      <!-- Top Row: Toolbar -->
       <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
         <!-- PDF Toolbar -->
         <div class="flex-1">
-          <PdfToolbar v-if="pdfStore.currentPdfUrl" />
+          <PdfToolbar
+            v-if="pdfStore.currentPdfUrl"
+            :notes-minimized="topMinimized"
+            :chat-minimized="bottomMinimized"
+            @toggle-notes="toggleTopMinimize"
+            @toggle-chat="toggleBottomMinimize"
+          />
           <div v-else class="h-[49px]"></div>
-        </div>
-
-        <!-- Right side minimized bars (horizontal layout) - only when both minimized -->
-        <div
-          v-if="bothMinimized && libraryStore.currentDocument && !aiStore.isPanelCollapsed"
-          class="flex border-l border-gray-200"
-          :style="{ width: MINIMIZED_WIDTH + 'px' }"
-        >
-          <!-- Top panel minimized bar -->
-          <div
-            class="flex-1 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors border-r border-gray-600"
-            @click="toggleTopMinimize"
-          >
-            <!-- Triangle pointing up (minimized state) -->
-            <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M7 14l5-5 5 5H7z"/>
-            </svg>
-            <span class="text-white text-xs font-medium truncate">Notes</span>
-          </div>
-          <!-- Bottom panel minimized bar -->
-          <div
-            class="flex-1 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
-            @click="toggleBottomMinimize"
-          >
-            <!-- Triangle pointing up (minimized state) -->
-            <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M7 14l5-5 5 5H7z"/>
-            </svg>
-            <span class="text-white text-xs font-medium truncate">Chat</span>
-          </div>
         </div>
       </div>
 
@@ -295,7 +281,7 @@ const bottomPanelStyle = computed(() => {
           ref="sidebarRef"
           class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
           :class="aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : ''"
-          :style="!aiStore.isPanelCollapsed ? { width: effectiveSidebarWidth + 'px' } : {}"
+          :style="!aiStore.isPanelCollapsed ? { width: sidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div

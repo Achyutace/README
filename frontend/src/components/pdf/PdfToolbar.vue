@@ -7,6 +7,18 @@ import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 
+// Props for panel states
+const props = defineProps<{
+  notesMinimized?: boolean
+  chatMinimized?: boolean
+}>()
+
+// Emits for panel toggle
+const emit = defineEmits<{
+  (e: 'toggle-notes'): void
+  (e: 'toggle-chat'): void
+}>()
+
 const pdfStore = usePdfStore()
 const aiStore = useAiStore()
 const libraryStore = useLibraryStore()
@@ -125,7 +137,7 @@ function handlePageInput() {
         </button>
       </div>
 
-      <!-- Right: Roadmap Button -->
+      <!-- Right: Roadmap Button + Panel Toggles -->
       <div class="flex items-center gap-1">
         <button
           @click="showRoadmap = !showRoadmap"
@@ -143,6 +155,69 @@ function handlePageInput() {
             </svg>
             Roadmap
           </span>
+        </button>
+
+        <!-- Divider -->
+        <div class="w-px h-6 bg-gray-300 mx-1"></div>
+
+        <!-- Notes Panel Toggle -->
+        <button
+          @click="emit('toggle-notes')"
+          :class="[
+            'px-2 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1',
+            props.notesMinimized
+              ? 'bg-gray-100 text-gray-500'
+              : 'hover:bg-gray-100 text-gray-600'
+          ]"
+          :title="props.notesMinimized ? '展开笔记' : '收起笔记'"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span class="text-xs">笔记</span>
+        </button>
+
+        <!-- Chat Panel Toggle -->
+        <button
+          @click="emit('toggle-chat')"
+          :class="[
+            'px-2 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1',
+            props.chatMinimized
+              ? 'bg-gray-100 text-gray-500'
+              : 'hover:bg-gray-100 text-gray-600'
+          ]"
+          :title="props.chatMinimized ? '展开对话' : '收起对话'"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <span class="text-xs">对话</span>
+        </button>
+
+        <!-- Divider -->
+        <div class="w-px h-6 bg-gray-300 mx-1"></div>
+
+        <!-- Collapse All Panels Button -->
+        <button
+          @click="aiStore.isPanelCollapsed = !aiStore.isPanelCollapsed"
+          :class="[
+            'p-1.5 rounded-lg transition-colors',
+            aiStore.isPanelCollapsed
+              ? 'bg-primary-100 text-primary-600'
+              : 'hover:bg-gray-100 text-gray-600'
+          ]"
+          :title="aiStore.isPanelCollapsed ? '展开侧边栏' : '收起侧边栏'"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              :d="aiStore.isPanelCollapsed
+                ? 'M11 19l-7-7 7-7m8 14l-7-7 7-7'
+                : 'M13 5l7 7-7 7M5 5l7 7-7 7'"
+            />
+          </svg>
         </button>
       </div>
     </div>
