@@ -241,7 +241,7 @@ class AcademicAgentService:
 
 请判断：
 1. 如果本地上下文包含足够的信息可以完整、准确地回答用户问题，输出 JSON：{{"sufficient": true, "missing": ""}}
-2. 如果本地上下文不足以回答问题，输出 JSON：{{"sufficient": false, "missing": "缺少的具体信息描述"}}
+2. 如果本地上下文不足以回答问题，输出 JSON：{{"sufficient": false, "missing": "缺少的信息的具体描述"}}
 
 只输出 JSON，不要有其他内容，输出的缺少的信息尽量简洁。
 """
@@ -293,7 +293,7 @@ class AcademicAgentService:
                 'external_context': self._demo_tool_execution(state)
             }
         
-        # 使用 LLM 规划工具调用
+        # 使用 LLM 规划工具调用（支持多个工具）
         tool_prompt = f"""
 你是一个工具调用规划专家。用户的问题缺少某些信息，需要使用工具获取。
 
@@ -313,22 +313,24 @@ class AcademicAgentService:
    - 返回：论文标题、作者、摘要、发表日期、引用数、相关性评分、PDF链接
    - 支持：自然语言查询、ArXiv分类（如 'cat:cs.CL'）、标题搜索（如 'ti:"transformer"'）
 
-请根据缺失的信息类型选择最合适的工具，并提供精确的查询参数。
+请根据缺失的信息类型选择合适的工具（可以选择多个），并提供精确的查询参数。
 
-输出 JSON 格式：
+输出 JSON 格式（支持单个或多个工具）：
 {{
-    "tool": "工具名称",
-    "query": "查询字符串"
+    "tools": [
+        {{"tool": "工具名称1", "query": "查询字符串1"}},
+        {{"tool": "工具名称2", "query": "查询字符串2"}}
+    ]
 }}
 
 只输出 JSON，不要有其他内容。
 """
         
         external_context = []
-        current_step_desc = '信息不足，正在使用外部工具...'
+        tool_descriptions = []
         
         try:
-            # LLM 决定使用哪个工具以及如何调用
+            # LLM 决定使用哪些工具以及如何调用
             response = self.llm.invoke([HumanMessage(content=tool_prompt)])
             
             content = response.content.strip()
@@ -339,27 +341,56 @@ class AcademicAgentService:
                 
             tool_plan = json.loads(content)
             
-            tool_name = tool_plan.get('tool')
-            query = tool_plan.get('query')
+            # 支持旧格式（单个工具）和新格式（多个工具）
+            tools_to_execute = []
+            if 'tools' in tool_plan:
+                # 新格式：多个工具
+                tools_to_execute = tool_plan['tools']
+            elif 'tool' in tool_plan:
+                # 旧格式：单个工具，转换为列表
+                tools_to_execute = [{'tool': tool_plan['tool'], 'query': tool_plan['query']}]
             
-            # 执行工具
-            if tool_name == 'web_search':
-                # 网络搜索
-                results = self.web_search.search(query)
-                external_context = results
-                current_step_desc = f'已完成网络搜索: {query}'
+            # 执行所有规划的工具
+            for tool_item in tools_to_execute:
+                tool_name = tool_item.get('tool')
+                query = tool_item.get('query')
+                
+                if not tool_name or not query:
+                    continue
+                
+                try:
+                    if tool_name == 'web_search':
+                        # 网络搜索
+                        results = self.web_search.search(query)
+                        external_context.extend(results)
+                        tool_descriptions.append(f'网络搜索: {query}')
+                    
+                    elif tool_name == 'search_papers':
+                        # ArXiv 论文搜索
+                        results = self.paper_discovery.search_papers(query)
+                        external_context.extend(results)
+                        tool_descriptions.append(f'论文搜索: {query}')
+                    
+                    else:
+                        print(f"Unknown tool: {tool_name}")
+                
+                except Exception as tool_error:
+                    print(f"Tool {tool_name} execution error: {tool_error}")
+                    tool_descriptions.append(f'{tool_name} 执行失败')
             
-            elif tool_name == 'search_papers':
-                # ArXiv 论文搜索
-                results = self.paper_discovery.search_papers(query)
-                external_context = results
-                current_step_desc = f'已完成论文搜索: {query}'
+            # 构建状态描述
+            if tool_descriptions:
+                current_step_desc = f'已完成 {len(tool_descriptions)} 个工具调用: {", ".join(tool_descriptions)}'
+            else:
+                current_step_desc = '工具调用完成，但未获取到有效结果'
             
         except Exception as e:
             # 工具执行出错，降级到 demo 模式
-            print(f"Tool execution error: {e}")
+            print(f"Tool planning error: {e}")
+            import traceback
+            traceback.print_exc()
             external_context = self._demo_tool_execution(state)
-            current_step_desc = '工具执行出错，使用模拟数据'
+            current_step_desc = '工具规划出错，使用模拟数据'
         
         return {
             **state,
