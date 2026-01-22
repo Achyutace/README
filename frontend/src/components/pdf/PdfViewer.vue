@@ -278,7 +278,19 @@ type LinkOverlayRect = {
 }
 
 function normalizeUrl(raw: string): string | null {
-  const trimmed = raw.trim().replace(/[),.;]+$/g, '') // 去掉末尾标点避免误判
+  let trimmed = raw.trim()
+
+  // 去掉末尾标点避免误判
+  trimmed = trimmed.replace(/[),.;:]+$/g, '')
+
+  // 修复PDF跨行URL问题：移除末尾错误包含的作者名首字母
+  // 例如 "https://doi.org/10.18653/v1/p19-1472.B" -> "https://doi.org/10.18653/v1/p19-1472"
+  // 模式：数字或短横线后面跟着 .大写字母 结尾（这通常是作者引用的开始，如 ". B. Zhang"）
+  trimmed = trimmed.replace(/(\d+[-\d]*)\.[A-Z]$/i, '$1')
+
+  // 再次清理可能残留的末尾标点
+  trimmed = trimmed.replace(/[),.;:]+$/g, '')
+
   if (!trimmed) return null
   if (/^https?:\/\//i.test(trimmed)) return trimmed
   if (/^www\./i.test(trimmed)) return `https://${trimmed}`
@@ -368,10 +380,23 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
 
   const spanInfos: SpanInfo[] = []
   let fullText = ''
+  let lastSpanBottom = -Infinity
 
   spans.forEach(span => {
     const text = span.textContent || ''
     if (!text) return
+
+    // 获取span的位置信息，检测是否换行
+    const rect = span.getBoundingClientRect()
+    // 如果当前span的顶部明显低于上一个span的底部，说明换行了
+    // 在换行处添加空格，防止跨行URL被错误合并
+    if (lastSpanBottom !== -Infinity && rect.top > lastSpanBottom - 2) {
+      // 如果fullText末尾不是空格，且当前text开头不是空格，添加空格分隔
+      if (fullText.length > 0 && !fullText.endsWith(' ') && !text.startsWith(' ')) {
+        fullText += ' '
+      }
+    }
+    lastSpanBottom = rect.bottom
 
     spanInfos.push({
       span,
