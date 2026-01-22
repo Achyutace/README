@@ -23,6 +23,7 @@ const pdfStore = usePdfStore()
 const aiStore = useAiStore()
 const libraryStore = useLibraryStore()
 const pageInput = ref('')
+const scaleInput = ref(String(pdfStore.scalePercent))
 const showRoadmap = ref(false)
 const selectedNode = ref<any>(null)
 
@@ -70,6 +71,23 @@ function handlePageInput() {
   }
   pageInput.value = ''
 }
+
+function applyScaleInput() {
+  const value = parseFloat(scaleInput.value)
+  if (isNaN(value)) {
+    scaleInput.value = String(pdfStore.scalePercent)
+    return
+  }
+  pdfStore.setScale(value / 100)
+  scaleInput.value = String(pdfStore.scalePercent)
+}
+
+watch(
+  () => pdfStore.scalePercent,
+  (val) => {
+    scaleInput.value = String(val)
+  }
+)
 </script>
 
 <template>
@@ -86,9 +104,19 @@ function handlePageInput() {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
           </svg>
         </button>
-        <span class="text-sm font-medium text-gray-700 min-w-[4rem] text-center">
-          {{ pdfStore.scalePercent }}%
-        </span>
+        <div class="flex items-center gap-1">
+          <input
+            v-model="scaleInput"
+            type="number"
+            min="50"
+            max="300"
+            step="1"
+            @keyup.enter="applyScaleInput"
+            @blur="applyScaleInput"
+            class="w-16 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500"
+          />
+          <span class="text-sm text-gray-600">%</span>
+        </div>
         <button
           @click="pdfStore.zoomIn"
           class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
