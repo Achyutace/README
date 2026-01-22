@@ -7,9 +7,10 @@
 3. 翻译缓存优化
 """
 
-import os
 from typing import Dict, List, Optional
 from pathlib import Path
+
+from config import settings
 
 try:
     from openai import OpenAI
@@ -44,20 +45,19 @@ class TranslateService:
         self.temperature = temperature
 
         # 初始化 OpenAI 客户端
-        api_key = os.getenv('TRANSLATE_API_KEY')
-        if api_key and HAS_OPENAI:
-            client_kwargs = {"api_key": api_key}
-            
-            # 支持 base_url 参数或环境变量
-            if base_url or os.getenv('TRANSLATE_API_BASE'):
-                client_kwargs["base_url"] = base_url or os.getenv('TRANSLATE_API_BASE')
-            
+        if settings.has_translate_key and HAS_OPENAI:
+            client_kwargs = {"api_key": settings.translate.api_key}
+
+            # 支持 base_url 参数或配置文件
+            if base_url or settings.translate.api_base:
+                client_kwargs["base_url"] = base_url or settings.translate.api_base
+
             self.client = OpenAI(**client_kwargs)
             self.has_client = True
         else:
             self.client = None
             self.has_client = False
-            print("Warning: OpenAI API key not found. Translate service will use demo mode.")
+            print("Warning: Translate API key not found. Translate service will use demo mode.")
 
     def translate(self, text: str, source_lang: str = "en", target_lang: str = "zh") -> Dict:
         """

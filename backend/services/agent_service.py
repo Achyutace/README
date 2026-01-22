@@ -8,7 +8,6 @@ Agent Service - 学术论文阅读助手 Agent [对话用]
 4. 综合生成 - 整合本地和外部信息，生成最终答案
 """
 
-import os
 import json
 from typing import Dict, List, Optional, TypedDict, Annotated
 from datetime import datetime
@@ -61,8 +60,8 @@ class AcademicAgentService:
         self.rag_service = rag_service  
   
   
-        api_key = openai_api_key or os.getenv('OPENAI_API_KEY')  
-        api_base = openai_api_base or os.getenv('OPENAI_API_BASE')   
+        api_key = openai_api_key
+        api_base = openai_api_base
         if api_key:  
             # 初始化 OpenAI 聊天模型  
             self.llm = ChatOpenAI(  

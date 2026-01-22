@@ -7,11 +7,12 @@
 3. 图片内容AI解析
 """
 
-import os
 import base64
 import io
 from typing import Dict, List, Optional
 from pathlib import Path
+
+from config import settings
 
 try:
     import fitz  # PyMuPDF
@@ -61,12 +62,14 @@ class ImageService:
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
         # 初始化 LLM（用于图片分析）
-        api_key = os.getenv('OPENAI_API_KEY')
-        if api_key and HAS_LANGCHAIN:
-            self.llm = ChatOpenAI(
-                model=model,
-                api_key=api_key
-            )
+        if settings.has_openai_key and HAS_LANGCHAIN:
+            llm_kwargs = {
+                "model": model,
+                "api_key": settings.openai.api_key
+            }
+            if settings.openai.api_base:
+                llm_kwargs["base_url"] = settings.openai.api_base
+            self.llm = ChatOpenAI(**llm_kwargs)
             self.has_llm = True
         else:
             self.llm = None

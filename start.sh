@@ -4,46 +4,11 @@
 
 echo "Starting README PDF Reader..."
 
-# Load configuration from config.yaml
-CONFIG_FILE="config.yaml"
-if [ -f "$CONFIG_FILE" ]; then
-    echo "Loading configuration from $CONFIG_FILE..."
-
-    # Parse YAML and export environment variables
-    # OpenAI
-    OPENAI_API_KEY=$(grep -A2 "^openai:" "$CONFIG_FILE" | grep "api_key:" | sed 's/.*api_key:[[:space:]]*"\([^"]*\)".*/\1/')
-    OPENAI_API_BASE=$(grep -A2 "^openai:" "$CONFIG_FILE" | grep "api_base:" | sed 's/.*api_base:[[:space:]]*"\([^"]*\)".*/\1/')
-
-    # Translation
-    TRANSLATE_API_KEY=$(grep -A2 "^translate:" "$CONFIG_FILE" | grep "api_key:" | sed 's/.*api_key:[[:space:]]*"\([^"]*\)".*/\1/')
-    TRANSLATE_API_BASE=$(grep -A2 "^translate:" "$CONFIG_FILE" | grep "api_base:" | sed 's/.*api_base:[[:space:]]*"\([^"]*\)".*/\1/')
-
-    # Tavily
-    TAVILY_API_KEY=$(grep -A2 "^tavily:" "$CONFIG_FILE" | grep "api_key:" | sed 's/.*api_key:[[:space:]]*"\([^"]*\)".*/\1/')
-
-    # Export non-empty values
-    if [ -n "$OPENAI_API_KEY" ]; then
-        export OPENAI_API_KEY="$OPENAI_API_KEY"
-        echo "  - OPENAI_API_KEY loaded"
-    fi
-    if [ -n "$OPENAI_API_BASE" ]; then
-        export OPENAI_API_BASE="$OPENAI_API_BASE"
-        echo "  - OPENAI_API_BASE loaded"
-    fi
-    if [ -n "$TRANSLATE_API_KEY" ]; then
-        export TRANSLATE_API_KEY="$TRANSLATE_API_KEY"
-        echo "  - TRANSLATE_API_KEY loaded"
-    fi
-    if [ -n "$TRANSLATE_API_BASE" ]; then
-        export TRANSLATE_API_BASE="$TRANSLATE_API_BASE"
-        echo "  - TRANSLATE_API_BASE loaded"
-    fi
-    if [ -n "$TAVILY_API_KEY" ]; then
-        export TAVILY_API_KEY="$TAVILY_API_KEY"
-        echo "  - TAVILY_API_KEY loaded"
-    fi
-else
-    echo "Warning: $CONFIG_FILE not found. Copy config_example.yaml to config.yaml and fill in your API keys."
+# Check config file
+if [ ! -f "config.yaml" ]; then
+    echo "Warning: config.yaml not found."
+    echo "Please copy config_example.yaml to config.yaml and fill in your API keys."
+    exit 1
 fi
 
 # Clean and create uploads directory
