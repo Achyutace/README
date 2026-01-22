@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue' // 引入 Vue 核心 API 与组件实例类型
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue' // 引入 Vue 核心 API 与组件实例类型
 import { useDebounceFn } from '@vueuse/core' // 引入防抖工具
 import {
   getDocument,
@@ -48,6 +48,16 @@ const CLICK_TIME_THRESHOLD = 300 // 点击时间小于此值视为点击（毫�
 // 循环选择高亮相关
 const highlightsAtCurrentPoint = ref<ReturnType<typeof pdfStore.getHighlightsAtPoint>>([])
 const currentHighlightIndex = ref(0)
+
+// 容器尺寸变化监听（用于面板收起/展开时保持页面位置）
+let resizeObserver: ResizeObserver | null = null
+let resizeTimeout: ReturnType<typeof setTimeout> | null = null
+const isResizing = ref(false)
+
+// 快速翻页检测
+let lastScrollTime = 0
+let scrollTimeoutId: ReturnType<typeof setTimeout> | null = null
+const RAPID_SCROLL_THRESHOLD = 300 // 300ms内的连续翻页视为快速翻页
 
 function handlePageContainerRef(
   pageNumber: number, // 当前页码
@@ -134,16 +144,27 @@ watch(
 watch(
   () => pdfStore.currentPage, // 监听当前页号
   (page) => {
+    // 清除之前的超时，避免累积
+    if (scrollTimeoutId) {
+      clearTimeout(scrollTimeoutId)
+      scrollTimeoutId = null
+    }
+
+    const now = Date.now()
+    const isRapidScroll = now - lastScrollTime < RAPID_SCROLL_THRESHOLD
+    lastScrollTime = now
+
     isProgrammaticScrolling.value = true
     scrollTargetPage.value = page
-    scrollToPage(page) // 页面变更时滚动到对应位置
-    // 安全回退：3秒后强制释放，防止卡死
-    setTimeout(() => {
+    scrollToPage(page, isRapidScroll) // 页面变更时滚动到对应位置，快速翻页时使用instant
+
+    // 安全回退：减少到500ms，快速翻页时能更快响应
+    scrollTimeoutId = setTimeout(() => {
       if (scrollTargetPage.value === page) {
         isProgrammaticScrolling.value = false
         scrollTargetPage.value = null
       }
-    }, 3000)
+    }, 500)
   }
 )
 
@@ -311,37 +332,81 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
   const layerRect = textLayer.getBoundingClientRect()
   const spans = Array.from(textLayer.querySelectorAll('span'))
 
+  // 收集所有span的信息：文本内容、起始位置、元素引用
+  type SpanInfo = {
+    span: HTMLElement
+    text: string
+    globalStart: number // 在合并文本中的起始位置
+    globalEnd: number   // 在合并文本中的结束位置
+  }
+
+  const spanInfos: SpanInfo[] = []
+  let fullText = ''
+
   spans.forEach(span => {
-    const textNode = span.firstChild
     const text = span.textContent || ''
-    if (!textNode || !text) return
+    if (!text) return
 
-    let match: RegExpExecArray | null
-    while ((match = urlRegex.exec(text)) !== null) {
-      const href = normalizeUrl(match[0])
-      if (!href) continue
-
-      const range = document.createRange()
-      range.setStart(textNode, match.index)
-      range.setEnd(textNode, match.index + match[0].length)
-      const rect = range.getBoundingClientRect()
-      range.detach()
-
-      if (!rect.width || !rect.height) continue
-
-      appendLinkOverlay(
-        container,
-        {
-          left: rect.left - layerRect.left,
-          top: rect.top - layerRect.top,
-          width: rect.width,
-          height: rect.height
-        },
-        href,
-        match[0]
-      )
-    }
+    spanInfos.push({
+      span,
+      text,
+      globalStart: fullText.length,
+      globalEnd: fullText.length + text.length
+    })
+    fullText += text
   })
+
+  // 在合并后的完整文本中匹配URL
+  let match: RegExpExecArray | null
+  while ((match = urlRegex.exec(fullText)) !== null) {
+    const urlStart = match.index
+    const urlEnd = match.index + match[0].length
+    const fullUrl = match[0]
+    const href = normalizeUrl(fullUrl)
+    if (!href) continue
+
+    // 找出这个URL跨越了哪些span
+    const affectedSpans = spanInfos.filter(info =>
+      info.globalEnd > urlStart && info.globalStart < urlEnd
+    )
+
+    // 为每个受影响的span创建对应的链接覆盖层
+    affectedSpans.forEach(info => {
+      const textNode = info.span.firstChild
+      if (!textNode) return
+
+      // 计算这个span中URL部分的本地偏移
+      const localStart = Math.max(0, urlStart - info.globalStart)
+      const localEnd = Math.min(info.text.length, urlEnd - info.globalStart)
+
+      if (localStart >= localEnd) return
+
+      try {
+        const range = document.createRange()
+        range.setStart(textNode, localStart)
+        range.setEnd(textNode, localEnd)
+        const rect = range.getBoundingClientRect()
+        range.detach()
+
+        if (!rect.width || !rect.height) return
+
+        // 所有行都使用完整的URL作为href
+        appendLinkOverlay(
+          container,
+          {
+            left: rect.left - layerRect.left,
+            top: rect.top - layerRect.top,
+            width: rect.width,
+            height: rect.height
+          },
+          href,
+          fullUrl // title显示完整URL
+        )
+      } catch (e) {
+        // 忽略range设置失败的情况
+      }
+    })
+  }
 }
 
 async function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement, textLayer?: HTMLElement) {
@@ -665,14 +730,15 @@ function getBoundingBoxStyle(rects: { left: number, top: number, width: number, 
   }
 }
 
-function scrollToPage(page: number) {
+function scrollToPage(page: number, instant: boolean = false) {
   if (!containerRef.value) return // 无容器则返回
   const refs = pageRefs.get(page) // 获取目标页引用
+  const behavior = instant ? 'instant' : 'smooth' // 快速翻页时使用instant滚动
 
   if (refs) {
     containerRef.value.scrollTo({
       top: refs.container.offsetTop - 12,
-      behavior: 'smooth'
+      behavior: behavior as ScrollBehavior
     })
     return
   }
@@ -683,7 +749,7 @@ function scrollToPage(page: number) {
     if (retryRefs) {
       containerRef.value?.scrollTo({
         top: retryRefs.container.offsetTop - 12,
-        behavior: 'smooth'
+        behavior: behavior as ScrollBehavior
       })
     }
   })
@@ -737,7 +803,50 @@ function handleScroll(){
 }
 
 
+// 设置容器尺寸变化监听器
+onMounted(() => {
+  // 等待DOM渲染完成后设置ResizeObserver
+  nextTick(() => {
+    if (!containerRef.value) return
+
+    resizeObserver = new ResizeObserver(() => {
+      // 容器尺寸变化时，标记为正在resize
+      if (!isResizing.value && pdfDoc.value) {
+        isResizing.value = true
+      }
+
+      // 清除之前的timeout
+      if (resizeTimeout) {
+        clearTimeout(resizeTimeout)
+      }
+
+      // 延迟后恢复到当前页
+      resizeTimeout = setTimeout(() => {
+        if (isResizing.value && pdfStore.currentPage) {
+          // 尺寸变化稳定后，滚动到当前页
+          const targetPage = pdfStore.currentPage
+          isProgrammaticScrolling.value = true
+          scrollTargetPage.value = targetPage
+          scrollToPage(targetPage)
+          isResizing.value = false
+        }
+      }, 150)
+    })
+
+    resizeObserver.observe(containerRef.value)
+  })
+})
+
 onBeforeUnmount(() => {
+  // 清理ResizeObserver
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (resizeTimeout) {
+    clearTimeout(resizeTimeout)
+    resizeTimeout = null
+  }
   cleanup() // 组件卸载前清理资源
 })
 </script>

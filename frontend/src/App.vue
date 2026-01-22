@@ -181,67 +181,56 @@ const bottomPanelStyle = computed(() => {
 
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden">
-      <!-- When both minimized: Top Row = Toolbar + Minimized Bars -->
-      <template v-if="bothMinimized">
-        <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
-          <!-- PDF Toolbar -->
-          <div class="flex-1">
-            <PdfToolbar v-if="pdfStore.currentPdfUrl" />
-            <div v-else class="h-[49px]"></div>
-          </div>
-          
-          <!-- Right side minimized bars (horizontal layout) -->
-          <div 
-            v-if="libraryStore.currentDocument && !aiStore.isPanelCollapsed"
-            class="flex border-l border-gray-200"
-            :style="{ width: MINIMIZED_WIDTH + 'px' }"
+      <!-- Top Row: Toolbar + Minimized Bars (when both minimized) -->
+      <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
+        <!-- PDF Toolbar -->
+        <div class="flex-1">
+          <PdfToolbar v-if="pdfStore.currentPdfUrl" />
+          <div v-else class="h-[49px]"></div>
+        </div>
+
+        <!-- Right side minimized bars (horizontal layout) - only when both minimized -->
+        <div
+          v-if="bothMinimized && libraryStore.currentDocument && !aiStore.isPanelCollapsed"
+          class="flex border-l border-gray-200"
+          :style="{ width: MINIMIZED_WIDTH + 'px' }"
+        >
+          <!-- Top panel minimized bar -->
+          <div
+            class="flex-1 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors border-r border-gray-600"
+            @click="toggleTopMinimize"
           >
-            <!-- Top panel minimized bar -->
-            <div 
-              class="flex-1 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors border-r border-gray-600"
-              @click="toggleTopMinimize"
-            >
-              <!-- Triangle pointing up (minimized state) -->
-              <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M7 14l5-5 5 5H7z"/>
-              </svg>
-              <span class="text-white text-xs font-medium truncate">Notes</span>
-            </div>
-            <!-- Bottom panel minimized bar -->
-            <div 
-              class="flex-1 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
-              @click="toggleBottomMinimize"
-            >
-              <!-- Triangle pointing up (minimized state) -->
-              <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M7 14l5-5 5 5H7z"/>
-              </svg>
-              <span class="text-white text-xs font-medium truncate">Chat</span>
-            </div>
+            <!-- Triangle pointing up (minimized state) -->
+            <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M7 14l5-5 5 5H7z"/>
+            </svg>
+            <span class="text-white text-xs font-medium truncate">Notes</span>
+          </div>
+          <!-- Bottom panel minimized bar -->
+          <div
+            class="flex-1 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
+            @click="toggleBottomMinimize"
+          >
+            <!-- Triangle pointing up (minimized state) -->
+            <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M7 14l5-5 5 5H7z"/>
+            </svg>
+            <span class="text-white text-xs font-medium truncate">Chat</span>
           </div>
         </div>
-        
-        <!-- PDF Viewer fullscreen -->
+      </div>
+
+      <!-- Content Row: PDF Viewer + Right Panels -->
+      <div class="flex flex-1 overflow-hidden">
+        <!-- PDF Viewer - always present, never destroyed -->
         <div class="flex-1 overflow-hidden">
           <PdfViewer />
         </div>
-      </template>
 
-      <!-- Normal state: PDF area (with toolbar) on left, Right panels on right -->
-      <template v-else>
-        <div class="flex flex-1 overflow-hidden">
-          <!-- Left: PDF Viewer with its toolbar -->
-          <div class="flex-1 flex flex-col overflow-hidden">
-            <div class="bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
-              <PdfToolbar v-if="pdfStore.currentPdfUrl" />
-              <div v-else class="h-[49px]"></div>
-            </div>
-            <PdfViewer />
-          </div>
-
-          <!-- Right Panel Container (Split View) -->
+        <!-- Right Panel Container (Split View) - hidden when both minimized -->
         <aside
-          v-if="libraryStore.currentDocument && !bothMinimized"
+          v-if="libraryStore.currentDocument"
+          v-show="!bothMinimized"
           ref="sidebarRef"
           class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
           :class="aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : ''"
@@ -355,8 +344,7 @@ const bottomPanelStyle = computed(() => {
             </template>
           </div>
         </aside>
-        </div>
-      </template>
+      </div>
     </main>
   </div>
 </template>
