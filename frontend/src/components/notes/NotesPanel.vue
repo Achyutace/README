@@ -115,15 +115,7 @@ defineExpose({ addCard })
     <div class="flex-1 overflow-y-auto py-2 space-y-1">
       <!-- Empty State -->
       <div v-if="cards.length === 0" class="flex items-center justify-center h-full">
-        <div class="text-center">
-          <p class="text-sm text-gray-400 dark:text-gray-500 mb-2">暂无笔记卡片</p>
-          <button
-            @click="addCard"
-            class="text-xs text-primary-500 hover:text-primary-600 dark:text-primary-400"
-          >
-            + 添加第一张卡片
-          </button>
-        </div>
+        
       </div>
 
       <!-- Card List -->
