@@ -42,8 +42,11 @@ const renderedPages = ref<Set<number>>(new Set())
 
 const showTooltip = ref(false) // 是否显示选中文本的工具提示
 const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
-const isProgrammaticScrolling = ref(false) // 标记是否正在进行程序化滚动
-const scrollTargetPage = ref<number | null>(null) // 程序滚动目标页
+
+// 后台预加载相关
+const preloadProgress = ref(0) // 预加载进度 (0-100)
+const isPreloading = ref(false) // 是否正在预加载
+let preloadAbortController: AbortController | null = null // 用于取消预加载
 
 // 点击/拖动检测相关
 const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
@@ -58,11 +61,6 @@ const currentHighlightIndex = ref(0)
 let resizeObserver: ResizeObserver | null = null
 let resizeTimeout: ReturnType<typeof setTimeout> | null = null
 const isResizing = ref(false)
-
-// 快速翻页检测
-let lastScrollTime = 0
-let scrollTimeoutId: ReturnType<typeof setTimeout> | null = null
-const RAPID_SCROLL_THRESHOLD = 300 // 300ms内的连续翻页视为快速翻页
 
 // 获取指定页面的缩放后尺寸
 function getScaledPageSize(pageNumber: number) {
@@ -152,40 +150,39 @@ const updateVisiblePages = useDebounceFn(() => {
 watch(
   () => pdfStore.scale, // 监听缩放比例
   () => {
+    // 取消当前预加载
+    if (preloadAbortController) {
+      preloadAbortController.abort()
+      preloadAbortController = null
+    }
+
     // 缩放时清除所有现有任务和已渲染状态，重新检测可见区域进行渲染
     renderTasks.forEach(task => task.cancel())
     renderTasks.clear()
     renderedPages.value = new Set() // 清空已渲染页面，因为缩放后需要重新渲染
+    preloadProgress.value = 0
+
     nextTick(() => {
       updateVisiblePages()
+      // 延迟重新启动预加载
+      setTimeout(() => {
+        startBackgroundPreload()
+      }, 500)
     })
   }
 )
 
+// 监听工具栏触发的页面跳转（仅响应用户主动跳转，不自动触发）
+let lastUserTriggeredPage = 1
 watch(
-  () => pdfStore.currentPage, // 监听当前页号
-  (page) => {
-    // 清除之前的超时，避免累积
-    if (scrollTimeoutId) {
-      clearTimeout(scrollTimeoutId)
-      scrollTimeoutId = null
+  () => pdfStore.currentPage,
+  (page, oldPage) => {
+    // 只有当页码变化且不是由滚动触发时才跳转
+    // 通过比较 lastUserTriggeredPage 来判断是否是用户主动跳转
+    if (page !== oldPage && page !== lastUserTriggeredPage) {
+      lastUserTriggeredPage = page
+      scrollToPage(page, true) // 使用 instant 滚动
     }
-
-    const now = Date.now()
-    const isRapidScroll = now - lastScrollTime < RAPID_SCROLL_THRESHOLD
-    lastScrollTime = now
-
-    isProgrammaticScrolling.value = true
-    scrollTargetPage.value = page
-    scrollToPage(page, isRapidScroll) // 页面变更时滚动到对应位置，快速翻页时使用instant
-
-    // 安全回退：减少到500ms，快速翻页时能更快响应
-    scrollTimeoutId = setTimeout(() => {
-      if (scrollTargetPage.value === page) {
-        isProgrammaticScrolling.value = false
-        scrollTargetPage.value = null
-      }
-    }, 500)
   }
 )
 
@@ -505,10 +502,88 @@ async function loadPdf(url: string) {
 
   pdfStore.isLoading = false // 结束加载态
   await nextTick() // 等待 DOM 更新
-  updateVisiblePages() // 初始渲染可见页面
+
+  // 先渲染可见页面，然后启动后台预加载
+  updateVisiblePages()
+
+  // 延迟启动后台预加载，让可见页面优先渲染
+  setTimeout(() => {
+    startBackgroundPreload()
+  }, 500)
+}
+
+// 后台预加载所有页面
+async function startBackgroundPreload() {
+  const pdf = pdfDoc.value
+  if (!pdf) return
+
+  // 取消之前的预加载
+  if (preloadAbortController) {
+    preloadAbortController.abort()
+  }
+  preloadAbortController = new AbortController()
+  const signal = preloadAbortController.signal
+
+  isPreloading.value = true
+  preloadProgress.value = 0
+
+  const totalPages = pdf.numPages
+  let loadedCount = 0
+
+  // 按顺序预加载所有页面
+  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
+    if (signal.aborted) break
+
+    // 如果页面已经渲染过，跳过
+    if (renderedPages.value.has(pageNumber)) {
+      loadedCount++
+      preloadProgress.value = Math.round((loadedCount / totalPages) * 100)
+      continue
+    }
+
+    // 等待 DOM 元素准备好
+    const refs = pageRefs.get(pageNumber)
+    if (refs && !renderTasks.has(pageNumber)) {
+      // 使用 requestIdleCallback 或 setTimeout 在空闲时渲染
+      await new Promise<void>((resolve) => {
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(() => {
+            if (!signal.aborted) {
+              renderPage(pageNumber)
+            }
+            resolve()
+          }, { timeout: 100 })
+        } else {
+          setTimeout(() => {
+            if (!signal.aborted) {
+              renderPage(pageNumber)
+            }
+            resolve()
+          }, 10)
+        }
+      })
+
+      // 等待渲染完成
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+
+    loadedCount++
+    preloadProgress.value = Math.round((loadedCount / totalPages) * 100)
+  }
+
+  isPreloading.value = false
+  preloadProgress.value = 100
 }
 
 function cleanup() {
+  // 取消后台预加载
+  if (preloadAbortController) {
+    preloadAbortController.abort()
+    preloadAbortController = null
+  }
+  isPreloading.value = false
+  preloadProgress.value = 0
+
   renderTasks.forEach((task) => task.cancel()) // 取消未完成的渲染任务
   renderTasks.clear() // 清空任务缓存
   pageRefs.clear() // 清空页面引用缓存
@@ -769,7 +844,7 @@ function getBoundingBoxStyle(rects: { left: number, top: number, width: number, 
 function scrollToPage(page: number, instant: boolean = false) {
   if (!containerRef.value) return // 无容器则返回
   const refs = pageRefs.get(page) // 获取目标页引用
-  const behavior = instant ? 'instant' : 'smooth' // 快速翻页时使用instant滚动
+  const behavior = instant ? 'instant' : 'smooth'
 
   if (refs) {
     containerRef.value.scrollTo({
@@ -791,52 +866,34 @@ function scrollToPage(page: number, instant: boolean = false) {
   })
 }
 
-function handleUserInteraction() {
-  if (isProgrammaticScrolling.value) {
-    isProgrammaticScrolling.value = false
-    scrollTargetPage.value = null
-  }
-}
-
-function handleScroll(){
-  if (!containerRef.value) return // 无容器则返回
+// 滚动处理：仅更新页码显示，不触发自动跳转
+const handleScroll = useDebounceFn(() => {
+  if (!containerRef.value) return
 
   updateVisiblePages() // 滚动时触发可见检测
 
-  // 这里的 isProgrammaticScrolling 检查移到下面，结合 nearestPage 判断
-  
-  const pages = Array.from(containerRef.value.querySelectorAll('.pdf-page')) as HTMLElement[] // 收集所有页面元素
-  if (!pages.length) return // 无页面则返回
+  // 计算当前可见的页面
+  const pages = Array.from(containerRef.value.querySelectorAll('.pdf-page')) as HTMLElement[]
+  if (!pages.length) return
 
-  const containerTop = containerRef.value.getBoundingClientRect().top // 容器顶部位置
-  let nearestPage = pdfStore.currentPage // 当前最近页初值
-  let minDistance = Number.POSITIVE_INFINITY // 最小距离初值
+  const containerTop = containerRef.value.getBoundingClientRect().top
+  let nearestPage = pdfStore.currentPage
+  let minDistance = Number.POSITIVE_INFINITY
 
   pages.forEach((pageEl, index) => {
-    const distance = Math.abs(pageEl.getBoundingClientRect().top - containerTop) // 计算页面顶部与容器顶部距离
+    const distance = Math.abs(pageEl.getBoundingClientRect().top - containerTop)
     if (distance < minDistance) {
-      minDistance = distance // 更新最小距离
-      nearestPage = index + 1 // 记录最近页号
+      minDistance = distance
+      nearestPage = index + 1
     }
   })
 
-  // 如果处于程序滚动模式
-  if (isProgrammaticScrolling.value) {
-    // 检查是否到达目标页
-    if (scrollTargetPage.value !== null && nearestPage === scrollTargetPage.value) {
-        // 到达目标，解除锁定
-        isProgrammaticScrolling.value = false
-        scrollTargetPage.value = null
-    } else {
-        // 未到达目标，忽略中间状态更新
-        return
-    }
-  }
-
+  // 仅更新页码显示，不触发滚动（通过更新 lastUserTriggeredPage 防止 watch 触发滚动）
   if (nearestPage !== pdfStore.currentPage && nearestPage <= pdfStore.totalPages) {
-    pdfStore.goToPage(nearestPage) // 同步状态中的当前页
+    lastUserTriggeredPage = nearestPage
+    pdfStore.goToPage(nearestPage)
   }
-}
+}, 50)
 
 
 // 设置容器尺寸变化监听器
@@ -856,14 +913,10 @@ onMounted(() => {
         clearTimeout(resizeTimeout)
       }
 
-      // 延迟后恢复到当前页
+      // 延迟后更新可见页面渲染
       resizeTimeout = setTimeout(() => {
-        if (isResizing.value && pdfStore.currentPage) {
-          // 尺寸变化稳定后，滚动到当前页
-          const targetPage = pdfStore.currentPage
-          isProgrammaticScrolling.value = true
-          scrollTargetPage.value = targetPage
-          scrollToPage(targetPage)
+        if (isResizing.value) {
+          updateVisiblePages()
           isResizing.value = false
         }
       }, 150)
@@ -889,7 +942,17 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 组件根容器，纵向排列，占满可用高度 -->
-  <div class="flex flex-col h-full bg-gray-100">
+  <div class="flex flex-col h-full bg-gray-100 relative">
+    <!-- 预加载进度条 -->
+    <div
+      v-if="isPreloading && preloadProgress < 100"
+      class="absolute top-0 left-0 right-0 z-20 h-1 bg-gray-200"
+    >
+      <div
+        class="h-full bg-blue-500 transition-all duration-300"
+        :style="{ width: preloadProgress + '%' }"
+      ></div>
+    </div>
     <!-- 主内容区，显示 PDF 页面的滚动容器 -->
     <div
       v-if="pdfStore.currentPdfUrl"
@@ -898,8 +961,6 @@ onBeforeUnmount(() => {
       @mousedown="handleMouseDown"
       @mouseup="handleMouseUp"
       @scroll="handleScroll"
-      @wheel="handleUserInteraction"
-      @touchstart="handleUserInteraction"
     >
       <!-- 居中内容区，控制最大宽度与行间距 -->
       <div class="space-y-4 flex flex-col items-center">
