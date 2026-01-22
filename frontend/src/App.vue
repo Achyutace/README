@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue' 
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import LibrarySidebar from './components/sidebar/LibrarySidebar.vue'
 import PdfViewer from './components/pdf/PdfViewer.vue'
 import PdfToolbar from './components/pdf/PdfToolbar.vue'
@@ -39,8 +39,67 @@ const splitRatio = ref(0.45)
 const isResizingSplit = ref(false)
 const sidebarRef = ref<HTMLElement | null>(null)
 const chatTabRef = ref<any>(null)
+const notesPanelRef = ref<any>(null)
 
 const SNAP_THRESHOLD = 60 // Distance from edge to trigger auto-minimize
+
+// Theme toggle button drag state
+const themeButtonPos = ref({ x: window.innerWidth - 60, y: 16 })
+const isDraggingThemeButton = ref(false)
+const hasDragged = ref(false)
+const dragOffset = ref({ x: 0, y: 0 })
+const dragStartPos = ref({ x: 0, y: 0 })
+
+const startDragThemeButton = (e: MouseEvent) => {
+  isDraggingThemeButton.value = true
+  hasDragged.value = false
+  dragStartPos.value = { x: e.clientX, y: e.clientY }
+  dragOffset.value = {
+    x: e.clientX - themeButtonPos.value.x,
+    y: e.clientY - themeButtonPos.value.y
+  }
+  e.preventDefault()
+}
+
+const onDragThemeButton = (e: MouseEvent) => {
+  if (!isDraggingThemeButton.value) return
+
+  // Check if actually dragged (moved more than 5px)
+  const dx = Math.abs(e.clientX - dragStartPos.value.x)
+  const dy = Math.abs(e.clientY - dragStartPos.value.y)
+  if (dx > 5 || dy > 5) {
+    hasDragged.value = true
+  }
+
+  const newX = e.clientX - dragOffset.value.x
+  const newY = e.clientY - dragOffset.value.y
+  // Keep button within viewport bounds
+  themeButtonPos.value = {
+    x: Math.max(0, Math.min(window.innerWidth - 44, newX)),
+    y: Math.max(0, Math.min(window.innerHeight - 44, newY))
+  }
+}
+
+const stopDragThemeButton = () => {
+  isDraggingThemeButton.value = false
+}
+
+const handleThemeButtonClick = () => {
+  // Only toggle theme if not dragged
+  if (!hasDragged.value) {
+    themeStore.toggleTheme()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('mousemove', onDragThemeButton)
+  document.addEventListener('mouseup', stopDragThemeButton)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onDragThemeButton)
+  document.removeEventListener('mouseup', stopDragThemeButton)
+})
 
 // Toggle minimize for top panel
 const toggleTopMinimize = () => {
@@ -160,18 +219,20 @@ const bottomPanelStyle = computed(() => {
 
 <template>
   <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
-    <!-- Theme Toggle Button - Fixed position -->
+    <!-- Theme Toggle Button - Draggable, top layer -->
     <button
-      @click="themeStore.toggleTheme()"
-      class="fixed top-4 right-4 z-50 p-2.5 rounded-lg bg-white/90 dark:bg-[#2d2d30] hover:bg-gray-100 dark:hover:bg-[#3e3e42] border border-gray-200/60 dark:border-gray-700/60 shadow-lg transition-all duration-200"
-      title="切换主题"
+      @click="handleThemeButtonClick"
+      @mousedown="startDragThemeButton"
+      class="fixed z-[9999] p-2.5 rounded-lg bg-white/90 dark:bg-[#2d2d30] hover:bg-gray-100 dark:hover:bg-[#3e3e42] border border-gray-200/60 dark:border-gray-700/60 shadow-lg transition-colors duration-200 cursor-move select-none"
+      :style="{ left: themeButtonPos.x + 'px', top: themeButtonPos.y + 'px' }"
+      title="切换主题 (可拖动)"
     >
       <!-- Sun icon (show in dark mode) -->
-      <svg v-if="themeStore.isDarkMode" class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg v-if="themeStore.isDarkMode" class="w-5 h-5 text-yellow-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
       </svg>
       <!-- Moon icon (show in light mode) -->
-      <svg v-else class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg v-else class="w-5 h-5 text-gray-700 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
       </svg>
     </button>
@@ -266,21 +327,33 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button -->
-              <div class="flex items-center px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+                <div class="flex items-center">
+                  <button
+                    @click="toggleTopMinimize"
+                    class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
+                    title="最小化"
+                  >
+                    <!-- Triangle pointing down (to collapse) -->
+                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7 10l5 5 5-5H7z"/>
+                    </svg>
+                  </button>
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
+                </div>
+                <!-- Add Card Button -->
                 <button
-                  @click="toggleTopMinimize"
-                  class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
-                  title="最小化"
+                  @click="notesPanelRef?.addCard()"
+                  class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  title="添加卡片"
                 >
-                  <!-- Triangle pointing down (to collapse) -->
-                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M7 10l5 5 5-5H7z"/>
+                  <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                   </svg>
                 </button>
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
               </div>
               <div class="flex-1 overflow-hidden">
-                <NotesPanel />
+                <NotesPanel ref="notesPanelRef" />
               </div>
             </template>
           </div>
