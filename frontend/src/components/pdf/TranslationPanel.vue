@@ -93,12 +93,12 @@ function onDrag(e: MouseEvent) {
   const snapPos = calculateSnapPosition()
   if (snapPos) {
     snapTargetRect.value = snapPos
-    // 检查是否接近吸附区域
+    // 检查是否接近吸附区域（增大吸附范围到120px）
     const distance = Math.sqrt(
-      Math.pow(newX - snapPos.left, 2) + 
+      Math.pow(newX - snapPos.left, 2) +
       Math.pow(newY - snapPos.top, 2)
     )
-    isNearSnapTarget.value = distance < 80
+    isNearSnapTarget.value = distance < 120
   }
   
   // 限制在视口内
@@ -114,16 +114,16 @@ function onDrag(e: MouseEvent) {
 // 停止拖动
 function stopDrag() {
   if (isDragging.value && isNearSnapTarget.value && snapTargetRect.value) {
-    // 执行吸附
+    // 执行吸附（稍微偏移，避免完全覆盖原文）
     snappedToParagraph.value = true
     pdfStore.updateTranslationPanelPosition({
-      x: snapTargetRect.value.left,
-      y: snapTargetRect.value.top
+      x: snapTargetRect.value.left + 4,
+      y: snapTargetRect.value.top + 4
     })
-    // 调整面板大小匹配段落
-    panelWidth.value = Math.max(minWidth, Math.min(maxWidth, snapTargetRect.value.width))
+    // 调整面板大小匹配段落（稍微缩小，让原文边缘可见）
+    panelWidth.value = Math.max(minWidth, Math.min(maxWidth, snapTargetRect.value.width - 8))
   }
-  
+
   isDragging.value = false
   isNearSnapTarget.value = false
   isResizing.value = false
@@ -183,12 +183,12 @@ function onResize(e: MouseEvent) {
 // 监听PDF滚动，更新吸附位置
 function onPdfScroll() {
   if (!snappedToParagraph.value) return
-  
+
   const snapPos = calculateSnapPosition()
   if (snapPos) {
     pdfStore.updateTranslationPanelPosition({
-      x: snapPos.left,
-      y: snapPos.top
+      x: snapPos.left + 4,
+      y: snapPos.top + 4
     })
   }
 }
@@ -369,13 +369,23 @@ onBeforeUnmount(() => {
 <style scoped>
 .translation-panel {
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15), 0 8px 16px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
+  background: rgba(255, 255, 255, 0.92) !important;
+}
+
+.dark .translation-panel {
+  background: rgba(45, 45, 48, 0.92) !important;
 }
 
 .translation-panel.is-snapped {
   border: 2px solid #3b82f6;
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+
+.dark .translation-panel.is-snapped {
+  background: rgba(45, 45, 48, 0.85) !important;
 }
 
 .loading-spinner {
@@ -474,12 +484,14 @@ onBeforeUnmount(() => {
   border: 2px dashed #9ca3af;
   border-radius: 8px;
   background: rgba(156, 163, 175, 0.1);
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .snap-hint-active {
   border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.15);
+  border-width: 3px;
+  background: rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
 }
 
 .snap-hint-text {
@@ -487,11 +499,13 @@ onBeforeUnmount(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  padding: 6px 12px;
-  background: rgba(0, 0, 0, 0.7);
+  padding: 8px 16px;
+  background: rgba(59, 130, 246, 0.9);
   color: white;
   font-size: 12px;
-  border-radius: 4px;
+  font-weight: 500;
+  border-radius: 6px;
   white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 </style>
