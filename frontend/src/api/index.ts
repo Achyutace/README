@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Keyword, Summary, Translation, ChatMessage, Roadmap } from '../types'
+import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph } from '../types'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
@@ -12,6 +12,7 @@ export interface PdfUploadResponse {
   pageCount: number
   fileHash: string
   isNewUpload: boolean
+  paragraphs?: PdfParagraph[]  // 段落数据
 }
 
 export interface ExtractTextResponse {
@@ -72,6 +73,21 @@ export const aiApi = {
   // 如果前端只是想翻译任意文本，后端需要在 router/translate.py 加一个通用接口
   translateText: async (text: string): Promise<Translation> => {
     const { data } = await api.post<Translation>('/translate/text', { text })
+    return data
+  },
+
+  // 翻译段落 -> 对应后端 router/translate.py
+  translateParagraph: async (pdfId: string, paragraphId: string, force: boolean = false): Promise<{
+    success: boolean
+    translation: string
+    cached: boolean
+    paragraphId: string
+  }> => {
+    const { data } = await api.post('/translate/paragraph', {
+      pdfId,
+      paragraphId,
+      force
+    })
     return data
   },
 

@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { PdfDocument } from '../types'
+import type { PdfDocument, PdfParagraph } from '../types'
+import { usePdfStore } from './pdf'
 
 export const useLibraryStore = defineStore('library', () => {
+  const pdfStore = usePdfStore()
   const documents = ref<PdfDocument[]>([])
   const currentDocumentId = ref<string | null>(null)
 
@@ -36,6 +38,12 @@ export const useLibraryStore = defineStore('library', () => {
       }
       
       documents.value.push(doc)
+      
+      // 保存段落数据到 pdfStore
+      if (data.paragraphs && data.paragraphs.length > 0) {
+        pdfStore.setParagraphs(data.id, data.paragraphs as PdfParagraph[])
+      }
+      
       return doc
     } catch (error) {
       console.error('Failed to upload PDF:', error)

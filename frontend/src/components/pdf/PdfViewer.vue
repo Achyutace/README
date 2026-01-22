@@ -15,6 +15,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url' // 使用 ?url �
 import { usePdfStore } from '../../stores/pdf' // 使用 Pinia 中的 PDF 状态仓库
 import { useLibraryStore } from '../../stores/library' // 使用 Pinia 中的文库状态仓库
 import TextSelectionTooltip from './TextSelectionTooltip.vue' // 导入文字选中提示组件
+import TranslationPanel from './TranslationPanel.vue' // 导入翻译面板组件
 
 GlobalWorkerOptions.workerSrc = pdfWorker // 设置 pdf.js 全局 worker 路径
 
@@ -891,6 +892,42 @@ function closeTooltip() {
   currentHighlightIndex.value = 0
 }
 
+// 点击段落光标，打开翻译面板
+function handleParagraphMarkerClick(event: MouseEvent, paragraphId: string, originalText: string) {
+  event.stopPropagation()
+  event.preventDefault()
+  
+  // 获取光标元素位置，计算翻译面板位置（显示在右侧）
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  
+  // 默认显示在段落右边
+  const panelX = rect.right + 10
+  const panelY = rect.top
+  
+  // 如果右边空间不足，显示在左边
+  const panelWidth = 320
+  const finalX = (panelX + panelWidth > window.innerWidth) ? (rect.left - panelWidth - 10) : panelX
+  
+  pdfStore.openTranslationPanel(paragraphId, { x: Math.max(0, finalX), y: Math.max(0, panelY) }, originalText)
+}
+
+// 计算段落光标在页面中的位置（考虑缩放）
+function getParagraphMarkerStyle(paragraph: { bbox: { x0: number; y0: number } }, pageNumber: number) {
+  const size = pageSizes.value.get(pageNumber)
+  if (!size) return { display: 'none' }
+  
+  // 光标显示在段落左上角
+  const left = (paragraph.bbox.x0 / size.width) * 100
+  const top = (paragraph.bbox.y0 / size.height) * 100
+  
+  return {
+    left: `${left}%`,
+    top: `${top}%`,
+    transform: 'translate(-100%, -50%)'
+  }
+}
+
 function findPageElement(node: Node | null): HTMLElement | null {
   let current: Node | null = node
   while (current) {
@@ -1109,6 +1146,25 @@ onBeforeUnmount(() => {
           </div>
           <div class="textLayer absolute inset-0" /> 
           <div class="linkLayer absolute inset-0" /> <!-- 链接层允许点击内部链接 -->
+          
+          <!-- 段落光标层 -->
+          <div class="paragraphMarkerLayer absolute inset-0 pointer-events-none z-10">
+            <div
+              v-for="paragraph in pdfStore.getParagraphsByPage(page)"
+              :key="paragraph.id"
+              :data-paragraph-id="paragraph.id"
+              class="paragraph-marker absolute pointer-events-auto cursor-pointer"
+              :style="getParagraphMarkerStyle(paragraph, page)"
+              @click="handleParagraphMarkerClick($event, paragraph.id, paragraph.content)"
+              :title="'点击翻译此段落'"
+            >
+              <div class="marker-icon">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                </svg>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1134,6 +1190,9 @@ onBeforeUnmount(() => {
       :highlight="pdfStore.selectedHighlight"
       @close="closeTooltip"
     />
+    
+    <!-- 翻译面板（可拖动，位于最上层） -->
+    <TranslationPanel />
   </div>
 </template>
 
@@ -1190,5 +1249,40 @@ onBeforeUnmount(() => {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 段落光标层 */
+.paragraphMarkerLayer {
+  z-index: 5;
+}
+
+/* 段落光标样式 */
+.paragraph-marker {
+  z-index: 6;
+}
+
+.paragraph-marker .marker-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease;
+  opacity: 0.85;
+}
+
+.paragraph-marker:hover .marker-icon {
+  opacity: 1;
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
+}
+
+.paragraph-marker .marker-icon svg {
+  width: 12px;
+  height: 12px;
 }
 </style>

@@ -79,3 +79,29 @@ export interface AiPanelTab {
   label: string
   icon: string
 }
+
+// PDF段落数据类型（对应后端 pdf_service.parse_paragraphs 返回）
+export interface PdfParagraph {
+  id: string           // 段落ID，格式: pdf_chk_{pdf_id前8位}_{页码}_{块号}
+  page: number         // 页码（1-based）
+  bbox: {              // 段落在PDF页面中的坐标
+    x0: number
+    y0: number
+    x1: number
+    y1: number
+    width: number
+    height: number
+  }
+  content: string      // 段落文本内容
+  wordCount: number    // 单词数
+}
+
+// 翻译面板状态
+export interface TranslationPanelState {
+  isVisible: boolean
+  paragraphId: string
+  position: { x: number; y: number }
+  translation: string
+  isLoading: boolean
+  originalText: string
+}
