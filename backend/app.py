@@ -5,12 +5,12 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 # ==================== 1. 导入服务类 ====================
-# 假设服务文件都在 services/ 目录下
 from services.pdf_service import PdfService
 from services.storage_service import StorageService
 from services.rag_service import RAGService
 from services.translate_service import TranslateService
 from services.agent_service import AcademicAgentService
+from services.chat_service import ChatService  
 
 # ==================== 2. 导入路由蓝图 ====================
 from route.upload import upload_bp
@@ -70,6 +70,12 @@ app.translate_service = translate_service
 agent_service = AcademicAgentService(rag_service=rag_service)
 app.agent_service = agent_service
 
+# (5) Chat 服务：负责会话管理业务逻辑 [新增]
+# 依赖 storage_service 进行持久化
+# 路由中通过 current_app.chat_service 访问
+chat_service = ChatService(storage_service=storage_service)
+app.chat_service = chat_service
+
 # ==================== 5. 请求上下文钩子 ====================
 
 @app.before_request
@@ -123,7 +129,8 @@ def health_check():
             'storage': True,
             'rag': hasattr(app, 'rag_service'),
             'translate': hasattr(app, 'translate_service'),
-            'agent': hasattr(app, 'agent_service')
+            'agent': hasattr(app, 'agent_service'),
+            'chat': hasattr(app, 'chat_service') # [新增] 检查 ChatService
         }
     })
 

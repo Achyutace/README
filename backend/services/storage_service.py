@@ -637,3 +637,136 @@ class StorageService:
             'recent_notes': all_notes[:5],  # 最近5条笔记
             'recent_highlights': all_highlights[:5]  # 最近5条高亮
         }
+    
+    # ==================== 聊天记录管理 ====================
+    
+    def create_chat_session(self, session_id: str, file_hash: str = None, 
+                           title: str = None) -> int:
+        """
+        创建聊天会话
+        
+        Args:
+            session_id: 会话ID（UUID）
+            file_hash: 关联的PDF文件哈希值（可选）
+            title: 会话标题（可选）
+            
+        Returns:
+            会话数据库ID
+        """
+        return self.db.create_chat_session(
+            session_id=session_id,
+            user_id=self.user_id,
+            file_hash=file_hash,
+            title=title
+        )
+    
+    def add_chat_message(self, session_id: str, role: str, content: str,
+                        citations: List[Dict] = None) -> int:
+        """
+        添加聊天消息
+        
+        Args:
+            session_id: 会话ID
+            role: 角色（user/assistant）
+            content: 消息内容
+            citations: 引用信息（可选）
+            
+        Returns:
+            消息ID
+        """
+        return self.db.add_chat_message(
+            session_id=session_id,
+            role=role,
+            content=content,
+            citations=citations
+        )
+    
+    def get_chat_session(self, session_id: str) -> Optional[Dict]:
+        """
+        获取聊天会话信息
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            会话信息字典
+        """
+        return self.db.get_chat_session(session_id)
+    
+    def get_chat_messages(self, session_id: str) -> List[Dict]:
+        """
+        获取会话的所有消息
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            消息列表
+        """
+        return self.db.get_chat_messages(session_id)
+    
+    def list_chat_sessions(self, limit: int = 50) -> List[Dict]:
+        """
+        列出用户的聊天会话
+        
+        Args:
+            limit: 返回数量限制
+            
+        Returns:
+            会话列表，包含消息数量
+        """
+        return self.db.list_chat_sessions(user_id=self.user_id, limit=limit)
+    
+    def update_chat_session_title(self, session_id: str, title: str):
+        """
+        更新会话标题
+        
+        Args:
+            session_id: 会话ID
+            title: 新标题
+        """
+        self.db.update_chat_session_title(session_id, title)
+    
+    def delete_chat_session(self, session_id: str) -> int:
+        """
+        删除聊天会话及其所有消息
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            删除的消息数量
+        """
+        return self.db.delete_chat_session(session_id)
+    
+    def get_chat_history(self, session_id: str, limit: int = 20) -> List[Dict]:
+        """
+        获取聊天历史（用于上下文）
+        
+        Args:
+            session_id: 会话ID
+            limit: 最近的消息数量
+            
+        Returns:
+            消息列表，格式化为 {role, content}
+        """
+        return self.db.get_chat_history(session_id, limit)
+    
+    def get_or_create_chat_session(self, session_id: str, file_hash: str = None,
+                                   title: str = None) -> Dict:
+        """
+        获取或创建聊天会话（幂等操作）
+        
+        Args:
+            session_id: 会话ID
+            file_hash: 关联的PDF文件哈希值
+            title: 会话标题
+            
+        Returns:
+            会话信息字典
+        """
+        session = self.get_chat_session(session_id)
+        if not session:
+            self.create_chat_session(session_id, file_hash, title)
+            session = self.get_chat_session(session_id)
+        return session

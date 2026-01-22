@@ -1,75 +1,109 @@
 """
-聊天会话管理服务
+聊天会话管理
 
-功能：
-1. 创建和管理聊天会话
-2. 存储聊天消息历史
-3. 生成会话标题（基于关键词）
-
-TODO 目前的对话历史管理完全依赖前端，这部分需要等对话历史存数据库写好之后再启用
+1. 会话生命周期管理（自动创建、智能标题生成）
+2. 消息验证和预处理
+3. 历史记录格式化（适配 Agent/UI 不同需求）
+4. 数据聚合和增强
 """
 
 import uuid
+import re
 from datetime import datetime
 from typing import List, Dict, Optional
+from services.storage_service import StorageService
 
 
 class ChatService:
-    def __init__(self):
-        # 内存存储（演示用，生产环境应使用数据库）
-        self.sessions: Dict[str, dict] = {}
-        self.messages: Dict[str, List[dict]] = {}
-    
-    def create_session(self, pdf_id: str, title: Optional[str] = None) -> dict:
+    def __init__(self, storage_service: StorageService):
         """
-        创建新的聊天会话
+        初始化聊天服务
         
         Args:
-            pdf_id: 关联的PDF文档ID
-            title: 会话标题（可选，如果不提供则自动生成）
+            storage_service: 存储服务实例，用于数据持久化
+        """
+        self.storage = storage_service
+
+    def get_session_basic_info(self, session_id: str) -> Optional[Dict]:
+        """
+        查数据库是否存在该 ID
+        """
+        return self.storage.get_chat_session(session_id)
+
+    def get_or_create_session(self, session_id: str = None, 
+                             file_hash: str = None, 
+                             title: str = None) -> Dict:
+        """
+        获取或创建聊天会话
+        
+        Args:
+            session_id: 会话ID（可选，不提供则自动生成）
+            file_hash: 关联的PDF文件哈希值（可选）
+            title: 会话标题（可选，首条消息时自动生成）
         
         Returns:
-            会话信息字典
+            会话信息字典，包含前端所需的格式
         """
-        session_id = str(uuid.uuid4())
-        session = {
-            'id': session_id,
-            'pdfId': pdf_id,
-            'title': title or '新对话',
-            'createdAt': datetime.now().isoformat(),
-            'updatedAt': datetime.now().isoformat(),
-            'messageCount': 0
+        # 如果没有提供 session_id，生成新的
+        if not session_id:
+            session_id = str(uuid.uuid4())
+        
+        # 尝试获取现有会话
+        session = self.storage.get_chat_session(session_id)
+        
+        # 如果会话不存在，创建新会话
+        if not session:
+            self.storage.create_chat_session(
+                session_id=session_id,
+                file_hash=file_hash,
+                title=title or '新对话'
+            )
+            session = self.storage.get_chat_session(session_id)
+        
+        # 获取消息数量
+        messages = self.storage.get_chat_messages(session_id)
+        
+        # 返回前端格式
+        return {
+            'id': session['session_id'],
+            'pdfId': session.get('file_hash'),
+            'title': session['title'],
+            'createdAt': session['created_time'],
+            'updatedAt': session['updated_time'],
+            'messageCount': len(messages)
         }
-        
-        self.sessions[session_id] = session
-        self.messages[session_id] = []
-        
-        return session
     
-    def get_session(self, session_id: str) -> Optional[dict]:
-        """获取会话信息"""
-        return self.sessions.get(session_id)
-    
-    def list_sessions(self, pdf_id: Optional[str] = None) -> List[dict]:
+    def list_sessions(self, file_hash: Optional[str] = None, 
+                     limit: int = 50) -> List[Dict]:
         """
         获取会话列表
         
         Args:
-            pdf_id: 可选，筛选特定PDF的会话
+            file_hash: 可选，筛选特定PDF的会话
+            limit: 返回数量限制
         
         Returns:
-            会话列表，按更新时间倒序排列
+            会话列表，已按更新时间倒序排列
         """
-        sessions = list(self.sessions.values())
+        sessions = self.storage.list_chat_sessions(limit=limit)
         
         # 筛选特定PDF的会话
-        if pdf_id:
-            sessions = [s for s in sessions if s['pdfId'] == pdf_id]
+        if file_hash:
+            sessions = [s for s in sessions if s.get('file_hash') == file_hash]
         
-        # 按更新时间倒序排列
-        sessions.sort(key=lambda x: x['updatedAt'], reverse=True)
+        # 转换为前端格式
+        result = []
+        for s in sessions:
+            result.append({
+                'id': s['session_id'],
+                'pdfId': s.get('file_hash'),
+                'title': s['title'],
+                'createdAt': s['created_time'],
+                'updatedAt': s['updated_time'],
+                'messageCount': s.get('message_count', 0)
+            })
         
-        return sessions
+        return result
     
     def add_message(self, 
                     session_id: str, 
@@ -92,11 +126,25 @@ class ChatService:
         Returns:
             消息对象
         """
-        if session_id not in self.sessions:
+        # 验证会话是否存在
+        session = self.storage.get_chat_session(session_id)
+        if not session:
             raise ValueError(f"Session {session_id} not found")
         
+        # 构建完整的 citations 数据（包含 steps 等信息）
+        full_citations = citations or []
+        
+        # 存储到数据库
+        message_id = self.storage.add_chat_message(
+            session_id=session_id,
+            role=role,
+            content=content,
+            citations=full_citations
+        )
+        
+        # 返回消息对象（前端格式）
         message = {
-            'id': str(uuid.uuid4()),
+            'id': message_id,
             'role': role,
             'content': content,
             'citations': citations or [],
@@ -105,17 +153,6 @@ class ChatService:
             'timestamp': datetime.now().isoformat()
         }
         
-        self.messages[session_id].append(message)
-        
-        # 更新会话信息
-        session = self.sessions[session_id]
-        session['updatedAt'] = datetime.now().isoformat()
-        session['messageCount'] = len(self.messages[session_id])
-        
-        # 如果是第一条用户消息，自动生成标题
-        if role == 'user' and session['messageCount'] == 1:
-            session['title'] = self._generate_title(content)
-        
         return message
 
     def get_chat_history_for_agent(self, session_id: str, limit: int = 10) -> List[dict]:
@@ -123,7 +160,9 @@ class ChatService:
         获取符合 Agent 接口要求的对话历史格式
         格式: [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
         """
-        messages = self.messages.get(session_id, [])
+        # 从数据库获取消息
+        messages = self.storage.get_chat_messages(session_id)
+        
         # 只取角色和内容，并限制轮数防止 prompt 过长
         history = [
             {'role': m['role'], 'content': m['content']} 
@@ -133,24 +172,45 @@ class ChatService:
     
     def get_messages(self, session_id: str) -> List[dict]:
         """获取会话的所有消息"""
-        return self.messages.get(session_id, [])
+        return self.storage.get_chat_messages(session_id)
+    
+    def update_session_title(self, session_id: str, new_title: str) -> bool:
+        """
+        更新会话标题
+        
+        Args:
+            session_id: 会话ID
+            new_title: 新标题
+        
+        Returns:
+            是否更新成功
+        """
+        # 验证会话是否存在
+        session = self.storage.get_chat_session(session_id)
+        if not session:
+            return False
+        
+        # 验证标题不能为空
+        if not new_title or not new_title.strip():
+            return False
+        
+        # 更新标题
+        self.storage.update_chat_session_title(session_id, new_title.strip())
+        return True
     
     def delete_session(self, session_id: str) -> bool:
         """删除会话"""
-        if session_id in self.sessions:
-            del self.sessions[session_id]
-            if session_id in self.messages:
-                del self.messages[session_id]
-            return True
-        return False
+        try:
+            deleted_count = self.storage.delete_chat_session(session_id)
+            return deleted_count > 0
+        except Exception:
+            return False
     
     def _generate_title(self, first_message: str) -> str:
         """
         根据第一条消息生成会话标题
         提取关键词作为标题
         """
-        # 简单实现：取前30个字符
-        # 生产环境可以使用NLP提取关键词
         title = first_message.strip()
         if len(title) > 30:
             title = title[:30] + '...'

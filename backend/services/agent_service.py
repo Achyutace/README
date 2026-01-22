@@ -22,9 +22,9 @@ from langgraph.graph import StateGraph, END  # 状态图和结束节点
 
 # 本地服务和工具
 from services.rag_service import RAGService  # RAG服务
-from services.storage_service import StorageService  # PDF 处理服务
 from tools.web_search_tool import WebSearchTool  # 网络搜索工具
 from tools.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
+
 class AgentState(TypedDict):
     """ Agent 状态定义 """
     user_query: str  
@@ -581,6 +581,34 @@ class AcademicAgentService:
     
     # ==================== 公共接口 ====================
     
+    def generate_session_title(self, user_query: str) -> str:
+        """
+        使用 LLM 根据用户的第一句提问生成简短的会话标题
+        """
+        if not self.has_llm:
+            # Demo 模式或无 LLM，回退到简单截断
+            return user_query[:20] + "..." if len(user_query) > 20 else user_query
+
+        prompt = f"""
+请为下面的用户提问生成一个极简短的会话标题（不超过 15 个字）。
+不要使用“关于”、“询问”等废话，直接提取核心主题。
+不要使用引号。
+
+用户提问：{user_query}
+标题：
+"""
+        try:
+            # 直接调用 LLM，不走复杂工作流
+            response = self.llm.invoke([HumanMessage(content=prompt)])
+            title = response.content.strip()
+            
+            # 清理可能的多余符号
+            title = title.replace('"', '').replace('《', '').replace('》', '')
+            return title
+        except Exception as e:
+            print(f"Title generation error: {e}")
+            return user_query[:20] # 降级处理
+        
     def chat(self, 
              user_query: str,
              user_id: str = "default",
@@ -686,4 +714,79 @@ class AcademicAgentService:
             yield {
                 'type': 'error',
                 'error': str(e)
+            }
+    
+    def simple_chat(self,
+                    user_query: str,
+                    context_text: Optional[str] = None,
+                    chat_history: Optional[List[Dict]] = None,
+                    system_prompt: Optional[str] = None) -> Dict:
+        """
+        简单对话模式 - 基于提供的上下文文本进行对话
+        
+        适用场景：
+        - 用户需要快速回答
+        - 问题相对简单，不需要外部工具
+        - 希望基于整篇文档内容进行对话
+
+        Args:
+            user_query: 用户问题
+            context_text: 上下文文本（如文档全文，由路由层提供）
+            chat_history: 对话历史（可选）
+            system_prompt: 自定义系统提示词（可选）
+        
+        Returns:
+            包含 response 的字典
+        """
+        if not self.has_llm:
+            return {
+                'response': f'Demo 模式：关于"{user_query}"的简单回答。实际使用时会基于提供的上下文生成回答。',
+                'citations': [],
+                'context_used': {
+                    'has_context': bool(context_text),
+                    'chat_history_turns': len(chat_history or [])
+                }
+            }
+        
+        try:
+            # 使用自定义系统提示词或默认提示词
+            default_system_prompt = "你是一个学术论文阅读助手。请根据提供的文档内容和对话历史，简洁、准确地回答用户的问题。"
+            messages = [SystemMessage(content=system_prompt or default_system_prompt)]
+            
+            # 如果提供了上下文文本，添加为上下文消息
+            if context_text:
+                context_message = f"文档内容：\n\n{context_text}\n\n---\n\n请基于以上文档内容回答用户的问题。"
+                messages.append(HumanMessage(content=context_message))
+            
+            # 添加对话历史（最近 5 轮）
+            for msg in (chat_history or [])[-5:]:
+                if msg['role'] == 'user':
+                    messages.append(HumanMessage(content=msg['content']))
+                elif msg['role'] == 'assistant':
+                    messages.append(AIMessage(content=msg['content']))
+            
+            # 添加当前用户问题
+            messages.append(HumanMessage(content=user_query))
+            
+            # 调用 LLM 生成回答
+            response = self.llm.invoke(messages)
+            
+            return {
+                'response': response.content,
+                'citations': [],  # 简单模式不提供详细引用
+                'context_used': {
+                    'has_context': bool(context_text),
+                    'context_length': len(context_text) if context_text else 0,
+                    'chat_history_turns': len(chat_history or [])
+                }
+            }
+        
+        except Exception as e:
+            print(f"Simple chat error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'response': f'抱歉，处理您的问题时出现了错误：{str(e)}',
+                'citations': [],
+                'context_used': {}
             }
