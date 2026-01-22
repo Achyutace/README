@@ -138,8 +138,8 @@ const createNewChat = () => {
   showHistoryPanel.value = false
 }
 
-const loadChatSession = (sessionId: string) => {
-  aiStore.loadSession(sessionId)
+const loadChatSession = async (sessionId: string) => {
+  await aiStore.loadSession(sessionId)
   showHistoryPanel.value = false
 }
 
@@ -273,6 +273,17 @@ function handleCitationClick(pageNumber: number) {
 watch(() => aiStore.chatMessages.length, () => {
   nextTick(scrollToBottom)
 })
+
+// 当PDF变化时，从后端加载该PDF的聊天会话
+watch(() => libraryStore.currentDocument?.id, async (pdfId) => {
+  if (pdfId) {
+    // 清空当前会话
+    aiStore.clearChat()
+    // 从后端加载该PDF的会话列表
+    await aiStore.loadSessionsFromBackend(pdfId)
+    console.log(`Loaded chat sessions for PDF: ${pdfId}`)
+  }
+}, { immediate: true })
 
 // Expose methods for parent component
 defineExpose({

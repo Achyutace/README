@@ -1154,35 +1154,49 @@ class Database:
             results.append(result)
         return results
     
-    def list_chat_sessions(self, user_id: str, limit: int = 50) -> List[Dict]:
+    def list_chat_sessions(self, user_id: str, file_hash: str = None, limit: int = 50) -> List[Dict]:
         """
         列出用户的聊天会话
-        
+
         Args:
             user_id: 用户ID
+            file_hash: 可选，按 PDF 文件哈希筛选
             limit: 返回数量限制
-            
+
         Returns:
             会话列表，包含消息数量
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT 
-                cs.*,
-                COUNT(cm.id) as message_count
-            FROM chat_sessions cs
-            LEFT JOIN chat_messages cm ON cs.session_id = cm.session_id
-            WHERE cs.user_id = ?
-            GROUP BY cs.session_id
-            ORDER BY cs.updated_time DESC
-            LIMIT ?
-        ''', (user_id, limit))
-        
+
+        if file_hash:
+            cursor.execute('''
+                SELECT
+                    cs.*,
+                    COUNT(cm.id) as message_count
+                FROM chat_sessions cs
+                LEFT JOIN chat_messages cm ON cs.session_id = cm.session_id
+                WHERE cs.user_id = ? AND cs.file_hash = ?
+                GROUP BY cs.session_id
+                ORDER BY cs.updated_time DESC
+                LIMIT ?
+            ''', (user_id, file_hash, limit))
+        else:
+            cursor.execute('''
+                SELECT
+                    cs.*,
+                    COUNT(cm.id) as message_count
+                FROM chat_sessions cs
+                LEFT JOIN chat_messages cm ON cs.session_id = cm.session_id
+                WHERE cs.user_id = ?
+                GROUP BY cs.session_id
+                ORDER BY cs.updated_time DESC
+                LIMIT ?
+            ''', (user_id, limit))
+
         rows = cursor.fetchall()
         conn.close()
-        
+
         results = []
         for row in rows:
             results.append(dict(row))

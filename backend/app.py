@@ -84,7 +84,7 @@ agent_service = AcademicAgentService(rag_service=rag_service)
 app.agent_service = agent_service
 
 # (5) Chat 服务：负责会话数据格式化
-chat_service = ChatService() 
+chat_service = ChatService()
 app.chat_service = chat_service
 
 # ==================== 5. 请求上下文钩子 ====================

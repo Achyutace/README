@@ -3,15 +3,14 @@
 解耦后：不再直接操作数据库，只负责数据格式化、校验和转换。
 """
 
-import uuid
 from datetime import datetime
 from typing import List, Dict, Optional
+
 
 class ChatService:
     def __init__(self):
         """
         初始化聊天服务
-        不再依赖 StorageService
         """
         pass
 
@@ -27,7 +26,7 @@ class ChatService:
             'updatedAt': session['updated_time'],
             'messageCount': message_count
         }
-    
+
     def format_session_list(self, sessions: List[Dict]) -> List[Dict]:
         """
         格式化会话列表
@@ -43,11 +42,11 @@ class ChatService:
                 'messageCount': s.get('message_count', 0)
             })
         return result
-    
-    def format_message(self, 
+
+    def format_message(self,
                        message_id: int,
-                       role: str, 
-                       content: str, 
+                       role: str,
+                       content: str,
                        citations: Optional[List[dict]] = None,
                        steps: Optional[List[str]] = None,
                        metadata: Optional[dict] = None) -> dict:
@@ -64,6 +63,21 @@ class ChatService:
             'timestamp': datetime.now().isoformat()
         }
 
+    def format_messages(self, messages: List[Dict]) -> List[Dict]:
+        """
+        格式化消息列表（从数据库格式转为前端格式）
+        """
+        result = []
+        for m in messages:
+            result.append({
+                'id': m['id'],
+                'role': m['role'],
+                'content': m['content'],
+                'citations': m.get('citations', []),
+                'created_time': m['created_time']
+            })
+        return result
+
     def process_history_for_agent(self, messages: List[dict], limit: int = 10) -> List[dict]:
         """
         处理符合 Agent 接口要求的对话历史格式
@@ -73,11 +87,11 @@ class ChatService:
         """
         # 只取角色和内容，并限制轮数防止 prompt 过长
         history = [
-            {'role': m['role'], 'content': m['content']} 
+            {'role': m['role'], 'content': m['content']}
             for m in messages[-limit:]
         ]
         return history
-    
+
     def generate_default_title(self, first_message: str) -> str:
         """
         根据第一条消息生成默认标题（纯逻辑）

@@ -698,17 +698,18 @@ class StorageService:
         """
         return self.db.get_chat_messages(session_id)
     
-    def list_chat_sessions(self, limit: int = 50) -> List[Dict]:
+    def list_chat_sessions(self, file_hash: str = None, limit: int = 50) -> List[Dict]:
         """
         列出用户的聊天会话
-        
+
         Args:
+            file_hash: 可选，按 PDF 文件哈希筛选
             limit: 返回数量限制
-            
+
         Returns:
             会话列表，包含消息数量
         """
-        return self.db.list_chat_sessions(user_id=self.user_id, limit=limit)
+        return self.db.list_chat_sessions(user_id=self.user_id, file_hash=file_hash, limit=limit)
     
     def update_chat_session_title(self, session_id: str, title: str):
         """

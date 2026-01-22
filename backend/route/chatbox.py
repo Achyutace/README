@@ -248,9 +248,10 @@ def list_sessions():
         pdf_id = request.args.get('pdfId')
         limit = request.args.get('limit', type=int, default=50)
         
-        # 使用 ChatService 的方法获取格式化的会话列表
-        sessions = chat_service.list_sessions(file_hash=pdf_id, limit=limit)
-        
+        # 从 storage_service 获取原始数据，再用 chat_service 格式化
+        raw_sessions = storage_service.list_chat_sessions(file_hash=pdf_id, limit=limit)
+        sessions = chat_service.format_session_list(raw_sessions)
+
         return jsonify({
             'success': True,
             'sessions': sessions,
@@ -274,10 +275,11 @@ def get_session_messages(session_id):
         session = storage_service.get_chat_session(session_id)
         if not session:
             return jsonify({'error': 'Session not found'}), 404
-        
-        # 获取消息列表
-        messages = chat_service.get_messages(session_id)
-        
+
+        # 从 storage_service 获取原始消息，再用 chat_service 格式化
+        raw_messages = storage_service.get_chat_messages(session_id)
+        messages = chat_service.format_messages(raw_messages)
+
         return jsonify({
             'success': True,
             'sessionId': session_id,
@@ -300,13 +302,13 @@ def update_session_title(session_id):
         
         if not new_title or not new_title.strip():
             return jsonify({'error': 'Title is required'}), 400
-        
+
         # 获取服务
-        _, chat_service, _ = get_services()
-        
-        # 更新标题
-        success = chat_service.update_session_title(session_id, new_title)
-        
+        _, _, storage_service = get_services()
+
+        # 调用 storage_service 更新标题
+        success = storage_service.update_chat_session_title(session_id, new_title.strip())
+
         if not success:
             return jsonify({'error': 'Session not found or update failed'}), 404
         
