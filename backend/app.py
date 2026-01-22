@@ -66,14 +66,11 @@ app.translate_service = translate_service
 
 # (4) Agent 服务：负责聊天和智能问答
 # 依赖 rag_service 进行上下文检索
-# 路由中通过 current_app.agent_service 访问
 agent_service = AcademicAgentService(rag_service=rag_service)
 app.agent_service = agent_service
 
-# (5) Chat 服务：负责会话管理业务逻辑 [新增]
-# 依赖 storage_service 进行持久化
-# 路由中通过 current_app.chat_service 访问
-chat_service = ChatService(storage_service=storage_service)
+# (5) Chat 服务：负责会话数据格式化
+chat_service = ChatService() 
 app.chat_service = chat_service
 
 # ==================== 5. 请求上下文钩子 ====================
@@ -130,7 +127,7 @@ def health_check():
             'rag': hasattr(app, 'rag_service'),
             'translate': hasattr(app, 'translate_service'),
             'agent': hasattr(app, 'agent_service'),
-            'chat': hasattr(app, 'chat_service') # [新增] 检查 ChatService
+            'chat': hasattr(app, 'chat_service')
         }
     })
 
