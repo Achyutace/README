@@ -1,96 +1,156 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useLibraryStore } from '../../stores/library'
+import { notesApi, type Note } from '../../api'
 import NoteEditor from './NoteEditor.vue'
 
 interface NoteCard {
-  id: string
+  id: string | number  // 可以是本地临时ID（string）或数据库ID（number）
   title: string
   content: string
   isEditing: boolean
   isCollapsed: boolean
   showRawMd?: boolean
   createdAt: number
+  isLocal?: boolean  // 标记是否为本地临时笔记（未保存到数据库）
 }
 
 const libraryStore = useLibraryStore()
 const cards = ref<NoteCard[]>([])
+const isLoading = ref(false)
 
-// Generate unique ID
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substring(2)
+// Generate unique ID for temporary notes
+function generateTempId() {
+  return `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`
 }
 
-// Load cards when document changes
+// Load notes from database when document changes
+async function loadNotesFromDB() {
+  if (!libraryStore.currentDocument?.id) {
+    cards.value = []
+    return
+  }
+  
+  isLoading.value = true
+  try {
+    const response = await notesApi.getNotes(libraryStore.currentDocument.id)
+    cards.value = response.notes.map((note: Note) => ({
+      id: note.id,
+      title: note.title || '',
+      content: note.content || '',
+      isEditing: false,
+      isCollapsed: false,
+      showRawMd: false,
+      createdAt: new Date(note.created_time).getTime(),
+      isLocal: false
+    }))
+  } catch (error) {
+    console.error('Failed to load notes from database:', error)
+    cards.value = []
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Watch document changes and load notes
 watch(() => libraryStore.currentDocument?.id, (newId) => {
   if (newId) {
-    const savedCards = localStorage.getItem(`note-cards-${newId}`)
-    if (savedCards) {
-      // 兼容旧数据，添加 isCollapsed 默认值
-      const parsed = JSON.parse(savedCards)
-      cards.value = parsed.map((c: any) => ({
-        ...c,
-        isCollapsed: c.isCollapsed ?? false,
-        showRawMd: c.showRawMd ?? false
-      }))
-    } else {
-      cards.value = []
-    }
+    loadNotesFromDB()
   } else {
     cards.value = []
   }
 }, { immediate: true })
 
-// Auto-save cards
-function saveCards() {
-  if (libraryStore.currentDocument?.id) {
-    localStorage.setItem(`note-cards-${libraryStore.currentDocument.id}`, JSON.stringify(cards.value))
+// Save note to database
+async function saveNoteToDB(card: NoteCard) {
+  if (!libraryStore.currentDocument?.id) return
+  
+  try {
+    if (card.isLocal) {
+      // 新建笔记
+      const response = await notesApi.createNote({
+        pdfId: libraryStore.currentDocument.id,
+        title: card.title,
+        content: card.content
+      })
+      // 更新卡片ID为数据库ID
+      card.id = response.id
+      card.isLocal = false
+    } else if (typeof card.id === 'number') {
+      // 更新现有笔记
+      await notesApi.updateNote(card.id, {
+        title: card.title,
+        content: card.content
+      })
+    }
+  } catch (error) {
+    console.error('Failed to save note to database:', error)
+    throw error
   }
 }
 
-// Add new card
+// Add new card (temporary, will be saved to DB when editing is done)
 function addCard() {
   const newCard: NoteCard = {
-    id: generateId(),
+    id: generateTempId(),
     title: '',
     content: '',
     isEditing: true,
     isCollapsed: false,
     showRawMd: false,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    isLocal: true
   }
   cards.value.unshift(newCard)
-  saveCards()
 }
 
-// Delete card
-function deleteCard(id: string) {
+// Delete card from database and local state
+async function deleteCard(id: string | number) {
+  // 如果是数据库笔记，先删除数据库中的记录
+  if (typeof id === 'number') {
+    try {
+      await notesApi.deleteNote(id)
+    } catch (error) {
+      console.error('Failed to delete note from database:', error)
+      return
+    }
+  }
+  // 从本地状态中移除
   cards.value = cards.value.filter(c => c.id !== id)
-  saveCards()
 }
 
-// Toggle edit mode
-function toggleEdit(card: NoteCard) {
+// Toggle edit mode and save when exiting edit mode
+async function toggleEdit(card: NoteCard) {
+  const wasEditing = card.isEditing
   card.isEditing = !card.isEditing
-  saveCards()
+  
+  // 如果退出编辑模式，保存到数据库
+  if (wasEditing && !card.isEditing) {
+    try {
+      await saveNoteToDB(card)
+    } catch (error) {
+      // 保存失败，恢复编辑模式
+      card.isEditing = true
+    }
+  }
 }
 
-// Toggle collapse state
+// Toggle collapse state (no need to save to DB)
 function toggleCollapse(card: NoteCard, event: Event) {
   event.stopPropagation()
   card.isCollapsed = !card.isCollapsed
-  saveCards()
 }
 
-// Toggle raw markdown view
+// Toggle raw markdown view (no need to save to DB)
 function toggleRawMd(card: NoteCard) {
   card.showRawMd = !card.showRawMd
-  saveCards()
 }
 
-// Update card and save
+// Update card (just update local state, no auto-save)
+// Saving happens when exiting edit mode via toggleEdit
 function updateCard() {
-  saveCards()
+  // 仅更新本地状态，不触发保存
+  // 保存会在退出编辑模式时通过 toggleEdit 触发
 }
 
 // Get first line of content

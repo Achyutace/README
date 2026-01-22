@@ -23,6 +23,36 @@ export interface ExtractTextResponse {
   }>
 }
 
+export interface Note {
+  id: number
+  file_hash: string
+  user_id: string
+  page_number: number | null
+  title: string
+  content: string
+  note_type: string
+  color: string
+  position: any | null
+  created_time: string
+  updated_time: string
+}
+
+export interface CreateNoteRequest {
+  pdfId: string
+  title?: string
+  content: string
+  pageNumber?: number
+  noteType?: string
+  color?: string
+  position?: any
+}
+
+export interface UpdateNoteRequest {
+  title?: string
+  content: string
+  color?: string
+}
+
 /**
  * PDF 相关 API
  * 对应后端 router/upload.py
@@ -173,6 +203,35 @@ export const chatSessionApi = {
       userId,
     })
     return data
+  },
+}
+
+export const notesApi = {
+  // 对应后端 router/notes.py
+  // 创建笔记
+  createNote: async (data: CreateNoteRequest): Promise<{ success: boolean; id: number; message: string }> => {
+    const { data: response } = await api.post('/notes', data)
+    return response
+  },
+
+  // 获取笔记列表
+  getNotes: async (pdfId: string, page?: number): Promise<{ success: boolean; notes: Note[]; total: number }> => {
+    const params: any = {}
+    if (page !== undefined) params.page = page
+    const { data } = await api.get(`/notes/${pdfId}`, { params })
+    return data
+  },
+
+  // 更新笔记
+  updateNote: async (noteId: number, data: UpdateNoteRequest): Promise<{ success: boolean; message: string }> => {
+    const { data: response } = await api.put(`/notes/${noteId}`, data)
+    return response
+  },
+
+  // 删除笔记
+  deleteNote: async (noteId: number): Promise<{ success: boolean; message: string }> => {
+    const { data: response } = await api.delete(`/notes/${noteId}`)
+    return response
   },
 }
 

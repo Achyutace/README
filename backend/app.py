@@ -17,6 +17,7 @@ from route.upload import upload_bp
 from route.chatbox import chatbox_bp
 from route.highlight import highlight_bp
 from route.translate import translate_bp
+from route.notes import notes_bp
 
 # 加载环境变量 (.env)
 load_dotenv()
@@ -127,6 +128,7 @@ app.register_blueprint(upload_bp)      # URL 前缀: /api/pdf
 app.register_blueprint(chatbox_bp)     # URL 前缀: /api/chatbox
 app.register_blueprint(highlight_bp)   # URL 前缀: /api/highlight
 app.register_blueprint(translate_bp)   # URL 前缀: /api/translate
+app.register_blueprint(notes_bp)       # URL 前缀: /api/notes
 
 # ==================== 7. 健康检查接口 ====================
 
