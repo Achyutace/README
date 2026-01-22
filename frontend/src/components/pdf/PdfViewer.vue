@@ -35,6 +35,11 @@ const pageRefs = new Map<number, PageRef>() // 每页元素引用集合
 const renderTasks = new Map<number, RenderTask>() // 每页渲染任务集合
 const visiblePages = new Set<number>() // 当前可见页面集合
 
+// 页面尺寸预加载（用于快速滚动时的占位）
+const pageSizes = ref<Map<number, { width: number; height: number }>>(new Map())
+// 已渲染完成的页面集合
+const renderedPages = ref<Set<number>>(new Set())
+
 const showTooltip = ref(false) // 是否显示选中文本的工具提示
 const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
 const isProgrammaticScrolling = ref(false) // 标记是否正在进行程序化滚动
@@ -58,6 +63,21 @@ const isResizing = ref(false)
 let lastScrollTime = 0
 let scrollTimeoutId: ReturnType<typeof setTimeout> | null = null
 const RAPID_SCROLL_THRESHOLD = 300 // 300ms内的连续翻页视为快速翻页
+
+// 获取指定页面的缩放后尺寸
+function getScaledPageSize(pageNumber: number) {
+  const size = pageSizes.value.get(pageNumber)
+  if (!size) return { width: 612, height: 792 } // 默认 A4 尺寸
+  return {
+    width: Math.floor(size.width * pdfStore.scale),
+    height: Math.floor(size.height * pdfStore.scale)
+  }
+}
+
+// 检查页面是否已渲染
+function isPageRendered(pageNumber: number) {
+  return renderedPages.value.has(pageNumber)
+}
 
 function handlePageContainerRef(
   pageNumber: number, // 当前页码
@@ -132,9 +152,10 @@ const updateVisiblePages = useDebounceFn(() => {
 watch(
   () => pdfStore.scale, // 监听缩放比例
   () => {
-    // 缩放时清除所有现有任务并重新检测可见区域进行渲染
+    // 缩放时清除所有现有任务和已渲染状态，重新检测可见区域进行渲染
     renderTasks.forEach(task => task.cancel())
     renderTasks.clear()
+    renderedPages.value = new Set() // 清空已渲染页面，因为缩放后需要重新渲染
     nextTick(() => {
       updateVisiblePages()
     })
@@ -242,6 +263,9 @@ async function renderPage(pageNumber: number) {
   } catch (err) {
     console.error('Error rendering link layer:', err)
   }
+
+  // 标记页面为已渲染完成（创建新 Set 以触发响应式更新）
+  renderedPages.value = new Set([...renderedPages.value, pageNumber])
 }
 
 type LinkOverlayRect = {
@@ -467,6 +491,16 @@ async function loadPdf(url: string) {
   if (libraryStore.currentDocumentId) {
     libraryStore.updateDocumentPageCount(libraryStore.currentDocumentId, pdf.numPages) // 同步更新文库记录页数
   }
+
+  // 预加载所有页面的尺寸信息（用于快速滚动时的占位）
+  const sizes = new Map<number, { width: number; height: number }>()
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const viewport = page.getViewport({ scale: 1 }) // 使用 scale=1 获取原始尺寸
+    sizes.set(i, { width: viewport.width, height: viewport.height })
+  }
+  pageSizes.value = sizes
+
   pageNumbers.value = Array.from({ length: pdf.numPages }, (_, index) => index + 1) // 构造页码数组
 
   pdfStore.isLoading = false // 结束加载态
@@ -479,6 +513,8 @@ function cleanup() {
   renderTasks.clear() // 清空任务缓存
   pageRefs.clear() // 清空页面引用缓存
   pageNumbers.value = [] // 清空页码列表
+  pageSizes.value = new Map() // 清空页面尺寸缓存
+  renderedPages.value = new Set() // 清空已渲染页面集合
   pdfDoc.value = null // 释放文档实例
 }
 
@@ -869,13 +905,25 @@ onBeforeUnmount(() => {
       <div class="space-y-4 flex flex-col items-center">
         <!-- 遍历所有页码生成页面容器 -->
         <div
-          v-for="page in pageNumbers" 
-          :key="page" 
-          class="pdf-page relative bg-white shadow-lg border border-gray-200 overflow-hidden shrink-0" 
-          :ref="(el, refs) => handlePageContainerRef(page, el, refs)" 
+          v-for="page in pageNumbers"
+          :key="page"
+          class="pdf-page relative bg-white shadow-lg border border-gray-200 overflow-hidden shrink-0"
+          :ref="(el, refs) => handlePageContainerRef(page, el, refs)"
           :data-page="page"
+          :style="{
+            width: getScaledPageSize(page).width + 'px',
+            height: getScaledPageSize(page).height + 'px'
+          }"
         >
-          <canvas class="block mx-auto" /> 
+          <!-- 加载中占位符 -->
+          <div
+            v-if="!isPageRendered(page)"
+            class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-10"
+          >
+            <div class="loading-spinner mb-3"></div>
+            <span class="text-gray-400 text-sm">{{ page }}</span>
+          </div>
+          <canvas class="block mx-auto" />
           <div class="highlightLayer absolute inset-0 pointer-events-none">
             <template v-for="hl in pdfStore.getHighlightsByPage(page)" :key="hl.id">
               <div
@@ -965,5 +1013,21 @@ onBeforeUnmount(() => {
 :deep(.linkLayer a),
 :deep(.linkLayer .internal-link) {
   pointer-events: auto; /* 仅链接可点击，其他区域透传 */
+}
+
+/* 加载动画 */
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

@@ -104,6 +104,9 @@ function renderMarkdown(text: string): string {
     // Line breaks
     .replace(/\n/g, '<br>')
 }
+
+// Expose addCard for parent component
+defineExpose({ addCard })
 </script>
 
 <template>
@@ -131,14 +134,37 @@ function renderMarkdown(text: string): string {
       >
         <!-- Editing Mode -->
         <template v-if="card.isEditing">
-          <div class="py-2">
+          <!-- Header with action buttons -->
+          <div class="py-2 flex items-center justify-between">
             <input
               v-model="card.title"
               @input="updateCard"
               type="text"
               placeholder="标题"
-              class="w-full px-3 py-1 text-sm font-medium bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
+              class="flex-1 px-3 py-1 text-sm font-medium bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
             />
+            <div class="flex items-center gap-1 mr-2">
+              <!-- Delete Button -->
+              <button
+                @click="deleteCard(card.id)"
+                class="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                title="删除"
+              >
+                <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+              <!-- Done Button -->
+              <button
+                @click="toggleEdit(card)"
+                class="p-1 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
+                title="完成"
+              >
+                <svg class="w-4 h-4 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div class="border-t border-gray-100 dark:border-gray-700"></div>
           <div class="py-2">
@@ -149,20 +175,6 @@ function renderMarkdown(text: string): string {
               rows="4"
               class="w-full px-3 py-1 text-sm bg-transparent border-none outline-none resize-none text-gray-600 dark:text-gray-400 placeholder-gray-400"
             ></textarea>
-          </div>
-          <div class="px-3 pb-2 flex justify-end gap-1">
-            <button
-              @click="deleteCard(card.id)"
-              class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-            >
-              删除
-            </button>
-            <button
-              @click="toggleEdit(card)"
-              class="px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-            >
-              完成
-            </button>
           </div>
         </template>
 
@@ -193,8 +205,7 @@ function renderMarkdown(text: string): string {
                 </svg>
               </button>
             </div>
-            <div class="border-t border-gray-100 dark:border-gray-700"></div>
-            <div class="px-3 py-2">
+            <div class="px-3 pb-2">
               <!-- Collapsed: show only first line -->
               <div
                 v-if="card.isCollapsed"

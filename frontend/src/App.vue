@@ -39,6 +39,7 @@ const splitRatio = ref(0.45)
 const isResizingSplit = ref(false)
 const sidebarRef = ref<HTMLElement | null>(null)
 const chatTabRef = ref<any>(null)
+const notesPanelRef = ref<any>(null)
 
 const SNAP_THRESHOLD = 60 // Distance from edge to trigger auto-minimize
 
@@ -266,21 +267,33 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button -->
-              <div class="flex items-center px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+                <div class="flex items-center">
+                  <button
+                    @click="toggleTopMinimize"
+                    class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
+                    title="最小化"
+                  >
+                    <!-- Triangle pointing down (to collapse) -->
+                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7 10l5 5 5-5H7z"/>
+                    </svg>
+                  </button>
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
+                </div>
+                <!-- Add Card Button -->
                 <button
-                  @click="toggleTopMinimize"
-                  class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
-                  title="最小化"
+                  @click="notesPanelRef?.addCard()"
+                  class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  title="添加卡片"
                 >
-                  <!-- Triangle pointing down (to collapse) -->
-                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M7 10l5 5 5-5H7z"/>
+                  <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                   </svg>
                 </button>
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
               </div>
               <div class="flex-1 overflow-hidden">
-                <NotesPanel />
+                <NotesPanel ref="notesPanelRef" />
               </div>
             </template>
           </div>
