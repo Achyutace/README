@@ -293,7 +293,7 @@ function normalizeUrl(raw: string): string | null {
     const afterExt = extMatch[3] || ''
     // 如果扩展名后面跟着非URL路径字符（如大写字母、点号等），截断
     if (afterExt && /^[.A-Z\s]/.test(afterExt)) {
-      trimmed = extMatch[1]
+      trimmed = extMatch[1] ?? trimmed
     }
   }
 
