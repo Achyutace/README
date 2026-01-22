@@ -2,10 +2,38 @@
 
 # README PDF Reader - Start Script
 
-rm -rf backend/uploads
-mkdir backend/uploads
-
 echo "Starting README PDF Reader..."
+
+# Load configuration from config.yaml
+CONFIG_FILE="config.yaml"
+if [ -f "$CONFIG_FILE" ]; then
+    echo "Loading configuration from $CONFIG_FILE..."
+
+    # Parse YAML and export environment variables
+    # OpenAI
+    OPENAI_API_KEY=$(grep -A2 "^openai:" "$CONFIG_FILE" | grep "api_key:" | sed 's/.*api_key:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
+    OPENAI_API_BASE=$(grep -A2 "^openai:" "$CONFIG_FILE" | grep "api_base:" | sed 's/.*api_base:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
+
+    # Translation
+    TRANSLATE_API_KEY=$(grep -A2 "^translate:" "$CONFIG_FILE" | grep "api_key:" | sed 's/.*api_key:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
+    TRANSLATE_API_BASE=$(grep -A2 "^translate:" "$CONFIG_FILE" | grep "api_base:" | sed 's/.*api_base:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
+
+    # Tavily
+    TAVILY_API_KEY=$(grep -A2 "^tavily:" "$CONFIG_FILE" | grep "api_key:" | sed 's/.*api_key:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
+
+    # Export non-empty values
+    [ -n "$OPENAI_API_KEY" ] && export OPENAI_API_KEY && echo "  - OPENAI_API_KEY loaded"
+    [ -n "$OPENAI_API_BASE" ] && export OPENAI_API_BASE && echo "  - OPENAI_API_BASE loaded"
+    [ -n "$TRANSLATE_API_KEY" ] && export TRANSLATE_API_KEY && echo "  - TRANSLATE_API_KEY loaded"
+    [ -n "$TRANSLATE_API_BASE" ] && export TRANSLATE_API_BASE && echo "  - TRANSLATE_API_BASE loaded"
+    [ -n "$TAVILY_API_KEY" ] && export TAVILY_API_KEY && echo "  - TAVILY_API_KEY loaded"
+else
+    echo "Warning: $CONFIG_FILE not found. Copy config_example.yaml to config.yaml and fill in your API keys."
+fi
+
+# Clean and create uploads directory
+rm -rf backend/uploads
+mkdir -p backend/uploads
 
 # Start backend
 echo "Starting backend server..."
@@ -15,7 +43,7 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 source venv/bin/activate
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
 python app.py &
 BACKEND_PID=$!
 cd ..

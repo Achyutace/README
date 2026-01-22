@@ -40,3 +40,6 @@ backend/.env
 mystart.sh
 # Storage
 storage/
+
+# Config (contains API keys)
+config.yaml

@@ -1,0 +1,16 @@
+# README PDF Reader Configuration Example
+# Copy this file to config.yaml and fill in your API keys
+
+# OpenAI / LLM Configuration
+openai:
+  api_key: "sk-your-openai-api-key"
+  api_base: "https://api.openai.com/v1"  # or your custom endpoint
+
+# Translation Service (can use same as openai or different)
+translate:
+  api_key: "sk-your-translate-api-key"
+  api_base: "https://api.openai.com/v1"
+
+# Tavily Search API (for web search tool)
+tavily:
+  api_key: "tvly-your-tavily-api-key"
