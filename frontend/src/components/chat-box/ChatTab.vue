@@ -31,9 +31,7 @@ const showMoreModels = ref(false)
 const selectedModel = ref('README Fusion')
 
 // Chat session state
-const currentSessionId = ref<string | null>(null)
 const showHistoryPanel = ref(false)
-const chatSessions = ref<any[]>([])
 
 const premiumModels = [
   { id: 'gpt', name: 'GPT-5.1' },
@@ -130,53 +128,33 @@ const closeMenus = () => {
 // Chat session handlers
 const toggleHistoryPanel = () => {
   showHistoryPanel.value = !showHistoryPanel.value
-  if (showHistoryPanel.value) {
-    loadChatSessions()
-  }
 }
 
-const loadChatSessions = async () => {
-  try {
-    const response = await fetch('http://localhost:5000/api/chat/sessions')
-    const data = await response.json()
-    chatSessions.value = data.sessions || []
-  } catch (error) {
-    console.error('Failed to load chat sessions:', error)
-    chatSessions.value = []
+const createNewChat = () => {
+  const pdfId = libraryStore.currentDocument?.id
+  if (pdfId) {
+    aiStore.createNewSession(pdfId)
   }
-}
-
-const createNewChat = async () => {
-  currentSessionId.value = null
-  aiStore.clearChat()
   showHistoryPanel.value = false
 }
 
-const loadChatSession = async (sessionId: string) => {
-  try {
-    const response = await fetch(`http://localhost:5000/api/chat/sessions/${sessionId}`)
-    const data = await response.json()
-    
-    currentSessionId.value = sessionId
-    
-    // Clear current messages and load history
-    aiStore.clearChat()
-    
-    // Add messages to store
-    if (data.messages && data.messages.length > 0) {
-      data.messages.forEach((msg: any) => {
-        aiStore.addChatMessage({
-          role: msg.role,
-          content: msg.content,
-          citations: msg.citations || []
-        })
-      })
-    }
-    
-    showHistoryPanel.value = false
-  } catch (error) {
-    console.error('Failed to load chat session:', error)
+const loadChatSession = (sessionId: string) => {
+  aiStore.loadSession(sessionId)
+  showHistoryPanel.value = false
+}
+
+const deleteChatSession = (sessionId: string, event: Event) => {
+  event.stopPropagation()
+  if (confirm('确定要删除这个对话吗？')) {
+    aiStore.deleteSession(sessionId)
   }
+}
+
+// 获取当前 PDF 的聊天会话列表
+const getCurrentPdfSessions = () => {
+  const pdfId = libraryStore.currentDocument?.id
+  if (!pdfId) return []
+  return aiStore.getSessionsByPdfId(pdfId)
 }
 
 const formatTime = (timestamp: string) => {
@@ -211,6 +189,12 @@ async function sendMessage(message?: string) {
     return
   }
 
+  // 如果没有当前会话，创建新会话
+  if (!aiStore.currentSessionId) {
+    aiStore.createNewSession(pdfId)
+  }
+
+  // 添加用户消息
   aiStore.addChatMessage({
     role: 'user',
     content,
@@ -224,26 +208,30 @@ async function sendMessage(message?: string) {
   scrollToBottom()
 
   try {
-    // Call backend API
-    const response = await fetch('http://localhost:5000/api/ai/chat', {
+    // 构建历史消息（排除当前刚添加的用户消息）
+    const history = aiStore.chatMessages.slice(0, -1).map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }))
+
+    // 调用后端 API（根据接口文档使用 /api/chatbox/message）
+    const response = await fetch('http://localhost:5000/api/chatbox/message', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        message: content,
         pdfId,
-        sessionId: currentSessionId.value,
-        message: content
+        userId: 'default_user', // 可选，默认为 default_user
+        sessionId: aiStore.currentSessionId, // 保留以便后续后端存储
+        history
       })
     })
 
     const data = await response.json()
-    
-    // Update session ID if it's a new chat
-    if (data.sessionId && !currentSessionId.value) {
-      currentSessionId.value = data.sessionId
-    }
 
+    // 添加 AI 回复
     aiStore.addChatMessage({
       role: 'assistant',
       content: data.response,
@@ -327,23 +315,38 @@ defineExpose({
 
         <!-- History List - Clean premium style -->
         <div class="overflow-y-auto" style="height: calc(100% - 65px)">
-          <div v-if="chatSessions.length === 0" class="p-8 text-center text-gray-400 text-sm">
+          <div v-if="getCurrentPdfSessions().length === 0" class="p-8 text-center text-gray-400 text-sm">
             暂无聊天记录
           </div>
-          <button
-            v-for="session in chatSessions"
+          <div
+            v-for="session in getCurrentPdfSessions()"
             :key="session.id"
-            @click="loadChatSession(session.id)"
-            class="w-full text-left px-5 py-3.5 hover:bg-gray-50/80 dark:hover:bg-[#2d2d30] border-b border-gray-50 dark:border-gray-800 transition-all duration-200 group"
+            class="relative group/item"
           >
-            <div class="font-medium text-sm text-gray-800 dark:text-gray-200 truncate mb-1.5 group-hover:text-gray-900 dark:group-hover:text-white">
-              {{ session.title }}
-            </div>
-            <div class="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
-              <span>{{ session.messageCount }} 条消息</span>
-              <span>{{ formatTime(session.updatedAt) }}</span>
-            </div>
-          </button>
+            <button
+              @click="loadChatSession(session.id)"
+              class="w-full text-left px-5 py-3.5 pr-12 hover:bg-gray-50/80 dark:hover:bg-[#2d2d30] border-b border-gray-50 dark:border-gray-800 transition-all duration-200"
+              :class="{ 'bg-gray-50 dark:bg-[#2d2d30]': session.id === aiStore.currentSessionId }"
+            >
+              <div class="font-medium text-sm text-gray-800 dark:text-gray-200 truncate mb-1.5 group-hover/item:text-gray-900 dark:group-hover/item:text-white">
+                {{ session.title }}
+              </div>
+              <div class="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
+                <span>{{ session.messages.length }} 条消息</span>
+                <span>{{ formatTime(session.updatedAt) }}</span>
+              </div>
+            </button>
+            <!-- Delete button -->
+            <button
+              @click="deleteChatSession(session.id, $event)"
+              class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 opacity-0 group-hover/item:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-all"
+              title="删除对话"
+            >
+              <svg class="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>

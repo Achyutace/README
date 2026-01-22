@@ -25,84 +25,84 @@ from services.rag_service import RAGService  # RAG服务
 from services.storage_service import StorageService  # PDF 处理服务
 from tools.web_search_tool import WebSearchTool  # 网络搜索工具
 from tools.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
-
 class AgentState(TypedDict):
     """ Agent 状态定义 """
-    user_query: str  # 用户的问题
-    user_id: str  # 用户标识符
-    paper_id: str  # 当前正在阅读的论文ID
+    user_query: str  
+    retrieval_query: str  
+    user_id: str
+    paper_id: str
     
-    chat_history: List[Dict]  # 历史对话记录 （MVP）
+    chat_history: List[Dict]
     
-    local_context: List[Dict]  # 从本地知识库检索到的相关段落列表
-    local_context_text: str  # 格式化后的本地上下文文本
+    local_context: List[Dict]
+    local_context_text: str
     
-    is_sufficient: bool  # 本地信息是否足够回答问题
-    missing_info: str  # 如果信息不足，描述缺少什么信息
+    is_sufficient: bool
+    missing_info: str
     
-    tool_calls: List[Dict]  # 调用的工具列表
-    external_context: List[Dict]  # 从外部工具获取的信息
+    tool_calls: List[Dict]
+    external_context: List[Dict]
     
-    final_response: str  # 生成的最终答案
-    citations: List[Dict]  # 引用来源列表（本地文档页码、章节等）
+    final_response: str
+    citations: List[Dict]
     
-    steps: List[str]  # 记录执行的步骤名称（用于调试和展示）
-    current_step: str  # 当前正在执行的步骤描述
+    steps: List[str]
+    current_step: str
 
 class AcademicAgentService:
-    """ 学术论文阅读助手 Agent """
-    
-    def __init__(self, 
-                 rag_service: RAGService,
-                 openai_api_key: Optional[str] = None,
-                 openai_api_base: Optional[str] = None,
-                 model: str = "gpt-3.5-turbo",
-                 temperature: float = 0.7):
-        """
-        初始化 Agent 服务    
-        """
-        self.rag_service = rag_service
+    def __init__(self,   
+                 rag_service: RAGService,  
+                 openai_api_key: Optional[str] = None,  
+                 openai_api_base: Optional[str] = None,  
+                 model: str = "gpt-3.5-turbo",  
+                 temperature: float = 0.7):  
+        """  
+        初始化 Agent 服务      
+        """  
+        self.rag_service = rag_service  
+  
+  
+        api_key = openai_api_key or os.getenv('OPENAI_API_KEY')  
+        api_base = openai_api_base or os.getenv('OPENAI_API_BASE')   
+        if api_key:  
+            # 初始化 OpenAI 聊天模型  
+            self.llm = ChatOpenAI(  
+                model=model,  
+                temperature=temperature,  
+                api_key=api_key,  
+                base_url=api_base  
+            )  
+            self.has_llm = True  
+        else:  
+            # 没有 API Key，进入 Demo 模式（返回模拟数据）  
+            self.llm = None  
+            self.has_llm = False  
+            print("Warning: OpenAI API key not found. Agent will use demo mode.")  
+          
+        # 初始化工具  
+        self.web_search = WebSearchTool()  
+        self.paper_discovery = PaperDiscoveryTool()  
+          
+        self.workflow = self._build_workflow()  
 
-        api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
-        api_base = openai_api_base or os.getenv('OPENAI_API_BASE') 
-        if api_key:
-            # 初始化 OpenAI 聊天模型
-            self.llm = ChatOpenAI(
-                model=model,
-                temperature=temperature,
-                api_key=api_key,
-                base_url=api_base
-            )
-            self.has_llm = True
-        else:
-            # 没有 API Key，进入 Demo 模式（返回模拟数据）
-            self.llm = None
-            self.has_llm = False
-            print("Warning: OpenAI API key not found. Agent will use demo mode.")
-        
-        # 初始化工具
-        self.web_search = WebSearchTool()
-        self.paper_discovery = PaperDiscoveryTool()
-        
-        self.workflow = self._build_workflow()
-    
     def _build_workflow(self) -> StateGraph:
         """构建 LangGraph 工作流"""
         workflow = StateGraph(AgentState)
         
         # 添加节点
+        workflow.add_node("query_translation", self._query_translation_node) # [新增] 节点0: 查询翻译
         workflow.add_node("rag_retrieval", self._rag_retrieval_node)  # 节点1: RAG检索
         workflow.add_node("sufficiency_judge", self._sufficiency_judge_node)  # 节点2: 评估
         workflow.add_node("tool_planning", self._tool_planning_node)  # 节点3: 工具调用
         workflow.add_node("synthesize", self._synthesize_node)  # 节点4: 综合生成
         
-        # 设置入口点
-        workflow.set_entry_point("rag_retrieval")
+        # 入口点为查询翻译
+        workflow.set_entry_point("query_translation")
         
-        # 添加边
+        workflow.add_edge("query_translation", "rag_retrieval")
         workflow.add_edge("rag_retrieval", "sufficiency_judge")
         
-        # 条件边：判断是否需要工具
+        # 条件边
         workflow.add_conditional_edges(
             "sufficiency_judge",
             self._should_use_tools,
@@ -116,31 +116,90 @@ class AcademicAgentService:
         workflow.add_edge("synthesize", END)
         
         return workflow.compile()
-    
+
+    # ==================== 查询翻译节点 ====================
+    def _query_translation_node(self, state: AgentState) -> AgentState:
+        """节点 0: 查询翻译与优化"""
+        steps = state.get('steps', [])
+        steps.append('查询优化')
+        
+        user_query = state['user_query']
+        
+        # 如果没有 LLM，直接使用原始查询
+        if not self.has_llm:
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '跳过翻译(Demo模式)...',
+                'retrieval_query': user_query
+            }
+
+        # 构建 Prompt
+        # 目标：将用户的中文问题转换为适合在英文学术论文中检索的英文关键词/短句
+        prompt = f"""
+你是一个学术搜索优化专家。用户的原始问题可能是中文，而目标检索库是英文学术论文。
+请将用户的问题转化为**英文**的检索查询（Search Query）。
+
+要求：
+1. 翻译为英文。
+2. 提取核心关键词，去除无关的语气词。
+3. 保持学术术语的准确性。
+4. 直接输出优化后的英文查询字符串，不要包含任何解释或 JSON 格式。
+
+用户问题：{user_query}
+英文检索词：
+"""
+        try:
+            response = self.llm.invoke([HumanMessage(content=prompt)])
+            translated_query = response.content.strip()
+            
+            # 简单的后处理，防止 LLM 啰嗦 TODO
+            if "Here is" in translated_query or ":" in translated_query:
+                 # 如果 LLM 返回了 "Here is the translation: keyword"，尝试提取冒号后的内容
+                 parts = translated_query.split(":")
+                 if len(parts) > 1:
+                     translated_query = parts[-1].strip()
+
+            current_step_desc = f'已将问题优化为检索词: "{translated_query}"'
+            
+        except Exception as e:
+            print(f"Translation error: {e}")
+            translated_query = user_query # 降级处理
+            current_step_desc = '翻译服务异常，使用原始查询'
+
+        return {
+            **state,
+            'steps': steps,
+            'current_step': current_step_desc,
+            'retrieval_query': translated_query
+        }
+
+    # ==================== RAG 检索节点 ====================
     def _rag_retrieval_node(self, state: AgentState) -> AgentState:
         """节点 1: RAG 检索"""
-        # 确保 steps 列表已初始化
         steps = state.get('steps', [])
         steps.append('RAG 检索')
         
-        user_query = state['user_query']
+        # 优先使用优化后的 retrieval_query，如果没有则用 user_query
+        query_to_use = state.get('retrieval_query') or state['user_query']
+        
         user_id = state['user_id']
         paper_id = state['paper_id']
         
         # 执行检索
-        results = self.rag_service.retrieve(query=user_query, user_id=user_id, paper_id=paper_id, top_k=5)
+        results = self.rag_service.retrieve(query=query_to_use, file_hash=paper_id, top_k=5)
         
         # 格式化为文本
         context_parts = []
         for i, result in enumerate(results, 1):
             section = result.get('section', 'unknown')
             page = result.get('page', 'N/A')
-    
+
             if section == 'unknown' and 'metadata' in result:
                 section = result['metadata'].get('section', 'unknown')
             if page == 'N/A' and 'metadata' in result:
                 page = result['metadata'].get('page', 'N/A')
-    
+
             context_parts.append(
                 f"[来源 {i}] 章节: {section}, "
                 f"页码: {page}\n"
@@ -150,7 +209,7 @@ class AcademicAgentService:
         return {
             **state,
             'steps': steps,
-            'current_step': '正在检索本地知识库...',
+            'current_step': f'正在检索本地知识库 (Query: {query_to_use})...',
             'local_context': results,
             'local_context_text': '\n'.join(context_parts) if context_parts else '未找到相关内容'
         }
