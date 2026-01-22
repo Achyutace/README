@@ -15,7 +15,7 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 source venv/bin/activate
-pip install -r requirements.txt -q
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 python app.py &
 BACKEND_PID=$!
 cd ..
