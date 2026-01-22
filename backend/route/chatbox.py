@@ -202,3 +202,120 @@ def stream_message():
             'Connection': 'keep-alive'
         }
     )
+
+@chatbox_bp.route('/session/<session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """
+    接口 D: 删除会话
+    删除会话及其所有消息
+    """
+    try:
+        # 获取服务
+        _, _, storage_service = get_services()
+        
+        # 检查会话是否存在
+        session = storage_service.get_chat_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        # 删除会话及其所有消息
+        deleted_count = storage_service.delete_chat_session(session_id)
+        
+        return jsonify({
+            'success': True,
+            'sessionId': session_id,
+            'deletedMessages': deleted_count,
+            'message': f'Session deleted with {deleted_count} messages'
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Delete session error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@chatbox_bp.route('/sessions', methods=['GET'])
+def list_sessions():
+    """
+    接口 E: 获取会话列表
+    可选参数：
+    - pdfId: 筛选特定PDF的会话
+    - limit: 返回数量限制（默认50）
+    """
+    try:
+        # 获取服务
+        _, chat_service, storage_service = get_services()
+        
+        # 获取查询参数
+        pdf_id = request.args.get('pdfId')
+        limit = request.args.get('limit', type=int, default=50)
+        
+        # 使用 ChatService 的方法获取格式化的会话列表
+        sessions = chat_service.list_sessions(file_hash=pdf_id, limit=limit)
+        
+        return jsonify({
+            'success': True,
+            'sessions': sessions,
+            'total': len(sessions)
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"List sessions error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@chatbox_bp.route('/session/<session_id>/messages', methods=['GET'])
+def get_session_messages(session_id):
+    """
+    接口 F: 获取会话的所有消息
+    """
+    try:
+        # 获取服务
+        _, chat_service, storage_service = get_services()
+        
+        # 检查会话是否存在
+        session = storage_service.get_chat_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        # 获取消息列表
+        messages = chat_service.get_messages(session_id)
+        
+        return jsonify({
+            'success': True,
+            'sessionId': session_id,
+            'messages': messages,
+            'total': len(messages)
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Get messages error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@chatbox_bp.route('/session/<session_id>/title', methods=['PUT'])
+def update_session_title(session_id):
+    """
+    接口 G: 更新会话标题
+    """
+    try:
+        data = request.get_json()
+        new_title = data.get('title')
+        
+        if not new_title or not new_title.strip():
+            return jsonify({'error': 'Title is required'}), 400
+        
+        # 获取服务
+        _, chat_service, _ = get_services()
+        
+        # 更新标题
+        success = chat_service.update_session_title(session_id, new_title)
+        
+        if not success:
+            return jsonify({'error': 'Session not found or update failed'}), 404
+        
+        return jsonify({
+            'success': True,
+            'sessionId': session_id,
+            'title': new_title.strip()
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Update title error: {str(e)}")
+        return jsonify({'error': str(e)}), 500

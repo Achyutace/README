@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { Roadmap, Summary, Translation, ChatMessage, AiPanelTab } from '../types'
-import { aiApi } from '../api'
+import { aiApi, chatSessionApi } from '../api'
 
 // 聊天会话类型
 export interface ChatSession {
@@ -67,8 +67,33 @@ export const useAiStore = defineStore('ai', () => {
     saveSessionsToStorage()
   }, { deep: true })
   
-  // 初始化时加载
-  loadSessionsFromStorage()
+  // 从后端加载会话列表
+  async function loadSessionsFromBackend(pdfId?: string) {
+    try {
+      const response = await chatSessionApi.listSessions(pdfId)
+      if (response.success && response.sessions) {
+        // 将后端数据转换为前端格式
+        chatSessions.value = response.sessions.map(s => ({
+          id: s.id,
+          pdfId: s.pdfId || '',
+          title: s.title,
+          messages: [], // 消息需要单独加载
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt
+        }))
+        // 保存到 localStorage
+        saveSessionsToStorage()
+        console.log(`Loaded ${response.sessions.length} sessions from backend`)
+      }
+    } catch (error) {
+      console.error('Failed to load sessions from backend:', error)
+      // 如果后端加载失败，回退到 localStorage
+      loadSessionsFromStorage()
+    }
+  }
+  
+  // 初始化时优先从后端加载，失败则使用 localStorage
+  loadSessionsFromBackend()
 
   const tabs: AiPanelTab[] = [
     { id: 'roadmap', label: 'Roadmap', icon: 'map' },
@@ -160,12 +185,38 @@ export const useAiStore = defineStore('ai', () => {
   }
   
   // 删除会话
-  function deleteSession(sessionId: string) {
-    const index = chatSessions.value.findIndex(s => s.id === sessionId)
-    if (index !== -1) {
-      chatSessions.value.splice(index, 1)
-      if (currentSessionId.value === sessionId) {
-        clearChat()
+  async function deleteSession(sessionId: string) {
+    try {
+      // 调用后端 API 删除会话
+      const response = await chatSessionApi.deleteSession(sessionId)
+      
+      if (response.success) {
+        // 删除成功后，从本地状态中移除
+        const index = chatSessions.value.findIndex(s => s.id === sessionId)
+        if (index !== -1) {
+          chatSessions.value.splice(index, 1)
+          if (currentSessionId.value === sessionId) {
+            clearChat()
+          }
+        }
+        // localStorage 会通过 watch 自动更新
+        console.log(`Session ${sessionId} deleted. ${response.deletedMessages} messages removed.`)
+      }
+    } catch (error: any) {
+      console.error('Failed to delete session:', error)
+      
+      // 如果后端返回 404（会话不存在），也从本地删除
+      if (error?.response?.status === 404) {
+        console.warn(`Session ${sessionId} not found in backend, removing from local storage`)
+        const index = chatSessions.value.findIndex(s => s.id === sessionId)
+        if (index !== -1) {
+          chatSessions.value.splice(index, 1)
+          if (currentSessionId.value === sessionId) {
+            clearChat()
+          }
+        }
+      } else {
+        throw error
       }
     }
   }
@@ -239,6 +290,7 @@ export const useAiStore = defineStore('ai', () => {
     clearChat,
     createNewSession,
     loadSession,
+    loadSessionsFromBackend,
     getSessionsByPdfId,
     deleteSession,
     resetForNewDocument,

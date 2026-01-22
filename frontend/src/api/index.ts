@@ -91,6 +91,91 @@ export const aiApi = {
   },
 }
 
+/**
+ * 聊天会话管理 API
+ * 对应后端 router/chatbox.py 的会话管理接口
+ */
+export const chatSessionApi = {
+  // 创建新会话
+  createSession: async (): Promise<{ sessionId: string; title: string; isNew: boolean; messageCount: number }> => {
+    const { data } = await api.post('/chatbox/new')
+    return data
+  },
+
+  // 删除会话
+  deleteSession: async (sessionId: string): Promise<{ success: boolean; deletedMessages: number }> => {
+    const { data } = await api.delete(`/chatbox/session/${sessionId}`)
+    return data
+  },
+
+  // 获取会话列表
+  listSessions: async (pdfId?: string, limit: number = 50): Promise<{
+    success: boolean
+    sessions: Array<{
+      id: string
+      pdfId?: string
+      title: string
+      createdAt: string
+      updatedAt: string
+      messageCount: number
+    }>
+    total: number
+  }> => {
+    const params: any = { limit }
+    if (pdfId) params.pdfId = pdfId
+    const { data } = await api.get('/chatbox/sessions', { params })
+    return data
+  },
+
+  // 获取会话消息
+  getSessionMessages: async (sessionId: string): Promise<{
+    success: boolean
+    sessionId: string
+    messages: Array<{
+      id: number
+      role: string
+      content: string
+      citations?: any[]
+      created_time: string
+    }>
+    total: number
+  }> => {
+    const { data } = await api.get(`/chatbox/session/${sessionId}/messages`)
+    return data
+  },
+
+  // 更新会话标题
+  updateSessionTitle: async (sessionId: string, title: string): Promise<{
+    success: boolean
+    sessionId: string
+    title: string
+  }> => {
+    const { data } = await api.put(`/chatbox/session/${sessionId}/title`, { title })
+    return data
+  },
+
+  // 发送消息（非流式）
+  sendMessage: async (
+    sessionId: string,
+    message: string,
+    pdfId?: string,
+    userId: string = 'default'
+  ): Promise<{
+    sessionId: string
+    response: string
+    citations?: any[]
+    steps?: string[]
+  }> => {
+    const { data } = await api.post('/chatbox/message', {
+      sessionId,
+      message,
+      pdfId,
+      userId,
+    })
+    return data
+  },
+}
+
 // 辅助布局函数保持不变
 function layoutNodes(data: Roadmap): Roadmap {
   if (data.nodes.some(n => n.position && (n.position.x !== 0 || n.position.y !== 0))) {
