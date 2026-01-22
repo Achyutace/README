@@ -122,6 +122,32 @@ class Database:
             )
         ''')
         
+        # 6. 聊天记录表（存储用户和AI的对话历史）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT UNIQUE NOT NULL,
+                user_id TEXT NOT NULL,
+                file_hash TEXT,
+                title TEXT,
+                created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (file_hash) REFERENCES pdf_files(file_hash) ON DELETE SET NULL
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                citations TEXT,
+                created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id) ON DELETE CASCADE
+            )
+        ''')
+        
         # 创建索引以提高查询性能
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_paragraphs_file_hash 
@@ -151,6 +177,16 @@ class Database:
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_highlights_file_user 
             ON user_highlights(file_hash, user_id)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_chat_sessions_user 
+            ON chat_sessions(user_id, updated_time DESC)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_session 
+            ON chat_messages(session_id, created_time)
         ''')
         
         conn.commit()
@@ -988,3 +1024,243 @@ class Database:
                 result['bbox'] = json.loads(result['bbox'])
             results.append(result)
         return results
+    
+    # ==================== 聊天记录操作 ====================
+    
+    def create_chat_session(self, session_id: str, user_id: str, 
+                           file_hash: str = None, title: str = None) -> int:
+        """
+        创建聊天会话
+        
+        Args:
+            session_id: 会话ID（UUID）
+            user_id: 用户ID
+            file_hash: 关联的PDF文件哈希值（可选）
+            title: 会话标题（可选）
+            
+        Returns:
+            会话数据库ID
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO chat_sessions 
+                (session_id, user_id, file_hash, title)
+                VALUES (?, ?, ?, ?)
+            ''', (session_id, user_id, file_hash, title or '新对话'))
+            conn.commit()
+            db_id = cursor.lastrowid
+        except sqlite3.IntegrityError:
+            # 会话已存在，获取ID
+            cursor.execute('''
+                SELECT id FROM chat_sessions WHERE session_id = ?
+            ''', (session_id,))
+            db_id = cursor.fetchone()[0]
+        finally:
+            conn.close()
+        
+        return db_id
+    
+    def add_chat_message(self, session_id: str, role: str, content: str,
+                        citations: List[Dict] = None) -> int:
+        """
+        添加聊天消息
+        
+        Args:
+            session_id: 会话ID
+            role: 角色（user/assistant）
+            content: 消息内容
+            citations: 引用信息（可选）
+            
+        Returns:
+            消息ID
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO chat_messages 
+            (session_id, role, content, citations)
+            VALUES (?, ?, ?, ?)
+        ''', (session_id, role, content, 
+              json.dumps(citations) if citations else None))
+        
+        # 更新会话的更新时间
+        cursor.execute('''
+            UPDATE chat_sessions 
+            SET updated_time = CURRENT_TIMESTAMP
+            WHERE session_id = ?
+        ''', (session_id,))
+        
+        conn.commit()
+        message_id = cursor.lastrowid
+        conn.close()
+        
+        return message_id
+    
+    def get_chat_session(self, session_id: str) -> Optional[Dict]:
+        """
+        获取聊天会话信息
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            会话信息字典
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM chat_sessions WHERE session_id = ?
+        ''', (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return dict(row)
+        return None
+    
+    def get_chat_messages(self, session_id: str) -> List[Dict]:
+        """
+        获取会话的所有消息
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            消息列表
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM chat_messages 
+            WHERE session_id = ?
+            ORDER BY created_time
+        ''', (session_id,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        results = []
+        for row in rows:
+            result = dict(row)
+            if result.get('citations'):
+                result['citations'] = json.loads(result['citations'])
+            results.append(result)
+        return results
+    
+    def list_chat_sessions(self, user_id: str, limit: int = 50) -> List[Dict]:
+        """
+        列出用户的聊天会话
+        
+        Args:
+            user_id: 用户ID
+            limit: 返回数量限制
+            
+        Returns:
+            会话列表，包含消息数量
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                cs.*,
+                COUNT(cm.id) as message_count
+            FROM chat_sessions cs
+            LEFT JOIN chat_messages cm ON cs.session_id = cm.session_id
+            WHERE cs.user_id = ?
+            GROUP BY cs.session_id
+            ORDER BY cs.updated_time DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        results = []
+        for row in rows:
+            results.append(dict(row))
+        return results
+    
+    def update_chat_session_title(self, session_id: str, title: str):
+        """
+        更新会话标题
+        
+        Args:
+            session_id: 会话ID
+            title: 新标题
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE chat_sessions 
+            SET title = ?, updated_time = CURRENT_TIMESTAMP
+            WHERE session_id = ?
+        ''', (title, session_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def delete_chat_session(self, session_id: str) -> int:
+        """
+        删除聊天会话及其所有消息
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            删除的消息数量
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # 统计消息数量
+        cursor.execute('''
+            SELECT COUNT(*) FROM chat_messages WHERE session_id = ?
+        ''', (session_id,))
+        message_count = cursor.fetchone()[0]
+        
+        # 删除会话（级联删除会自动删除消息）
+        cursor.execute('''
+            DELETE FROM chat_sessions WHERE session_id = ?
+        ''', (session_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return message_count
+    
+    def get_chat_history(self, session_id: str, limit: int = 20) -> List[Dict]:
+        """
+        获取聊天历史（用于上下文）
+        
+        Args:
+            session_id: 会话ID
+            limit: 最近的消息数量
+            
+        Returns:
+            消息列表，格式化为 {role, content}
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT role, content FROM chat_messages 
+            WHERE session_id = ?
+            ORDER BY created_time DESC
+            LIMIT ?
+        ''', (session_id, limit))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # 反转顺序（从旧到新）
+        messages = [{'role': row['role'], 'content': row['content']} 
+                   for row in reversed(rows)]
+        return messages

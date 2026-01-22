@@ -143,10 +143,17 @@ const loadChatSession = (sessionId: string) => {
   showHistoryPanel.value = false
 }
 
-const deleteChatSession = (sessionId: string, event: Event) => {
+const deleteChatSession = async (sessionId: string, event: Event) => {
   event.stopPropagation()
   if (confirm('确定要删除这个对话吗？')) {
-    aiStore.deleteSession(sessionId)
+    try {
+      await aiStore.deleteSession(sessionId)
+      // 删除成功，可以显示提示（可选）
+      console.log('会话已删除')
+    } catch (error) {
+      console.error('删除会话失败:', error)
+      alert('删除会话失败，请重试')
+    }
   }
 }
 
