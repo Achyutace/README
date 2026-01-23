@@ -36,6 +36,7 @@ const pageRefs = new Map<number, PageRef>() // 每页元素引用集合
 const renderTasks = new Map<number, RenderTask>() // 每页渲染任务集合
 const visiblePages = new Set<number>() // 当前可见页面集合
 const pendingAnchor = ref<{ page: number; ratio: number } | null>(null) // 记录缩放前的视口锚点
+const isPointerOverPdf = ref(false)
 
 // 页面尺寸预加载（用于快速滚动时的占位）
 const pageSizes = ref<Map<number, { width: number; height: number }>>(new Map())
@@ -957,6 +958,31 @@ function cleanup() {
   pdfDoc.value = null // 释放文档实例
 }
 
+function handleMouseEnterContainer() {
+  isPointerOverPdf.value = true
+}
+
+function handleMouseLeaveContainer() {
+  isPointerOverPdf.value = false
+}
+
+function handleWheel(event: WheelEvent) {
+  // Trackpad pinch on Chrome/Edge reports wheel with ctrlKey=true; intercept only inside PDF.
+  if (!isPointerOverPdf.value) return
+  if (!event.ctrlKey) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  const delta = event.deltaY
+  const step = Math.min(0.25, Math.max(0.05, Math.abs(delta) / 500))
+  const nextScale = delta < 0
+    ? Math.min(3.0, pdfStore.scale + step)
+    : Math.max(0.5, pdfStore.scale - step)
+
+  pdfStore.setScale(nextScale)
+}
+
 function handleMouseDown(event: MouseEvent) {
   // 记录鼠标按下位置和时间
   mouseDownInfo.value = {
@@ -1348,8 +1374,11 @@ onBeforeUnmount(() => {
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
       class="pdf-scroll-container flex-1 overflow-auto p-4"
+      @mouseenter="handleMouseEnterContainer"
+      @mouseleave="handleMouseLeaveContainer"
       @mousedown="handleMouseDown"
       @mouseup="handleMouseUp"
+      @wheel="handleWheel"
       @scroll="handleScroll"
     >
       <!-- 居中内容区，控制最大宽度与行间距 -->
