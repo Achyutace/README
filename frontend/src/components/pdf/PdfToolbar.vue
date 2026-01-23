@@ -78,7 +78,9 @@ function applyScaleInput() {
     scaleInput.value = String(pdfStore.scalePercent)
     return
   }
-  pdfStore.setScale(value / 100)
+  // 修正：value 是百分比（如 100），默认 scale=1.5 对应 100%
+  // 所以需要 (value / 100) * 1.5
+  pdfStore.setScale((value / 100) * 1.5)
   scaleInput.value = String(pdfStore.scalePercent)
 }
 

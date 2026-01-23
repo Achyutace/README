@@ -143,8 +143,8 @@ export const usePdfStore = defineStore('pdf', () => {
   }
 
   function zoomIn() {
-    if (scale.value < 3.0) {
-      scale.value = Math.min(3.0, scale.value + 0.1)
+    if (scale.value < 4.5) {
+      scale.value = Math.min(4.5, scale.value + 0.1)
     }
   }
 
@@ -155,7 +155,7 @@ export const usePdfStore = defineStore('pdf', () => {
   }
 
   function setScale(value: number) {
-    scale.value = Math.max(0.5, Math.min(3.0, value))
+    scale.value = Math.max(0.5, Math.min(4.5, value))
   }
 
   function setSelectedText(text: string, position?: { x: number; y: number }) {

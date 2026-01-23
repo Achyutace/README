@@ -37,7 +37,17 @@ const renderTasks = new Map<number, RenderTask>() // 每页渲染任务集合
 const visiblePages = new Set<number>() // 当前可见页面集合
 const pagesNeedingRefresh = new Set<number>() // 缩放后需要重绘的页面集合
 const lastRenderedScale = new Map<number, number>() // 每页最后一次渲染使用的缩放比例
-const pendingAnchor = ref<{ page: number; ratio: number } | null>(null) // 记录缩放前的视口锚点
+
+// 记录缩放锚点：包含页码、垂直/水平比例、以及目标回复的屏幕坐标（可选）
+type ZoomAnchor = {
+  page: number
+  ratioY: number
+  ratioX: number
+  destX?: number // 鼠标缩放时的目标屏幕X
+  destY?: number // 鼠标缩放时的目标屏幕Y
+}
+const pendingAnchor = ref<ZoomAnchor | null>(null)
+
 const isPointerOverPdf = ref(false)
 const isZooming = ref(false)
 
@@ -88,37 +98,74 @@ function isPageRendered(pageNumber: number) {
   return renderedPages.value.has(pageNumber)
 }
 
-function captureCenterAnchor() {
+function captureCenterAnchor(mousePos?: { x: number; y: number }): ZoomAnchor | null {
   const container = containerRef.value
   if (!container || !pageNumbers.value.length) return null
 
-  const centerY = container.scrollTop + container.clientHeight / 2
-  let anchor: { page: number; ratio: number } | null = null
+  const rect = container.getBoundingClientRect()
+  
+  // 目标内容坐标（相对于容器内容左上角）
+  // 如果有 mousePos，则是鼠标下面的点
+  // 否则是视口中心点
+  const targetX = mousePos 
+    ? (mousePos.x - rect.left + container.scrollLeft) 
+    : (container.scrollLeft + container.clientWidth / 2)
+    
+  const targetY = mousePos 
+    ? (mousePos.y - rect.top + container.scrollTop) 
+    : (container.scrollTop + container.clientHeight / 2)
 
+  let anchor: ZoomAnchor | null = null
+
+  // 这里的查找逻辑可以优化，但保持简单遍历
   for (const page of pageNumbers.value) {
     const refs = pageRefs.get(page)
     if (!refs) continue
-    const top = refs.container.offsetTop
+    
+    // 获取页面真实布局位置
+    // 注意：如果使用了 mx-auto, offsetLeft 会变化
+    const pageTop = refs.container.offsetTop
+    const pageLeft = refs.container.offsetLeft
     const height = refs.container.offsetHeight || refs.container.clientHeight
-    if (!height) continue
+    const width = refs.container.offsetWidth || refs.container.clientWidth
+    
+    if (!height || !width) continue
 
-    if (centerY >= top && centerY <= top + height) {
-      anchor = { page, ratio: (centerY - top) / height }
+    // 宽松判断：只要 targetY 在页面垂直范围内（或者非常接近），
+    // 并且我们还没找到 anchor，或者这个页面更“中心”
+    // 这里简单使用第一个命中的页面
+    if (targetY >= pageTop && targetY <= pageTop + height) {
+      anchor = { 
+        page, 
+        ratioY: (targetY - pageTop) / height,
+        ratioX: (targetX - pageLeft) / width, // x 比例可以大于 1 或小于 0，这没关系
+        destX: mousePos ? mousePos.x - rect.left : undefined,
+        destY: mousePos ? mousePos.y - rect.top : undefined
+      }
       break
     }
-
-    if (centerY > top) {
-      anchor = { page, ratio: Math.min(1, Math.max(0, (centerY - top) / height)) }
-    } else {
-      anchor = { page, ratio: 0 }
-      break
-    }
+    
+    // 如果 targetY 在当前页面之上，且还没找到，说明可能在前一个 gap 里，
+    // 但通常循环是顺序的。如果 targetY 比第一个页面还小（top margin），
+    // 会在循环结束也没找到。
+  }
+  
+  // 兜底：如果遍历完没找到（比如在页面间隙，或者上方空白），取最近的一个页面
+  if (!anchor && pageNumbers.value.length > 0) {
+      const firstPage = pageNumbers.value[0]
+      if (firstPage !== undefined) {
+        const refs = pageRefs.get(firstPage)
+        if (refs) {
+            // 默认锚定到第一页顶部
+            anchor = { page: firstPage, ratioY: 0, ratioX: 0.5 }
+        }
+      }
   }
 
   return anchor
 }
 
-function restoreAnchor(anchor: { page: number; ratio: number }) {
+function restoreAnchor(anchor: ZoomAnchor) {
   const container = containerRef.value
   if (!container) return
 
@@ -133,11 +180,29 @@ function restoreAnchor(anchor: { page: number; ratio: number }) {
   }
 
   const height = refs.container.offsetHeight || refs.container.clientHeight
+  const width = refs.container.offsetWidth || refs.container.clientWidth
   if (!height) return
 
-  const targetTop = refs.container.offsetTop + anchor.ratio * height - container.clientHeight / 2
+  // 计算原来那个内容点现在的位置
+  const currentContentY = refs.container.offsetTop + anchor.ratioY * height
+  const currentContentX = refs.container.offsetLeft + anchor.ratioX * width
+  
+  let top = 0
+  let left = 0
+  
+  if (anchor.destX !== undefined && anchor.destY !== undefined) {
+      // 鼠标缩放恢复模式：让内容点回到屏幕上的 dest 位置
+      top = currentContentY - anchor.destY
+      left = currentContentX - anchor.destX
+  } else {
+      // 中心缩放恢复模式：让内容点回到视口中心
+      top = currentContentY - container.clientHeight / 2
+      left = currentContentX - container.clientWidth / 2
+  }
+
   container.scrollTo({
-    top: targetTop,
+    top,
+    left,
     behavior: 'instant' as ScrollBehavior
   })
 }
@@ -225,7 +290,10 @@ const updateVisiblePages = useDebounceFn(() => {
 watch(
   () => pdfStore.scale, // 监听缩放比例
   () => {
-    pendingAnchor.value = captureCenterAnchor()
+    // 如果没有 pendingAnchor（说明不是滚轮触发的缩放，而是按钮触发），则使用中心锚点
+    if (!pendingAnchor.value) {
+      pendingAnchor.value = captureCenterAnchor()
+    }
 
     isZooming.value = true
 
@@ -1044,10 +1112,23 @@ function handleWheel(event: WheelEvent) {
     event.preventDefault()
     event.stopPropagation()
 
+    // 逻辑修正：
+    // 1. 当还没有进入纸面的时候（内容宽度 <= 容器宽度），无论鼠标在哪里，请都往中间放大
+    // 2. 在进入纸面后（内容宽度 > 容器宽度），往鼠标的方向放大
+    const isHorizontalOverflow = container.scrollWidth > container.clientWidth + 1 // +1 容错
+
+    if (isHorizontalOverflow) {
+      // 往鼠标方向放大
+      pendingAnchor.value = captureCenterAnchor({ x: event.clientX, y: event.clientY })
+    } else {
+      // 往中间放大
+      pendingAnchor.value = captureCenterAnchor()
+    }
+
     const delta = event.deltaY
     const step = Math.min(0.25, Math.max(0.05, Math.abs(delta) / 500))
     const nextScale = delta < 0
-      ? Math.min(3.0, pdfStore.scale + step)
+      ? Math.min(4.5, pdfStore.scale + step)
       : Math.max(0.5, pdfStore.scale - step)
 
     pdfStore.setScale(nextScale)
@@ -1072,6 +1153,7 @@ function handleWheel(event: WheelEvent) {
 
     if ((deltaX > 0 && canScrollRight) || (deltaX < 0 && canScrollLeft)) {
       // PDF can still scroll in this direction, prevent browser navigation
+      container.scrollLeft += deltaX
       event.preventDefault()
     }
     // If at boundary, allow browser default behavior (back/forward navigation)
@@ -1477,7 +1559,7 @@ onBeforeUnmount(() => {
       @scroll="handleScroll"
     >
       <!-- 居中内容区，控制最大宽度与行间距 -->
-      <div class="space-y-4 flex flex-col items-center">
+      <div class="space-y-4 flex flex-col items-center w-fit min-w-full mx-auto">
         <!-- 遍历所有页码生成页面容器 -->
         <div
           v-for="page in pageNumbers"
