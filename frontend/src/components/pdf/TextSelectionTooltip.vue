@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { useLibraryStore } from '../../stores/library'
 import { aiApi } from '../../api'
@@ -13,7 +13,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  close: []
+  (e: 'close'): void
+  (e: 'quote', text: string): void
 }>()
 
 const aiStore = useAiStore()
@@ -30,6 +31,17 @@ const showTranslation = ref(false)
 const isTranslating = ref(false)
 const translationResult = ref('')
 
+// --- 拖拽相关状态 ---
+const dragState = ref({
+  isDragging: false,
+  startX: 0, // 鼠标按下的初始 X
+  startY: 0, // 鼠标按下的初始 Y
+  offsetX: 0, // 盒子当前的 X 偏移量 (px)
+  offsetY: 0, // 盒子当前的 Y 偏移量 (px)
+  prevOffsetX: 0, // 记录上一次结束时的偏移量
+  prevOffsetY: 0 
+})
+
 const colorOptions = [
   { label: '亮黄', value: '#F6E05E' },
   { label: '薄绿', value: '#9AE6B4' },
@@ -37,6 +49,46 @@ const colorOptions = [
   { label: '柔粉', value: '#FBB6CE' },
   { label: '橘橙', value: '#F6AD55' }
 ]
+
+// --- 拖拽处理函数 (已优化) ---
+function startDrag(event: MouseEvent) {
+  event.preventDefault() // 防止选中文本
+  dragState.value.isDragging = true
+  
+  // 记录鼠标起始位置
+  dragState.value.startX = event.clientX
+  dragState.value.startY = event.clientY
+  
+  // 记录开始拖动前盒子已经在的位置
+  dragState.value.prevOffsetX = dragState.value.offsetX
+  dragState.value.prevOffsetY = dragState.value.offsetY
+  
+  window.addEventListener('mousemove', onDrag)
+  window.addEventListener('mouseup', stopDrag)
+}
+
+function onDrag(event: MouseEvent) {
+  if (!dragState.value.isDragging) return
+  
+  // 计算鼠标移动的距离 (纯像素值)
+  const deltaX = event.clientX - dragState.value.startX
+  const deltaY = event.clientY - dragState.value.startY
+  
+  // 更新盒子的偏移量 = 之前的偏移 + 现在的移动距离
+  dragState.value.offsetX = dragState.value.prevOffsetX + deltaX
+  dragState.value.offsetY = dragState.value.prevOffsetY + deltaY
+}
+
+function stopDrag() {
+  dragState.value.isDragging = false
+  window.removeEventListener('mousemove', onDrag)
+  window.removeEventListener('mouseup', stopDrag)
+}
+
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onDrag)
+  window.removeEventListener('mouseup', stopDrag)
+})
 
 function handleCustomColorChange(event: Event) {
   const input = event.target as HTMLInputElement
@@ -46,27 +98,24 @@ function handleCustomColorChange(event: Event) {
   handleColorSelect(color)
 }
 
-// 翻译处理函数
 async function handleTranslate() {
-  // 1. 初始化UI状态，显示弹窗，不关闭主菜单
   showTranslation.value = true
   isTranslating.value = true
   translationResult.value = '' 
+  
+  // 每次点击翻译按钮，重置位置回到菜单正上方
+  dragState.value.offsetX = 0
+  dragState.value.offsetY = 0
 
   try {
     const pdfId = libraryStore.currentDocumentId
-    // 2. 发起请求
     const response = await aiApi.translateText(props.text, pdfId || undefined)
-    
-    // 3. 处理响应
     if (response && response.translatedText) {
        translationResult.value = response.translatedText
-       // 可选：存入 store
        aiStore.setTranslation(response)
     } else {
        translationResult.value = "未能获取翻译结果"
     }
-
   } catch (error) {
     console.error('Translation failed:', error)
     translationResult.value = "翻译请求失败，请稍后重试。"
@@ -77,10 +126,12 @@ async function handleTranslate() {
 
 function closeTranslation() {
   showTranslation.value = false
+  dragState.value.offsetX = 0
+  dragState.value.offsetY = 0
 }
 
-function handleCopy() {
-  navigator.clipboard.writeText(props.text)
+function handleQuote() {
+  emit('quote', props.text) 
   emit('close')
 }
 
@@ -125,19 +176,27 @@ function handleColorSelect(color: string) {
     <!-- 翻译结果悬浮框 -->
     <div 
       v-if="showTranslation" 
-      class="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-64 sm:w-80 bg-gray-800 text-white rounded-lg shadow-xl border border-gray-700 overflow-hidden flex flex-col"
+      class="absolute bottom-full left-1/2 mb-3 w-64 sm:w-80 bg-gray-800 text-white rounded-lg shadow-xl border border-gray-700 overflow-hidden flex flex-col transition-shadow will-change-transform"
+      :class="{ 'shadow-2xl ring-1 ring-gray-600': dragState.isDragging }"
+      :style="{ 
+        transform: `translateX(-50%) translate(${dragState.offsetX}px, ${dragState.offsetY}px)` 
+      }"
       @click.stop
     >
       <!-- 头部：标题和关闭按钮 -->
-      <div class="flex justify-between items-center px-3 py-2 bg-gray-900/50 border-b border-gray-700">
+      <div 
+        class="flex justify-between items-center px-3 py-2 bg-gray-900/50 border-b border-gray-700 select-none"
+        :class="dragState.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
+        @mousedown="startDrag"
+      >
         <span class="text-xs font-medium text-gray-300">AI 翻译</span>
-        <button @click="closeTranslation" class="text-gray-400 hover:text-white">
+        <button @click="closeTranslation" class="text-gray-400 hover:text-white cursor-pointer" @mousedown.stop>
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
       </div>
       
       <!-- 内容区域 -->
-      <div class="p-3 text-sm leading-relaxed max-h-48 overflow-y-auto custom-scrollbar">
+      <div class="p-3 text-sm leading-relaxed max-h-48 overflow-y-auto custom-scrollbar cursor-default" @mousedown.stop>
         <div v-if="isTranslating" class="flex items-center justify-center py-2 space-x-2 text-gray-400">
           <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -151,7 +210,7 @@ function handleColorSelect(color: string) {
       </div>
     </div>
 
-    <!-- 主菜单 -->
+    <!-- 主菜单 (保持不变) -->
     <div class="relative bg-gray-800 text-white rounded-lg shadow-xl py-1">
       <div class="flex items-center divide-x divide-gray-600">
         <!-- 翻译按钮 -->
@@ -165,8 +224,6 @@ function handleColorSelect(color: string) {
           </svg>
           翻译
         </button>
-
-        <!-- 已删除解释按钮 -->
 
         <!-- 高亮按钮 -->
         <button
@@ -226,9 +283,9 @@ function handleColorSelect(color: string) {
           </div>
         </div>
 
-        <!-- 复制按钮 -->
+        <!-- 引用按钮 -->
         <button
-          @click="handleCopy"
+          @click="handleQuote"
           class="px-3 py-2 hover:bg-gray-700 transition-colors flex items-center gap-1.5 text-sm"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,3 +302,25 @@ function handleColorSelect(color: string) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 隐藏滚动条但保留功能 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 性能优化：提示浏览器该元素会变化 */
+.will-change-transform {
+  will-change: transform;
+}
+</style>
