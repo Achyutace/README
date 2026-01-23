@@ -227,7 +227,7 @@ const bottomPanelStyle = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
+  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#111827] dark:to-[#0b1220] transition-colors duration-200">
     <!-- Theme Toggle Button - Draggable, top layer -->
     <button
       @click="handleThemeButtonClick"
@@ -252,7 +252,7 @@ const bottomPanelStyle = computed(() => {
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- Top Row: Toolbar -->
-      <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
+      <div class="flex items-stretch bg-white/95 dark:bg-sidebar backdrop-blur-sm border-b border-gray-200/60 dark:border-[#121726]/70 shadow-sm">
         <!-- PDF Toolbar -->
         <div class="flex-1">
           <PdfToolbar
@@ -278,14 +278,14 @@ const bottomPanelStyle = computed(() => {
           v-if="libraryStore.currentDocument"
           v-show="!bothMinimized"
           ref="sidebarRef"
-          class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
+          class="flex flex-col border-l border-gray-200/60 dark:border-[#121726]/70 bg-white/95 dark:bg-sidebar backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
           :class="aiStore.isPanelHidden ? 'w-0 opacity-0 overflow-hidden' : ''"
           :style="!aiStore.isPanelHidden ? { width: sidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div
             v-if="!aiStore.isPanelHidden"
-            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-gray-600 transition-colors z-50"
+            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-[#2f3750] transition-colors z-50"
             :class="{ 'bg-primary-500': isResizingWidth }"
             @mousedown="startWidthResize"
           >
@@ -295,11 +295,11 @@ const bottomPanelStyle = computed(() => {
           <!-- Top Panel: AI Panel -->
           <div
             v-if="!topHidden"
-            class="flex flex-col border-b border-gray-200 dark:border-gray-800 overflow-hidden transition-all duration-200"
+            class="flex flex-col border-b border-gray-200 dark:border-[#121726]/70 overflow-hidden transition-all duration-200"
             :style="topPanelStyle"
           >
             <!-- Panel Header with Hide Button -->
-            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-[#121726]/70 bg-white dark:bg-sidebar">
               <div class="flex items-center">
                 <button
                   @click="toggleTopHide"
@@ -332,7 +332,7 @@ const bottomPanelStyle = computed(() => {
           <!-- Draggable Divider (only show when neither panel is hidden/minimized) -->
           <div
             v-if="!topHidden && !bottomMinimized"
-            class="h-1 bg-gray-300 dark:bg-gray-700 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
+            class="h-1 bg-gray-300 dark:bg-[#2f3750] hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
             :class="{ 'bg-primary-500 dark:bg-primary-400': isResizingSplit }"
             @mousedown="startSplitResize"
           >
@@ -342,13 +342,13 @@ const bottomPanelStyle = computed(() => {
 
           <!-- Bottom Panel: Chat Box -->
           <div 
-            class="flex flex-col overflow-hidden bg-gray-50 dark:bg-[#1e1e1e] transition-all duration-200"
+            class="flex flex-col overflow-hidden bg-gray-50 dark:bg-sidebar transition-all duration-200"
             :style="bottomPanelStyle"
           >
             <!-- Minimized Bar for Bottom Panel -->
             <div 
               v-if="bottomMinimized"
-              class="h-9 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
+              class="h-9 bg-sidebar flex items-center px-3 cursor-pointer hover:bg-[#2f3750] transition-colors"
               @click="toggleBottomMinimize"
             >
               <!-- Triangle pointing up (minimized state) -->
@@ -360,7 +360,7 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button and History -->
-              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526]">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-[#121726]/70 bg-white dark:bg-sidebar">
                 <div class="flex items-center">
                   <button
                     @click="toggleBottomMinimize"

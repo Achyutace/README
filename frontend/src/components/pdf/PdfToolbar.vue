@@ -92,7 +92,7 @@ watch(
 
 <template>
   <div class="relative">
-    <div class="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm">
+    <div class="pdf-toolbar flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm dark:bg-sidebar dark:border-[#121726]/70 dark:text-gray-100">
       <!-- Left: Zoom Controls -->
       <div class="flex items-center gap-2">
         <button
@@ -382,5 +382,31 @@ watch(
   width: 6px;
   height: 6px;
   background: #bbb;
+}
+
+/* Dark mode styling to align toolbar with sidebar color */
+.dark .pdf-toolbar {
+  background: #1e1e2e;
+  border-color: #121726;
+  color: #e5e7eb;
+}
+
+.dark .pdf-toolbar button {
+  color: #e5e7eb;
+}
+
+.dark .pdf-toolbar button:hover {
+  background-color: #2f3750;
+}
+
+.dark .pdf-toolbar input {
+  background-color: #111827;
+  border-color: #2f3750;
+  color: #e5e7eb;
+}
+
+.dark .pdf-toolbar span,
+.dark .pdf-toolbar svg {
+  color: #dbeafe;
 }
 </style>
