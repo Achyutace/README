@@ -38,6 +38,9 @@ const showModelMenu = ref(false)
 const showCustomModelModal = ref(false) // 自定义模型弹窗
 const selectedModel = ref('README Fusion')
 
+// --- Feature: Chat Mode Toggle ---
+const chatMode = ref<'agent' | 'simple'>('agent') 
+
 // 自定义模型数据接口
 interface CustomModel {
   id: string
@@ -213,6 +216,12 @@ const selectModel = (modelName: string) => {
   showModelMenu.value = false
 }
 
+// --- Chat Mode Handlers ---
+const toggleChatMode = () => {
+  chatMode.value = chatMode.value === 'agent' ? 'simple' : 'agent'
+  console.log('Chat mode switched to:', chatMode.value)
+}
+
 const openCustomModelModal = () => {
   newCustomModel.value = { name: '', apiBase: '', apiKey: '' }
   showCustomModelModal.value = true
@@ -360,7 +369,12 @@ async function sendMessage(message?: string) {
 
     console.log('Sending message with payload:', payload)
 
-    const response = await fetch('http://localhost:5000/api/chatbox/message', {
+    // 根据聊天模式选择不同的 API 端点
+    const endpoint = chatMode.value === 'simple' 
+      ? 'http://localhost:5000/api/chatbox/simple-chat'
+      : 'http://localhost:5000/api/chatbox/message'
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -609,6 +623,20 @@ defineExpose({
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
         </button>
         <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileSelect" />
+
+        <!-- Chat Mode Toggle Button -->
+        <button 
+          @click="toggleChatMode" 
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          :title="chatMode === 'agent' ? '当前: Agent 模式 (点击切换到简单聊天)' : '当前: 简单聊天模式 (点击切换到 Agent )'"
+        >
+          <svg v-if="chatMode === 'agent'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        </button>
 
         <!-- Feature 3: Model Selector with Custom Models -->
         <div class="relative ml-auto">
