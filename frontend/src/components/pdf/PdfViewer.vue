@@ -637,6 +637,14 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
         }
       }
 
+      // 兜底：上一段看起来是完整 URL，且下一段跳回左侧并以大写开头时，强制断开，防止把新段首词吞进 URL
+      const prevLooksLikeUrl = /(https?:\/\/|www\.)\S+$/.test(fullText)
+      const nextStartsWithUpper = /^[A-Z]/.test(text)
+      const resetsToLeft = xGap < -lineHeight * 0.8
+      if (!needsSpace && prevLooksLikeUrl && nextStartsWithUpper && resetsToLeft && !startsWithExtension && !nextStartsWithConnector) {
+        needsSpace = true
+      }
+
       if (needsSpace && !fullText.endsWith(' ') && !text.startsWith(' ')) {
         fullText += ' '
       }
@@ -1334,12 +1342,12 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 组件根容器，纵向排列，占满可用高度 -->
-  <div class="flex flex-col h-full bg-gray-100 relative">
+  <div class="pdf-viewer-root flex flex-col h-full bg-gray-100 dark:bg-[#0b1220] relative">
     <!-- 主内容区，显示 PDF 页面的滚动容器 -->
     <div
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
-      class="flex-1 overflow-auto p-4"
+      class="pdf-scroll-container flex-1 overflow-auto p-4"
       @mousedown="handleMouseDown"
       @mouseup="handleMouseUp"
       @scroll="handleScroll"
@@ -1350,7 +1358,7 @@ onBeforeUnmount(() => {
         <div
           v-for="page in pageNumbers"
           :key="page"
-          class="pdf-page relative bg-white shadow-lg border border-gray-200 overflow-hidden shrink-0"
+          class="pdf-page relative bg-white dark:bg-[#111827] shadow-lg dark:shadow-[0_10px_30px_rgba(0,0,0,0.45)] border border-gray-200 dark:border-[#1f2937] overflow-hidden shrink-0"
           :ref="(el, refs) => handlePageContainerRef(page, el, refs)"
           :data-page="page"
           :style="{
@@ -1361,7 +1369,7 @@ onBeforeUnmount(() => {
           <!-- 加载中占位符 -->
           <div
             v-if="!isPageRendered(page)"
-            class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-10"
+            class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 dark:bg-[#0f172a] z-10"
           >
             <div class="loading-spinner mb-3"></div>
             <span class="text-gray-400 text-sm">{{ page }}</span>
@@ -1529,5 +1537,38 @@ onBeforeUnmount(() => {
 .paragraph-marker .marker-icon svg {
   width: 12px;
   height: 12px;
+}
+
+/* Dark mode adjustments: dark canvas and white text for comfortable reading */
+:global(.dark .pdf-viewer-root) {
+  background: #0b1220;
+}
+
+:global(.dark .pdf-scroll-container) {
+  background: #0b1220;
+}
+
+:global(.dark .pdf-page) {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+:global(.dark .pdf-page canvas) {
+  background-color: #111827;
+  filter: invert(0.92) hue-rotate(180deg) brightness(1.05);
+}
+
+:global(.dark .textLayer),
+:global(.dark .textLayer span) {
+  color: #0b0b0b !important;
+  mix-blend-mode: normal;
+}
+
+:global(.dark .highlight-selected-box) {
+  border-color: #cbd5ff;
+}
+
+:global(.dark .loading-spinner) {
+  border-color: #1f2937;
+  border-top-color: #9ca3af;
 }
 </style>
