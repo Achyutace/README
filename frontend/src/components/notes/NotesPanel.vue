@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useLibraryStore } from '../../stores/library'
 import { notesApi, type Note } from '../../api'
 import NoteEditor from './NoteEditor.vue'
@@ -18,6 +18,7 @@ interface NoteCard {
 const libraryStore = useLibraryStore()
 const cards = ref<NoteCard[]>([])
 const isLoading = ref(false)
+const containerRef = ref<HTMLElement | null>(null)
 
 // Generate unique ID for temporary notes
 function generateTempId() {
@@ -101,7 +102,10 @@ function addCard() {
     createdAt: Date.now(),
     isLocal: true
   }
-  cards.value.unshift(newCard)
+  cards.value.push(newCard)
+  nextTick(() => {
+    containerRef.value?.scrollTo({ top: containerRef.value.scrollHeight, behavior: 'smooth' })
+  })
 }
 
 // Delete card from database and local state
@@ -187,7 +191,7 @@ defineExpose({ addCard })
 <template>
   <div class="h-full flex flex-col bg-white dark:bg-[#2d2d30]">
     <!-- Cards Container -->
-    <div class="flex-1 overflow-y-auto py-2 space-y-1">
+    <div ref="containerRef" class="flex-1 overflow-y-auto pb-2 pt-0 space-y-1">
       <!-- Empty State -->
       <div v-if="cards.length === 0" class="flex items-center justify-center h-full">
         
