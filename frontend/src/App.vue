@@ -24,8 +24,12 @@ const chatVisible = ref(true)
 const notesMinimized = ref(false)
 const chatMinimized = ref(false)
 
-// Sidebar is visible if at least one panel is visible
-const sidebarVisible = computed(() => notesVisible.value || chatVisible.value)
+// Sidebar is visible if at least one panel is visible and not both minimized
+const sidebarVisible = computed(() => {
+  const hasVisiblePanel = notesVisible.value || chatVisible.value
+  const bothMinimized = notesVisible.value && notesMinimized.value && chatVisible.value && chatMinimized.value
+  return hasVisiblePanel && !bothMinimized
+})
 
 // Resizable sidebar width
 const sidebarWidth = ref(480) // Default w-96 = 384px
@@ -95,17 +99,41 @@ const handleThemeButtonClick = () => {
 // Toggle Visibility (Hide/Show)
 const toggleNotesVisibility = () => {
   notesVisible.value = !notesVisible.value
+  // 如果笔记隐藏且聊天最小化，自动隐藏聊天
+  if (!notesVisible.value && chatMinimized.value) {
+    chatVisible.value = false
+    chatMinimized.value = false
+  }
 }
 const toggleChatVisibility = () => {
   chatVisible.value = !chatVisible.value
+  // 如果聊天隐藏且笔记最小化，自动隐藏笔记
+  if (!chatVisible.value && notesMinimized.value) {
+    notesVisible.value = false
+    notesMinimized.value = false
+  }
 }
 
 // Toggle Minimize (Collapse/Expand)
 const toggleNotesMinimize = () => {
   notesMinimized.value = !notesMinimized.value
+  // 如果笔记最小化且聊天隐藏或最小化，自动隐藏两者
+  if (notesMinimized.value && (!chatVisible.value || chatMinimized.value)) {
+    notesVisible.value = false
+    chatVisible.value = false
+    notesMinimized.value = false
+    chatMinimized.value = false
+  }
 }
 const toggleChatMinimize = () => {
   chatMinimized.value = !chatMinimized.value
+  // 如果聊天最小化且笔记隐藏或最小化，自动隐藏两者
+  if (chatMinimized.value && (!notesVisible.value || notesMinimized.value)) {
+    notesVisible.value = false
+    chatVisible.value = false
+    notesMinimized.value = false
+    chatMinimized.value = false
+  }
 }
 
 // Keyboard shortcuts handler
@@ -257,26 +285,25 @@ const bottomPanelStyle = computed(() => {
 
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden">
-      <!-- Top Row: Toolbar -->
-      <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
-        <!-- PDF Toolbar -->
-        <div class="flex-1">
-          <PdfToolbar
-            v-if="pdfStore.currentPdfUrl"
-            :notes-visible="notesVisible"
-            :chat-visible="chatVisible"
-            @toggle-notes-visibility="toggleNotesVisibility"
-            @toggle-chat-visibility="toggleChatVisibility"
-          />
-          <div v-else class="h-[49px]"></div>
-        </div>
-      </div>
-
       <!-- Content Row: PDF Viewer + Right Panels -->
       <div class="flex flex-1 overflow-hidden">
         <!-- PDF Viewer - always present, never destroyed -->
-        <div class="flex-1 overflow-hidden">
-          <PdfViewer />
+        <div class="flex-1 overflow-hidden flex flex-col">
+          <!-- PDF Toolbar - Only above PDF viewer -->
+          <div class="bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
+            <PdfToolbar
+              v-if="pdfStore.currentPdfUrl"
+              :notes-visible="notesVisible"
+              :chat-visible="chatVisible"
+              @toggle-notes-visibility="toggleNotesVisibility"
+              @toggle-chat-visibility="toggleChatVisibility"
+            />
+            <div v-else class="h-[49px]"></div>
+          </div>
+          <!-- PDF Viewer Content -->
+          <div class="flex-1 overflow-hidden">
+            <PdfViewer />
+          </div>
         </div>
 
         <!-- Right Panel Container (Split View) - hidden when both panels are hidden -->
@@ -314,28 +341,27 @@ const bottomPanelStyle = computed(() => {
                <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
                  <path d="M7 10l5 5 5-5H7z"/>
                </svg>
-              <span class="text-white text-xs font-medium truncate">笔记</span>
+              <span class="text-white text-xs font-medium truncate">Note</span>
             </div>
 
             <template v-else>
             <!-- Panel Header with Minimize Button -->
-            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+            <div 
+              class="h-9 flex items-center justify-between px-3 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2d2d30] transition-colors"
+              @click="toggleNotesMinimize"
+            >
               <div class="flex items-center">
-                <button
-                  @click="toggleNotesMinimize"
-                  class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors mr-2"
-                  title="最小化"
-                >
+                <div class="mr-2 flex items-center text-gray-500 dark:text-gray-400">
                   <!-- Up Triangle (Collapse) -->
-                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M7 14l5-5 5 5H7z"/>
                   </svg>
-                </button>
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
+                </div>
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Note</span>
               </div>
               <!-- Add Card Button -->
               <button
-                @click="notesPanelRef?.addCard()"
+                @click.stop="notesPanelRef?.addCard()"
                 class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 title="添加卡片"
               >
@@ -385,30 +411,44 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button and History -->
-              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526]">
+              <div 
+                class="h-9 flex items-center justify-between px-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2d2d30] transition-colors"
+                @click="toggleChatMinimize"
+              >
                 <div class="flex items-center">
-                  <button
-                    @click="toggleChatMinimize"
-                    class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
-                    title="最小化"
-                  >
+                  <div class="mr-2 flex items-center text-gray-500">
                     <!-- Triangle pointing down (Collapse) -->
-                    <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M7 10l5 5 5-5H7z"/>
                     </svg>
-                  </button>
+                  </div>
                   <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Chat</span>
                 </div>
-                <!-- History Button (Clock Icon) - Always visible -->
-                <button
-                  class="p-1.5 hover:bg-gray-100 dark:hover:bg-[#3e3e42] rounded-lg transition-colors"
-                  title="聊天记录"
-                  @click="chatTabRef?.toggleHistoryPanel()"
-                >
-                  <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
+                
+                <!-- Right Actions -->
+                <div class="flex items-center gap-1">
+                  <!-- New Chat Button -->
+                  <button
+                    class="p-1.5 hover:bg-gray-100 dark:hover:bg-[#3e3e42] rounded-lg transition-colors"
+                    title="新对话"
+                    @click.stop="chatTabRef?.createNewChat()"
+                  >
+                    <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+
+                  <!-- History Button (Clock Icon) - Always visible -->
+                  <button
+                    class="p-1.5 hover:bg-gray-100 dark:hover:bg-[#3e3e42] rounded-lg transition-colors"
+                    title="聊天记录"
+                    @click.stop="chatTabRef?.toggleHistoryPanel()"
+                  >
+                    <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <ChatTab ref="chatTabRef" class="flex-1 overflow-hidden" />
             </template>

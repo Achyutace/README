@@ -52,6 +52,8 @@ async function handleFileUpload(event: Event) {
         libraryStore.selectDocument(doc.id)
         pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID
         aiStore.resetForNewDocument()
+        // 上传成功后自动收起左侧边栏
+        isCollapsed.value = true
       } catch (error) {
         alert('上传失败，请确保后端服务已启动')
       }

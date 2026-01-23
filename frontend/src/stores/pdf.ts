@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { PdfParagraph, TranslationPanelState } from '../types'
 
-const DEFAULT_SCALE = 1.6
+const DEFAULT_SCALE = 1.5 // 实际缩放 150%，显示为 100%
 const HIGHLIGHTS_STORAGE_KEY = 'pdf-highlights'
 
 type NormalizedRect = {
@@ -74,7 +74,8 @@ export const usePdfStore = defineStore('pdf', () => {
   // 翻译缓存（paragraphId -> translation）
   const translationCache = ref<Record<string, string>>({})
 
-  const scalePercent = computed(() => Math.round(scale.value * 100))
+  // 显示的缩放百分比：实际缩放的 2/3（1.5 显示为 100%）
+  const scalePercent = computed(() => Math.round((scale.value / 1.5) * 100))
 
   // 从 localStorage 加载高亮数据
   function loadHighlightsFromStorage() {

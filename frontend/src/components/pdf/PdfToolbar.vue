@@ -92,15 +92,15 @@ watch(
 
 <template>
   <div class="relative">
-    <div class="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm">
+    <div class="flex items-center justify-between px-4 py-1.5 bg-white dark:bg-[#252526] border-b border-gray-200 dark:border-gray-800 shadow-sm">
       <!-- Left: Zoom Controls -->
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5">
         <button
           @click="pdfStore.zoomOut"
-          class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
           title="缩小"
         >
-          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
           </svg>
         </button>
@@ -113,30 +113,30 @@ watch(
             step="1"
             @keyup.enter="applyScaleInput"
             @blur="applyScaleInput"
-            class="w-16 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500 no-spinner"
+            class="w-14 px-2 py-0.5 text-center text-sm border border-gray-300 dark:border-gray-600 dark:bg-[#3e3e42] dark:text-gray-200 rounded focus:outline-none focus:border-primary-500 dark:focus:border-primary-400 no-spinner"
           />
-          <span class="text-sm text-gray-600">%</span>
+          <span class="text-sm text-gray-600 dark:text-gray-400">%</span>
         </div>
         <button
           @click="pdfStore.zoomIn"
-          class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
           title="放大"
         >
-          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
         </button>
       </div>
 
       <!-- Center: Page Navigation -->
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5">
         <button
           @click="pdfStore.prevPage"
           :disabled="pdfStore.currentPage <= 1"
-          class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="上一页"
         >
-          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
@@ -147,19 +147,19 @@ watch(
             type="text"
             :placeholder="String(pdfStore.currentPage)"
             @keyup.enter="handlePageInput"
-            class="w-12 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500"
+            class="w-10 px-2 py-0.5 text-center text-sm border border-gray-300 dark:border-gray-600 dark:bg-[#3e3e42] dark:text-gray-200 rounded focus:outline-none focus:border-primary-500 dark:focus:border-primary-400"
           />
-          <span class="text-sm text-gray-500">/</span>
-          <span class="text-sm text-gray-700">{{ pdfStore.totalPages || '-' }}</span>
+          <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
+          <span class="text-sm text-gray-700 dark:text-gray-300">{{ pdfStore.totalPages || '-' }}</span>
         </div>
 
         <button
           @click="pdfStore.nextPage"
           :disabled="pdfStore.currentPage >= pdfStore.totalPages"
-          class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="下一页"
         >
-          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
         </button>
@@ -170,10 +170,10 @@ watch(
         <button
           @click="showRoadmap = !showRoadmap"
           :class="[
-            'px-3 py-1.5 text-sm rounded-lg transition-colors',
+            'px-2.5 py-1 text-sm rounded-lg transition-colors',
             showRoadmap
-              ? 'bg-primary-100 text-primary-700'
-              : 'hover:bg-gray-100 text-gray-600'
+              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
+              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
           ]"
           title="思维导图"
         >
@@ -186,16 +186,16 @@ watch(
         </button>
 
         <!-- Divider -->
-        <div class="w-px h-6 bg-gray-300 mx-1"></div>
+        <div class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
         <!-- Notes Panel Toggle (Visibility) -->
         <button
           @click="emit('toggle-notes-visibility')"
           :class="[
-            'px-2 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1',
+            'px-2 py-1 text-sm rounded-lg transition-colors flex items-center gap-1',
             props.notesVisible
-              ? 'bg-gray-100 text-gray-500'
-              : 'hover:bg-gray-100 text-gray-600'
+              ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
           ]"
           :title="props.notesVisible ? '隐藏笔记' : '显示笔记'"
         >
@@ -208,10 +208,10 @@ watch(
         <button
           @click="emit('toggle-chat-visibility')"
           :class="[
-            'px-2 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1',
+            'px-2 py-1 text-sm rounded-lg transition-colors flex items-center gap-1',
             props.chatVisible
-              ? 'bg-gray-100 text-gray-500'
-              : 'hover:bg-gray-100 text-gray-600'
+              ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
           ]"
           :title="props.chatVisible ? '隐藏对话' : '显示对话'"
         >

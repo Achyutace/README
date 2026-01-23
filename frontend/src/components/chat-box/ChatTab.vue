@@ -30,7 +30,8 @@ const showModelMenu = ref(false)
 const showMoreModels = ref(false)
 const selectedModel = ref('README Fusion')
 
-// Chat session state
+// Chat session state 
+// TODO
 const showHistoryPanel = ref(false)
 
 const premiumModels = [
@@ -63,7 +64,7 @@ const handleKeywordClick = () => {
 }
 
 const selectFrameMode = () => {
-  // TODO: Implement frame selection mode
+  // TODO
   console.log('Frame selection mode activated')
   showAtMenu.value = false
   showKeywordSubmenu.value = false
@@ -179,10 +180,11 @@ const formatTime = (timestamp: string) => {
 }
 
 const suggestedPrompts = [
-  '这篇文章的核心是什么？',
+  '这篇文章针对的问题的是什么？',
   '这篇论文有什么创新点？',
-  '有什么局限性或不足？',
-  '请解释主要的研究方法'
+  '这篇论文有什么局限性或不足？',
+  '这篇论文主要的研究方法是什么？',
+  '这篇文章启发了哪些后续的研究？',
 ]
 
 async function sendMessage(message?: string) {
@@ -287,26 +289,14 @@ watch(() => libraryStore.currentDocument?.id, async (pdfId) => {
 
 // Expose methods for parent component
 defineExpose({
-  toggleHistoryPanel
+  toggleHistoryPanel,
+  createNewChat
 })
 </script>
 
 <template>
   <div class="h-full flex flex-col relative">
-    <!-- Top Toolbar: New Chat Button -->
-    <div class="absolute top-3 right-3 z-10 flex gap-2">
-      <!-- New Chat Button - Minimalist premium style -->
-      <button
-        @click="createNewChat"
-        class="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-[#2d2d30] backdrop-blur-sm hover:bg-white dark:hover:bg-[#3e3e42] border border-gray-200/60 dark:border-gray-700/60 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-xl transition-all duration-200 shadow-sm hover:shadow"
-        title="新对话"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" />
-        </svg>
-        <span class="text-sm font-medium">新对话</span>
-      </button>
-    </div>
+    <!-- Top Toolbar: New Chat Button REMOVED -->
 
     <!-- History Panel (Overlay) -->
     <div
@@ -421,22 +411,6 @@ defineExpose({
             class="space-y-3"
           >
             <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
-
-            <!-- Citations -->
-            <div
-              v-if="message.citations && message.citations.length > 0"
-              class="mt-3 pt-2 border-t border-gray-200"
-            >
-              <p class="text-xs text-gray-500 mb-1">引用来源：</p>
-              <button
-                v-for="citation in message.citations"
-                :key="citation.pageNumber"
-                @click="handleCitationClick(citation.pageNumber)"
-                class="text-xs text-primary-600 hover:underline"
-              >
-                第 {{ citation.pageNumber }} 页
-              </button>
-            </div>
           </div>
           <p class="text-xs text-gray-400 mt-1 px-1" :class="message.role === 'user' ? 'text-right' : ''">
             {{ message.timestamp.toLocaleTimeString() }}
