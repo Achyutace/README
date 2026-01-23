@@ -2,6 +2,7 @@
 import { ref, nextTick, watch, onMounted, computed } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { useLibraryStore } from '../../stores/library'
+import { chatSessionApi } from '../../api'
 
 // --- Markdown Imports ---
 import MarkdownIt from 'markdown-it'
@@ -278,14 +279,13 @@ const toggleHistoryPanel = () => {
   showHistoryPanel.value = !showHistoryPanel.value
 }
 
-const createNewChat = () => {
+const createNewChat = async () => {
   const pdfId = libraryStore.currentDocument?.id
   if (pdfId) {
-    aiStore.createNewSession(pdfId)
+    await aiStore.createNewSession(pdfId)
   }
   showHistoryPanel.value = false
 }
-
 const loadChatSession = async (sessionId: string) => {
   await aiStore.loadSession(sessionId)
   showHistoryPanel.value = false
@@ -326,62 +326,34 @@ const formatTime = (timestamp: string) => {
 async function sendMessage(message?: string) {
   const content = message || inputMessage.value.trim()
   if (!content) return
-
   const pdfId = libraryStore.currentDocument?.id
   if (!pdfId) {
     console.error('No PDF selected')
     return
   }
-
+  // 如果没有会话ID，先创建一个
   if (!aiStore.currentSessionId) {
-    aiStore.createNewSession(pdfId)
+    await aiStore.createNewSession(pdfId)
   }
-
+  // 乐观更新 UI
   aiStore.addChatMessage({ role: 'user', content })
-
   inputMessage.value = ''
   aiStore.isLoadingChat = true
-
   await nextTick()
   scrollToBottom()
-
   try {
-    const history = aiStore.chatMessages.slice(0, -1).map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }))
-
-    // Find custom model details if applicable
+    // 获取当前选中的自定义模型配置
     const currentModelConfig = allAvailableModels.value.find(m => m.name === selectedModel.value)
-    
-    // Construct payload with extra model info
-    const payload = {
-      message: content,
+    // 调用封装的 API
+    const data = await chatSessionApi.sendMessage(
+      aiStore.currentSessionId!,
+      content,
       pdfId,
-      userId: 'default_user',
-      sessionId: aiStore.currentSessionId,
-      history,
-      // Pass model info to backend
-      model: selectedModel.value,
-      apiKey: (currentModelConfig as CustomModel)?.apiKey || '',
-      apiBase: (currentModelConfig as CustomModel)?.apiBase || ''
-    }
-
-    console.log('Sending message with payload:', payload)
-
-    // 根据聊天模式选择不同的 API 端点
-    const endpoint = chatMode.value === 'simple' 
-      ? 'http://localhost:5000/api/chatbox/simple-chat'
-      : 'http://localhost:5000/api/chatbox/message'
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-
-    const data = await response.json()
-
+      chatMode.value,
+      selectedModel.value,
+      (currentModelConfig as CustomModel)?.apiBase,
+      (currentModelConfig as CustomModel)?.apiKey
+    )
     aiStore.addChatMessage({
       role: 'assistant',
       content: data.response,
@@ -391,11 +363,10 @@ async function sendMessage(message?: string) {
     console.error('Failed to send message:', error)
     aiStore.addChatMessage({
       role: 'assistant',
-      content: '抱歉，发生错误，请稍后重试。',
+      content: '抱歉，网络请求失败，请检查后端服务。',
       citations: []
     })
   }
-
   aiStore.isLoadingChat = false
   await nextTick()
   scrollToBottom()

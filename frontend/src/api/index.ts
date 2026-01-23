@@ -1,9 +1,19 @@
 import axios from 'axios'
 import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph } from '../types'
-
+// 当前用户ID，需要添加登陆验证逻辑
+// TODO
+const CURRENT_USER_ID = 'default_user' 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   timeout: 60000, // AI 生成可能较慢，增加超时时间
+})
+
+// 请求拦截器，自动注入 X-User-Id 
+api.interceptors.request.use((config) => {
+  config.headers['X-User-Id'] = CURRENT_USER_ID
+  return config
+}, (error) => {
+  return Promise.reject(error)
 })
 
 export interface PdfUploadResponse {
@@ -101,8 +111,12 @@ export const aiApi = {
   // 翻译 -> 对应后端 router/translate.py
   // 注意：后端目前是 /translate/paragraph，需要 paragraphId。
   // 如果前端只是想翻译任意文本，后端需要在 router/translate.py 加一个通用接口
-  translateText: async (text: string): Promise<Translation> => {
-    const { data } = await api.post<Translation>('/translate/text', { text })
+  translateText: async (text: string, pdfId?: string): Promise<Translation> => {
+    const { data } = await api.post<Translation>('/translate/text', { 
+      text,
+      pdfId, // 发送 pdfId 以获取上下文
+      contextParagraphs: 5 // 获取前5段作为上下文
+    })
     return data
   },
 
@@ -132,6 +146,7 @@ export const aiApi = {
       pdfId,
       message,
       history,
+      userId: CURRENT_USER_ID
     })
     return data
   },
@@ -205,18 +220,26 @@ export const chatSessionApi = {
     sessionId: string,
     message: string,
     pdfId?: string,
-    userId: string = 'default'
+    mode: 'agent' | 'simple' = 'agent', 
+    model?: string, // 支持自定义模型参数
+    apiBase?: string,
+    apiKey?: string
   ): Promise<{
     sessionId: string
     response: string
     citations?: any[]
-    steps?: string[]
   }> => {
-    const { data } = await api.post('/chatbox/message', {
+    const endpoint = mode === 'simple' 
+      ? '/chatbox/simple-chat' 
+      : '/chatbox/message'
+    const { data } = await api.post(endpoint, {
       sessionId,
       message,
       pdfId,
-      userId,
+      userId: CURRENT_USER_ID,
+      model, 
+      apiBase,
+      apiKey
     })
     return data
   },

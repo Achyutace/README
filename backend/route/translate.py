@@ -170,7 +170,7 @@ def translate_text():
     """
     翻译选中的词句（带上下文）
     
-    前端发送: { "text": "选中的文本", "pdfId": "..." (可选) }
+    前端发送: { "text": "选中的文本", "pdfId": "..."  }
     后端会从数据库获取前几段文本（包含摘要）作为上下文，帮助 LLM 更准确地翻译
     
     适用场景：
@@ -186,7 +186,7 @@ def translate_text():
     
     text = data['text']
     pdf_id = data.get('pdfId')
-    context_paragraphs = data.get('contextParagraphs', 5)  # 默认获取前5段
+    context_paragraphs = data.get('contextParagraphs', 3) 
     
     if not text or not text.strip():
         return jsonify({'error': 'Text cannot be empty'}), 400
@@ -206,7 +206,7 @@ def translate_text():
                 if paragraphs:
                     # 取前几段并拼接
                     context_parts = []
-                    for para in paragraphs[:context_paragraphs]:
+                    for para in paragraphs[:context_paragraphs]: 
                         context_parts.append(para['original_text'])
                     
                     context = '\n\n'.join(context_parts)

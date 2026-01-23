@@ -124,12 +124,12 @@
 ### 会话管理
 
 #### 获取会话列表
-获取用户的所有聊天会话，支持按 PDF 筛选。
+获取用户的所有聊天会话，按 PDF 筛选。
 
 - **接口**: `GET /chatbox/sessions`
 - **Header**: `X-User-Id: user_123`
 - **Query 参数**:
-    - `pdfId`: (String, 可选) 筛选特定 PDF 的会话
+    - `pdfId`: (String) 筛选特定 PDF 的会话
     - `limit`: (Int, 可选, 默认 50) 返回数量限制
 - **示例**: `GET /chatbox/sessions?pdfId=a1b2c3...&limit=20`
 - **响应**:
@@ -311,7 +311,7 @@
 ```json
 {
   "text": "selected text to translate",
-  "pdfId": "a1b2c3...", // 可选，提供则自动获取上下文
+  "pdfId": "a1b2c3...", 
   "contextParagraphs": 5 // 可选，上下文段落数
 }
 ```

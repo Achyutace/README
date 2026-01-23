@@ -193,20 +193,32 @@ export const useAiStore = defineStore('ai', () => {
   }
   
   // 创建新会话
-  function createNewSession(pdfId: string): string {
-    const sessionId = crypto.randomUUID()
-    const newSession: ChatSession = {
-      id: sessionId,
-      pdfId,
-      title: '新对话',
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+  async function createNewSession(pdfId: string): Promise<string> {
+    try {
+      // 调用后端生成 Session ID
+      const data = await chatSessionApi.createSession()
+      
+      const newSession: ChatSession = {
+        id: data.sessionId, // 使用后端 ID
+        pdfId,
+        title: data.title || '新对话',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+      
+      chatSessions.value.unshift(newSession)
+      currentSessionId.value = data.sessionId
+      chatMessages.value = []
+      return data.sessionId
+    } catch (error) {
+      console.error('Failed to create session on backend:', error)
+      // 降级处理：如果在离线模式或后端挂了，前端生成临时ID
+      const tempId = crypto.randomUUID()
+      currentSessionId.value = tempId
+      chatMessages.value = []
+      return tempId
     }
-    chatSessions.value.unshift(newSession)
-    currentSessionId.value = sessionId
-    chatMessages.value = []
-    return sessionId
   }
   
   // 加载会话（从后端获取消息）
