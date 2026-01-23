@@ -15,12 +15,17 @@ const aiStore = useAiStore()
 const pdfStore = usePdfStore()
 const themeStore = useThemeStore()
 
-// Panel minimize states
-const topHidden = ref(false)
-const bottomMinimized = ref(false)
+// --- Panel States ---
+// Visible: Controlled by Toolbar buttons (Show/Hide)
+const notesVisible = ref(true)
+const chatVisible = ref(true)
 
-// Both minimized = sidebar collapses to thin bars
-const bothMinimized = computed(() => topHidden.value && bottomMinimized.value)
+// Minimized: Controlled by Panel Header buttons (Expand/Collapse)
+const notesMinimized = ref(false)
+const chatMinimized = ref(false)
+
+// Sidebar is visible if at least one panel is visible
+const sidebarVisible = computed(() => notesVisible.value || chatVisible.value)
 
 // Resizable sidebar width
 const sidebarWidth = ref(480) // Default w-96 = 384px
@@ -85,17 +90,35 @@ const handleThemeButtonClick = () => {
   }
 }
 
+// --- Toggles ---
+
+// Toggle Visibility (Hide/Show)
+const toggleNotesVisibility = () => {
+  notesVisible.value = !notesVisible.value
+}
+const toggleChatVisibility = () => {
+  chatVisible.value = !chatVisible.value
+}
+
+// Toggle Minimize (Collapse/Expand)
+const toggleNotesMinimize = () => {
+  notesMinimized.value = !notesMinimized.value
+}
+const toggleChatMinimize = () => {
+  chatMinimized.value = !chatMinimized.value
+}
+
 // Keyboard shortcuts handler
 const handleKeyboard = (e: KeyboardEvent) => {
-  // Ctrl+Alt+/ toggle Chat
+  // Ctrl+Alt+/ toggle Chat Minimize (Keep existing shortcut behavior)
   if (e.ctrlKey && e.altKey && e.key === '/') {
     e.preventDefault()
-    toggleBottomMinimize()
+    toggleChatMinimize()
   }
-  // Ctrl+Alt+N toggle Notes (完全隐藏/显示)
+  // Ctrl+Alt+N toggle Notes Visibility (Hide/Show)
   if (e.ctrlKey && e.altKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault()
-    toggleTopHide()
+    toggleNotesVisibility()
   }
 }
 
@@ -111,34 +134,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeyboard)
 })
 
-// Toggle hide for top panel
-const toggleTopHide = () => {
-  topHidden.value = !topHidden.value
-  // 如果隐藏了顶部面板，调整底部面板占满空间
-  if (topHidden.value && !bottomMinimized.value) {
-    splitRatio.value = 0 // 底部面板占满
-  } else if (!topHidden.value && !bottomMinimized.value) {
-    splitRatio.value = 0.45 // 恢复默认比例
-  }
-}
-
-// Toggle minimize for bottom panel
-const toggleBottomMinimize = () => {
-  if (bottomMinimized.value) {
-    // Expanding bottom panel
-    bottomMinimized.value = false
-    if (!topHidden.value) {
-      splitRatio.value = 0.45 // Reset to 45/55
-    }
-  } else {
-    // Minimizing bottom panel
-    bottomMinimized.value = true
-  }
-}
-
 // Horizontal resize (sidebar width)
 const startWidthResize = (e: MouseEvent) => {
-  if (bothMinimized.value) return // Don't resize when both minimized
+  if (!sidebarVisible.value) return // Don't resize when hidden
   isResizingWidth.value = true
   document.addEventListener('mousemove', handleWidthResize)
   document.addEventListener('mouseup', stopWidthResize)
@@ -160,7 +158,9 @@ const stopWidthResize = () => {
 
 // Vertical resize (split between panels)
 const startSplitResize = (e: MouseEvent) => {
-  if (topHidden.value || bottomMinimized.value) return
+  // Only allow resize if both are visible and NOT minimized
+  if (!notesVisible.value || notesMinimized.value || !chatVisible.value || chatMinimized.value) return
+  
   isResizingSplit.value = true
   document.addEventListener('mousemove', handleSplitResize)
   document.addEventListener('mouseup', stopSplitResize)
@@ -188,12 +188,12 @@ const stopSplitResize = () => {
   const topHeight = rect.height * splitRatio.value
   const bottomHeight = rect.height * (1 - splitRatio.value)
   
-  // Auto-hide if dragged to edge
+  // Auto-minimize if dragged to edge
   if (topHeight < SNAP_THRESHOLD) {
-    topHidden.value = true
+    notesMinimized.value = true
     splitRatio.value = 0.5
   } else if (bottomHeight < SNAP_THRESHOLD) {
-    bottomMinimized.value = true
+    chatMinimized.value = true
     splitRatio.value = 0.5
   }
   
@@ -202,32 +202,38 @@ const stopSplitResize = () => {
   document.removeEventListener('mouseup', stopSplitResize)
 }
 
-// Computed styles for panels - 使用百分比高度确保拖动准确
+// Computed styles for panels
 const topPanelStyle = computed(() => {
-  if (topHidden.value) {
-    return { height: '0px', flexShrink: 0 }
+  if (!notesVisible.value) return { display: 'none' }
+  if (notesMinimized.value) return { height: '36px', flexShrink: 0 }
+  
+  // If Notes is expanded...
+  // And Chat is hidden OR minimized -> Notes takes full remaining space
+  if (!chatVisible.value || chatMinimized.value) {
+    return { flex: '1 1 auto' }
   }
-  if (bottomMinimized.value) {
-    return { flex: '1 1 auto' } // 占满剩余空间
-  }
-  // 使用 calc 减去分隔线高度(4px)的一半
+  
+  // Both expanded -> Use split ratio
   return { height: `calc(${splitRatio.value * 100}% - 2px)`, flexShrink: 0 }
 })
 
 const bottomPanelStyle = computed(() => {
-  if (bottomMinimized.value) {
-    return { height: '36px', flexShrink: 0 }
-  }
-  if (topHidden.value) {
+  if (!chatVisible.value) return { display: 'none' }
+  if (chatMinimized.value) return { height: '36px', flexShrink: 0 }
+  
+  // If Chat is expanded...
+  // And Notes is hidden OR minimized -> Chat takes full remaining space
+  if (!notesVisible.value || notesMinimized.value) {
     return { flex: '1 1 auto' }
   }
-  // 使用 calc 减去分隔线高度(4px)的一半
+  
+  // Both expanded -> Use split ratio
   return { height: `calc(${(1 - splitRatio.value) * 100}% - 2px)`, flexShrink: 0 }
 })
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#111827] dark:to-[#0b1220] transition-colors duration-200">
+  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
     <!-- Theme Toggle Button - Draggable, top layer -->
     <button
       @click="handleThemeButtonClick"
@@ -252,15 +258,15 @@ const bottomPanelStyle = computed(() => {
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- Top Row: Toolbar -->
-      <div class="flex items-stretch bg-white/95 dark:bg-sidebar backdrop-blur-sm border-b border-gray-200/60 dark:border-[#121726]/70 shadow-sm">
+      <div class="flex items-stretch bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
         <!-- PDF Toolbar -->
         <div class="flex-1">
           <PdfToolbar
             v-if="pdfStore.currentPdfUrl"
-            :notes-minimized="topHidden"
-            :chat-minimized="bottomMinimized"
-            @toggle-notes="toggleTopHide"
-            @toggle-chat="toggleBottomMinimize"
+            :notes-visible="notesVisible"
+            :chat-visible="chatVisible"
+            @toggle-notes-visibility="toggleNotesVisibility"
+            @toggle-chat-visibility="toggleChatVisibility"
           />
           <div v-else class="h-[49px]"></div>
         </div>
@@ -273,42 +279,56 @@ const bottomPanelStyle = computed(() => {
           <PdfViewer />
         </div>
 
-        <!-- Right Panel Container (Split View) - hidden when both minimized -->
+        <!-- Right Panel Container (Split View) - hidden when both panels are hidden -->
         <aside
           v-if="libraryStore.currentDocument"
-          v-show="!bothMinimized"
+          v-show="sidebarVisible"
           ref="sidebarRef"
-          class="flex flex-col border-l border-gray-200/60 dark:border-[#121726]/70 bg-white/95 dark:bg-sidebar backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
+          class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
           :class="aiStore.isPanelHidden ? 'w-0 opacity-0 overflow-hidden' : ''"
           :style="!aiStore.isPanelHidden ? { width: sidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div
             v-if="!aiStore.isPanelHidden"
-            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-[#2f3750] transition-colors z-50"
+            class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-gray-600 transition-colors z-50"
             :class="{ 'bg-primary-500': isResizingWidth }"
             @mousedown="startWidthResize"
           >
             <div class="absolute left-0 top-0 bottom-0 w-3 -ml-1"></div>
           </div>
 
-          <!-- Top Panel: AI Panel -->
+          <!-- Top Panel: AI Panel (Notes) -->
           <div
-            v-if="!topHidden"
-            class="flex flex-col border-b border-gray-200 dark:border-[#121726]/70 overflow-hidden transition-all duration-200"
+            v-if="notesVisible"
+            class="flex flex-col border-b border-gray-200 dark:border-gray-800 overflow-hidden transition-all duration-200"
             :style="topPanelStyle"
           >
-            <!-- Panel Header with Hide Button -->
-            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-[#121726]/70 bg-white dark:bg-sidebar">
+            <!-- Minimized Bar for Top Panel -->
+            <div 
+              v-if="notesMinimized"
+              class="h-9 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
+              @click="toggleNotesMinimize"
+            >
+               <!-- Down Triangle (Expand) -->
+               <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
+                 <path d="M7 10l5 5 5-5H7z"/>
+               </svg>
+              <span class="text-white text-xs font-medium truncate">笔记</span>
+            </div>
+
+            <template v-else>
+            <!-- Panel Header with Minimize Button -->
+            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
               <div class="flex items-center">
                 <button
-                  @click="toggleTopHide"
+                  @click="toggleNotesMinimize"
                   class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors mr-2"
-                  title="隐藏笔记"
+                  title="最小化"
                 >
-                  <!-- Hide icon (eye-slash) -->
-                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  <!-- Up Triangle (Collapse) -->
+                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M7 14l5-5 5 5H7z"/>
                   </svg>
                 </button>
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
@@ -327,12 +347,16 @@ const bottomPanelStyle = computed(() => {
             <div class="flex-1 overflow-hidden">
               <NotesPanel ref="notesPanelRef" />
             </div>
+            </template>
           </div>
 
-          <!-- Draggable Divider (only show when neither panel is hidden/minimized) -->
+          <!-- Spacer if both are minimized (to push chat to bottom) -->
+          <div v-if="notesVisible && notesMinimized && chatVisible && chatMinimized" class="flex-1 bg-gray-50 dark:bg-[#1e1e1e]"></div>
+
+          <!-- Draggable Divider (only show when both panels are visible and expanded) -->
           <div
-            v-if="!topHidden && !bottomMinimized"
-            class="h-1 bg-gray-300 dark:bg-[#2f3750] hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
+            v-if="notesVisible && !notesMinimized && chatVisible && !chatMinimized"
+            class="h-1 bg-gray-300 dark:bg-gray-700 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
             :class="{ 'bg-primary-500 dark:bg-primary-400': isResizingSplit }"
             @mousedown="startSplitResize"
           >
@@ -342,16 +366,17 @@ const bottomPanelStyle = computed(() => {
 
           <!-- Bottom Panel: Chat Box -->
           <div 
-            class="flex flex-col overflow-hidden bg-gray-50 dark:bg-sidebar transition-all duration-200"
+            v-if="chatVisible"
+            class="flex flex-col overflow-hidden bg-gray-50 dark:bg-[#1e1e1e] transition-all duration-200"
             :style="bottomPanelStyle"
           >
             <!-- Minimized Bar for Bottom Panel -->
             <div 
-              v-if="bottomMinimized"
-              class="h-9 bg-sidebar flex items-center px-3 cursor-pointer hover:bg-[#2f3750] transition-colors"
-              @click="toggleBottomMinimize"
+              v-if="chatMinimized"
+              class="h-9 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
+              @click="toggleChatMinimize"
             >
-              <!-- Triangle pointing up (minimized state) -->
+              <!-- Triangle pointing up (Expand) -->
               <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M7 14l5-5 5 5H7z"/>
               </svg>
@@ -360,14 +385,14 @@ const bottomPanelStyle = computed(() => {
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button and History -->
-              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-[#121726]/70 bg-white dark:bg-sidebar">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526]">
                 <div class="flex items-center">
                   <button
-                    @click="toggleBottomMinimize"
+                    @click="toggleChatMinimize"
                     class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
                     title="最小化"
                   >
-                    <!-- Triangle pointing down (expanded state) -->
+                    <!-- Triangle pointing down (Collapse) -->
                     <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M7 10l5 5 5-5H7z"/>
                     </svg>
