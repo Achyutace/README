@@ -15,6 +15,12 @@ fi
 rm -rf backend/uploads
 mkdir -p backend/uploads
 
+# Install frontend dependencies
+cd frontend
+echo "Installing frontend dependencies..."
+npm install
+cd ..
+
 # Start backend
 echo "Starting backend server..."
 cd backend
