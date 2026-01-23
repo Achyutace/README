@@ -637,6 +637,14 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
         }
       }
 
+      // 兜底：上一段看起来是完整 URL，且下一段跳回左侧并以大写开头时，强制断开，防止把新段首词吞进 URL
+      const prevLooksLikeUrl = /(https?:\/\/|www\.)\S+$/.test(fullText)
+      const nextStartsWithUpper = /^[A-Z]/.test(text)
+      const resetsToLeft = xGap < -lineHeight * 0.8
+      if (!needsSpace && prevLooksLikeUrl && nextStartsWithUpper && resetsToLeft && !startsWithExtension && !nextStartsWithConnector) {
+        needsSpace = true
+      }
+
       if (needsSpace && !fullText.endsWith(' ') && !text.startsWith(' ')) {
         fullText += ' '
       }
