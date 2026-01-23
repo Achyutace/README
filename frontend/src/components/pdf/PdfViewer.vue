@@ -1033,20 +1033,49 @@ function handleMouseLeaveContainer() {
 }
 
 function handleWheel(event: WheelEvent) {
-  // Trackpad pinch on Chrome/Edge reports wheel with ctrlKey=true; intercept only inside PDF.
+  // Only handle events when pointer is over PDF
   if (!isPointerOverPdf.value) return
-  if (!event.ctrlKey) return
 
-  event.preventDefault()
-  event.stopPropagation()
+  const container = containerRef.value
+  if (!container) return
 
-  const delta = event.deltaY
-  const step = Math.min(0.25, Math.max(0.05, Math.abs(delta) / 500))
-  const nextScale = delta < 0
-    ? Math.min(3.0, pdfStore.scale + step)
-    : Math.max(0.5, pdfStore.scale - step)
+  // Trackpad pinch on Chrome/Edge reports wheel with ctrlKey=true
+  if (event.ctrlKey) {
+    event.preventDefault()
+    event.stopPropagation()
 
-  pdfStore.setScale(nextScale)
+    const delta = event.deltaY
+    const step = Math.min(0.25, Math.max(0.05, Math.abs(delta) / 500))
+    const nextScale = delta < 0
+      ? Math.min(3.0, pdfStore.scale + step)
+      : Math.max(0.5, pdfStore.scale - step)
+
+    pdfStore.setScale(nextScale)
+    return
+  }
+
+  // Handle horizontal scrolling to prevent browser back/forward navigation
+  // when PDF content is scrollable
+  const deltaX = event.deltaX
+  if (Math.abs(deltaX) > Math.abs(event.deltaY) * 0.5) {
+    // This is primarily a horizontal scroll gesture
+    const scrollLeft = container.scrollLeft
+    const scrollWidth = container.scrollWidth
+    const clientWidth = container.clientWidth
+    const maxScrollLeft = scrollWidth - clientWidth
+
+    // Check if we can scroll in the direction of the gesture
+    // deltaX > 0 means scrolling right (content moves left)
+    // deltaX < 0 means scrolling left (content moves right)
+    const canScrollRight = scrollLeft < maxScrollLeft - 1
+    const canScrollLeft = scrollLeft > 1
+
+    if ((deltaX > 0 && canScrollRight) || (deltaX < 0 && canScrollLeft)) {
+      // PDF can still scroll in this direction, prevent browser navigation
+      event.preventDefault()
+    }
+    // If at boundary, allow browser default behavior (back/forward navigation)
+  }
 }
 
 function handleMouseDown(event: MouseEvent) {
