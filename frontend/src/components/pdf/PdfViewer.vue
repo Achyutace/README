@@ -35,13 +35,21 @@ const pageNumbers = ref<number[]>([]) // 页面序号集合
 const pageRefs = new Map<number, PageRef>() // 每页元素引用集合
 const renderTasks = new Map<number, RenderTask>() // 每页渲染任务集合
 const visiblePages = new Set<number>() // 当前可见页面集合
+const pagesNeedingRefresh = new Set<number>() // 缩放后需要重绘的页面集合
+const lastRenderedScale = new Map<number, number>() // 每页最后一次渲染使用的缩放比例
 const pendingAnchor = ref<{ page: number; ratio: number } | null>(null) // 记录缩放前的视口锚点
 const isPointerOverPdf = ref(false)
+const isZooming = ref(false)
 
 // 页面尺寸预加载（用于快速滚动时的占位）
 const pageSizes = ref<Map<number, { width: number; height: number }>>(new Map())
 // 已渲染完成的页面集合
 const renderedPages = ref<Set<number>>(new Set())
+const settleZooming = useDebounceFn(() => {
+  isZooming.value = false
+  updateVisiblePages()
+  startBackgroundPreload()
+}, 180)
 
 const showTooltip = ref(false) // 是否显示选中文本的工具提示
 const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
@@ -198,9 +206,14 @@ const updateVisiblePages = useDebounceFn(() => {
     // 检查页面是否在视口范围内（包含缓冲区）
     if (top < containerBottom + buffer && bottom > containerTop - buffer) {
       newVisiblePages.add(pageNumber)
-      // 如果之前未渲染或需要重绘，则触发渲染
-      if (!renderTasks.has(pageNumber)) {
-        renderPage(pageNumber)
+      const alreadyRendered = renderedPages.value.has(pageNumber)
+      const needsRefresh = pagesNeedingRefresh.has(pageNumber)
+      const shouldRenderNow = !alreadyRendered || (!isZooming.value && needsRefresh)
+
+      // 如果之前未渲染或（缩放后）需要重绘且已结束缩放，则触发渲染
+      if (shouldRenderNow && !renderTasks.has(pageNumber)) {
+        renderPage(pageNumber, { preserveContent: alreadyRendered })
+        pagesNeedingRefresh.delete(pageNumber)
       }
     }
   })
@@ -214,6 +227,8 @@ watch(
   () => {
     pendingAnchor.value = captureCenterAnchor()
 
+    isZooming.value = true
+
     // 取消当前预加载
     if (preloadAbortController) {
       preloadAbortController.abort()
@@ -223,8 +238,11 @@ watch(
     // 缩放时清除所有现有任务和已渲染状态，重新检测可见区域进行渲染
     renderTasks.forEach(task => task.cancel())
     renderTasks.clear()
-    renderedPages.value = new Set() // 清空已渲染页面，因为缩放后需要重新渲染
+    pagesNeedingRefresh.clear()
+    pageRefs.forEach((_, pageNumber) => pagesNeedingRefresh.add(pageNumber))
     preloadProgress.value = 0
+
+    applyInterimScale()
 
     nextTick(() => {
       updateVisiblePages()
@@ -238,9 +256,7 @@ watch(
         })
       }
       // 延迟重新启动预加载
-      setTimeout(() => {
-        startBackgroundPreload()
-      }, 500)
+      settleZooming()
     })
   }
 )
@@ -259,7 +275,7 @@ watch(
   }
 )
 
-async function renderPage(pageNumber: number) {
+async function renderPage(pageNumber: number, options?: { preserveContent?: boolean }) {
   const pdf = pdfDoc.value // 当前文档实例
   const refs = pageRefs.get(pageNumber) // 当前页的引用集合
   if (!pdf || !refs) return // 缺失则跳过
@@ -267,10 +283,13 @@ async function renderPage(pageNumber: number) {
   // 防止重复渲染同一页
   if(renderTasks.has(pageNumber)) return
 
+  const preserveContent = !!options?.preserveContent && renderedPages.value.has(pageNumber)
+
   const page = await pdf.getPage(pageNumber) // 获取指定页
   const viewport = page.getViewport({ scale: pdfStore.scale }) // 依据缩放创建视口
 
-  const context = refs.canvas.getContext('2d') // 获取画布 2D 上下文
+  const targetCanvas = preserveContent ? document.createElement('canvas') : refs.canvas
+  const context = targetCanvas.getContext('2d') // 获取画布 2D 上下文
   if (!context) return // 无上下文则终止
 
   // 1. 高清屏优化：获取设备像素比
@@ -281,20 +300,24 @@ async function renderPage(pageNumber: number) {
   refs.container.style.width = `${Math.floor(viewport.width)}px`
   refs.container.style.height = `${Math.floor(viewport.height)}px`
 
-  refs.canvas.width = Math.floor(viewport.width * outputScale)
-  refs.canvas.height = Math.floor(viewport.height * outputScale)
-  refs.canvas.style.width = `${Math.floor(viewport.width)}px`
-  refs.canvas.style.height = `${Math.floor(viewport.height)}px`
+  targetCanvas.width = Math.floor(viewport.width * outputScale)
+  targetCanvas.height = Math.floor(viewport.height * outputScale)
+  targetCanvas.style.width = `${Math.floor(viewport.width)}px`
+  targetCanvas.style.height = `${Math.floor(viewport.height)}px`
 
   // 文字层和链接层使用逻辑尺寸
   refs.textLayer.style.width = `${Math.floor(viewport.width)}px`
   refs.textLayer.style.height = `${Math.floor(viewport.height)}px`
   refs.textLayer.style.setProperty('--scale-factor', `${viewport.scale}`)
+  refs.textLayer.style.transform = 'scale(1)'
+  refs.textLayer.style.transformOrigin = 'top left'
   refs.textLayer.innerHTML = '' // 重绘前清空文字层
   
   // 链接层同样使用逻辑尺寸（复用 renderLinkLayer 内部逻辑，也可以在此显式重置防止闪烁）
   refs.linkLayer.style.width = `${Math.floor(viewport.width)}px`
   refs.linkLayer.style.height = `${Math.floor(viewport.height)}px`
+  refs.linkLayer.style.transform = 'scale(1)'
+  refs.linkLayer.style.transformOrigin = 'top left'
 
   // 3. 渲染优化：应用缩放变换
   const transform = outputScale !== 1 
@@ -333,6 +356,20 @@ async function renderPage(pageNumber: number) {
   } catch (err) {
     console.error('Error rendering link layer:', err)
   }
+
+  if (preserveContent) {
+    const destContext = refs.canvas.getContext('2d')
+    if (destContext) {
+      refs.canvas.width = targetCanvas.width
+      refs.canvas.height = targetCanvas.height
+      refs.canvas.style.width = targetCanvas.style.width
+      refs.canvas.style.height = targetCanvas.style.height
+      destContext.clearRect(0, 0, refs.canvas.width, refs.canvas.height)
+      destContext.drawImage(targetCanvas, 0, 0)
+    }
+  }
+
+  lastRenderedScale.set(pageNumber, pdfStore.scale)
 
   // 标记页面为已渲染完成（创建新 Set 以触发响应式更新）
   renderedPages.value = new Set([...renderedPages.value, pageNumber])
@@ -955,7 +992,36 @@ function cleanup() {
   pageNumbers.value = [] // 清空页码列表
   pageSizes.value = new Map() // 清空页面尺寸缓存
   renderedPages.value = new Set() // 清空已渲染页面集合
+  pagesNeedingRefresh.clear()
+  lastRenderedScale.clear()
+  isZooming.value = false
   pdfDoc.value = null // 释放文档实例
+}
+
+// 缩放手势进行时，先按目标尺寸拉伸已有渲染，避免立即显示占位符
+function applyInterimScale() {
+  pageRefs.forEach((refs, pageNumber) => {
+    const size = pageSizes.value.get(pageNumber)
+    if (!size) return
+
+    const targetWidth = Math.floor(size.width * pdfStore.scale)
+    const targetHeight = Math.floor(size.height * pdfStore.scale)
+    const renderedScale = lastRenderedScale.get(pageNumber) ?? pdfStore.scale
+    const ratio = renderedScale ? pdfStore.scale / renderedScale : 1
+
+    refs.canvas.style.width = `${targetWidth}px`
+    refs.canvas.style.height = `${targetHeight}px`
+
+    refs.textLayer.style.width = `${targetWidth}px`
+    refs.textLayer.style.height = `${targetHeight}px`
+    refs.textLayer.style.transformOrigin = 'top left'
+    refs.textLayer.style.transform = `scale(${ratio})`
+
+    refs.linkLayer.style.width = `${targetWidth}px`
+    refs.linkLayer.style.height = `${targetHeight}px`
+    refs.linkLayer.style.transformOrigin = 'top left'
+    refs.linkLayer.style.transform = `scale(${ratio})`
+  })
 }
 
 function handleMouseEnterContainer() {
@@ -1404,7 +1470,7 @@ onBeforeUnmount(() => {
             <span class="text-gray-400 text-sm">{{ page }}</span>
           </div>
           <canvas class="block mx-auto" />
-          <div class="highlightLayer absolute inset-0 pointer-events-none">
+          <div class="highlightLayer absolute inset-0 pointer-events-none" :class="{ 'zooming-layer': isZooming }">
             <template v-for="hl in pdfStore.getHighlightsByPage(page)" :key="hl.id">
               <div
                 v-for="(rect, idx) in hl.rects"
@@ -1426,11 +1492,11 @@ onBeforeUnmount(() => {
               />
             </template>
           </div>
-          <div class="textLayer absolute inset-0" /> 
-          <div class="linkLayer absolute inset-0" /> <!-- 链接层允许点击内部链接 -->
+          <div class="textLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" /> 
+          <div class="linkLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" /> <!-- 链接层允许点击内部链接 -->
           
           <!-- 段落光标层 -->
-          <div class="paragraphMarkerLayer absolute inset-0 pointer-events-none z-10">
+          <div class="paragraphMarkerLayer absolute inset-0 pointer-events-none z-10" :class="{ 'zooming-layer': isZooming }">
             <div
               v-for="paragraph in pdfStore.getParagraphsByPage(page)"
               :key="paragraph.id"
@@ -1566,6 +1632,12 @@ onBeforeUnmount(() => {
 .paragraph-marker .marker-icon svg {
   width: 12px;
   height: 12px;
+}
+
+.zooming-layer {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }
 
 /* Dark mode adjustments: dark canvas and white text for comfortable reading */
