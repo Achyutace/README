@@ -113,7 +113,7 @@ watch(
             step="1"
             @keyup.enter="applyScaleInput"
             @blur="applyScaleInput"
-            class="w-16 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500"
+            class="w-16 px-2 py-1 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-primary-500 no-spinner"
           />
           <span class="text-sm text-gray-600">%</span>
         </div>
@@ -351,6 +351,16 @@ watch(
 </template>
 
 <style>
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner[type='number'] {
+  -moz-appearance: textfield;
+}
+
 .vue-flow__node {
   font-size: 12px;
   background: white;
