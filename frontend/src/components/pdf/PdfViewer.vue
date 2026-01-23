@@ -277,11 +277,20 @@ type LinkOverlayRect = {
   height: number
 }
 
-function normalizeUrl(raw: string): string | null {
+// 统一清理 URL 内部空白字符（包含普通空格/不间断空格/零宽空格）
+function sanitizeHref(href: string): string {
+  return href.replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '')
+}
+
+// 返回修剪信息与最终 href：trimmed 为去除末尾非 URL 片段后的原始子串（不附加协议），href 为可点击链接
+function normalizeUrlWithTrimInfo(raw: string): { trimmed: string | null; href: string | null } {
   let trimmed = raw.trim()
 
   // 去掉末尾标点避免误判
   trimmed = trimmed.replace(/[),.;:]+$/g, '')
+
+  // 去除内部空白字符（有些 PDF 会在跨行时引入空格/零宽字符）
+  trimmed = trimmed.replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '')
 
   // 关键修复：如果URL包含有效扩展名，截断扩展名之后的内容
   // 例如 "example.com/page.html.Y.Bengio" -> "example.com/page.html"
@@ -317,15 +326,16 @@ function normalizeUrl(raw: string): string | null {
   // 移除末尾可能的空格和特殊字符
   trimmed = trimmed.replace(/[\s\u00A0]+$/g, '')
 
-  if (!trimmed) return null
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
-  if (/^www\./i.test(trimmed)) return `https://${trimmed}`
-  return null
+  if (!trimmed) return { trimmed: null, href: null }
+  if (/^https?:\/\//i.test(trimmed)) return { trimmed, href: trimmed }
+  if (/^www\./i.test(trimmed)) return { trimmed, href: `https://${trimmed}` }
+  return { trimmed: null, href: null }
 }
 
 function appendLinkOverlay(container: HTMLElement, rect: LinkOverlayRect, href: string, title?: string) {
   const link = document.createElement('a')
-  link.href = href
+  // 最终设置前移除 URL 内部空格，避免不可点击
+  link.href = sanitizeHref(href)
   link.target = '_blank'
   link.rel = 'noreferrer noopener'
   link.title = title || href
@@ -365,6 +375,87 @@ function appendInternalLinkOverlay(container: HTMLElement, rect: LinkOverlayRect
   container.appendChild(link)
 }
 
+function dedupeLinkOverlays(container: HTMLElement) {
+  const anchors = Array.from(container.querySelectorAll('a')) as HTMLAnchorElement[]
+  if (anchors.length < 2) return
+
+  type AnchorInfo = {
+    el: HTMLAnchorElement
+    href: string
+    rect: { left: number; top: number; width: number; height: number }
+    area: number
+    hrefLen: number
+  }
+
+  const infos: AnchorInfo[] = anchors.map(el => {
+    const left = parseFloat(el.style.left || '0')
+    const top = parseFloat(el.style.top || '0')
+    const width = parseFloat(el.style.width || '0')
+    const height = parseFloat(el.style.height || '0')
+    const area = Math.max(0, width) * Math.max(0, height)
+    const href = el.href || ''
+    return { el, href, rect: { left, top, width, height }, area, hrefLen: href.length }
+  })
+
+  function overlapArea(a: AnchorInfo, b: AnchorInfo) {
+    const ax2 = a.rect.left + a.rect.width
+    const ay2 = a.rect.top + a.rect.height
+    const bx2 = b.rect.left + b.rect.width
+    const by2 = b.rect.top + b.rect.height
+    const ow = Math.max(0, Math.min(ax2, bx2) - Math.max(a.rect.left, b.rect.left))
+    const oh = Math.max(0, Math.min(ay2, by2) - Math.max(a.rect.top, b.rect.top))
+    return ow * oh
+  }
+
+  function IoU(a: AnchorInfo, b: AnchorInfo) {
+    const ov = overlapArea(a, b)
+    const union = a.area + b.area - ov
+    return union > 0 ? ov / union : 0
+  }
+
+  // function overlapFractions(small: AnchorInfo, big: AnchorInfo) {
+  //   const sx2 = small.rect.left + small.rect.width
+  //   const sy2 = small.rect.top + small.rect.height
+  //   const bx2 = big.rect.left + big.rect.width
+  //   const by2 = big.rect.top + big.rect.height
+  //   const ow = Math.max(0, Math.min(sx2, bx2) - Math.max(small.rect.left, big.rect.left))
+  //   const oh = Math.max(0, Math.min(sy2, by2) - Math.max(small.rect.top, big.rect.top))
+  //   return {
+  //     fracW: small.rect.width > 0 ? ow / small.rect.width : 0,
+  //     fracH: small.rect.height > 0 ? oh / small.rect.height : 0,
+  //   }
+  // }
+
+  const toRemove = new Set<HTMLAnchorElement>()
+  for (let i = 0; i < infos.length; i++) {
+    for (let j = i + 1; j < infos.length; j++) {
+      const a = infos[i]
+      const b = infos[j]
+      if (!a || !b) continue
+      if (a.area === 0 || b.area === 0) continue
+      const iou = IoU(a, b)
+      if( iou >= 0.3) {
+        // 高覆盖度：删除较短的链接
+        if (a.hrefLen < b.hrefLen) {
+          toRemove.add(a.el)
+        } else if (b.hrefLen < a.hrefLen) {
+          toRemove.add(b.el)
+        } else {
+          // 长度相等时删除面积较小的
+          if (a.area < b.area) {
+            toRemove.add(a.el)
+          } else {
+            toRemove.add(b.el)
+          }
+        }
+        continue
+      }
+    }
+  }
+
+  toRemove.forEach(el => el.remove())
+}
+
 async function resolveDestination(dest: any): Promise<number | null> {
   if (!pdfDoc.value) return null
 
@@ -392,7 +483,6 @@ async function resolveDestination(dest: any): Promise<number | null> {
 }
 
 function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
-  const urlRegex = /\b((?:https?:\/\/|www\.)[^\s<>"'()]+[^\s<>"'().])/gi
   const layerRect = textLayer.getBoundingClientRect()
   const spans = Array.from(textLayer.querySelectorAll('span'))
 
@@ -430,14 +520,16 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
       // 检查上一个span是否以连字符结尾（PDF断词）
       const lastEndsWithHyphen = lastSpan.text.endsWith('-')
 
-      // 检查是否是URL的延续部分（通常URL不会有空格）
-      const lastEndsWithUrlChar = /[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]$/.test(lastSpan.text)
-      const currentStartsWithUrlChar = /^[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]/.test(text)
-      const couldBeUrlContinuation = lastEndsWithUrlChar && currentStartsWithUrlChar
+      // 检查是否是URL的延续部分（通常URL不会有空格）——此前使用字符类判断，现已由连接符与扩展名启发式替代
 
       // 检查当前span是否以文件扩展名开头（如 .html, .pdf 等）
       // 这通常是跨行URL的延续部分
       const startsWithExtension = /^\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt|shtml)/i.test(text)
+
+      // 连接符：URL 连续的明确信号
+      const nextStartsWithConnector = /^[\/?#&=]/.test(text)
+      const prevEndsWithConnector = /[\/?#&=]$/.test(lastSpan.text)
+      const prevEndsWithKnownExt = /\.(html?|pdf|php|aspx?|jsp|js|css|json|xml|txt|png|jpe?g|gif|svg|ico|zip|tar|gz|mp[34]|avi|mov|doc|xls|ppt|shtml)$/.test(lastSpan.text)
 
       // 检查fullText是否看起来像是一个未完成的URL
       const looksLikeIncompleteUrl = /https?:\/\/[^\s]*$/.test(fullText) || /www\.[^\s]*$/.test(fullText)
@@ -448,11 +540,14 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
       // 3. 如果末尾是点号后紧跟大写字母（作者引用开始），需要空格
       // 4. 如果当前span以文件扩展名开头且上一个像未完成的URL，不加空格
       const isAuthorCitation = /\.$/.test(lastSpan.text) && /^[A-Z]/.test(text) && !startsWithExtension
+      // 标题或页码行（例如“1.”、“1.1 ”或纯页码）
+      const isHeadingLike = /^\s*\d+(?:\.\d+)*(?:\s|$)/.test(text)
+      const isPageNumberLine = /^\s*\d+\s*$/.test(text)
 
       let needsSpace = false
       if (isNewLine) {
-        // 新行：如果X不连续或看起来像是引用开始，添加空格
-        if (!isXContinuous || isAuthorCitation) {
+        // 新行：如果X不连续/引用开始/标题或页码，添加空格
+        if (!isXContinuous || isAuthorCitation || isHeadingLike || isPageNumberLine) {
           needsSpace = true
         }
         // 如果是连字符断词，不加空格
@@ -461,13 +556,17 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
           // 移除末尾的连字符
           fullText = fullText.slice(0, -1)
         }
-        // 如果当前以扩展名开头且前面是未完成的URL，不加空格（URL跨行延续）
+        // 扩展名开头且前面是未完成的URL：不加空格（URL跨行延续）
         if (startsWithExtension && looksLikeIncompleteUrl) {
           needsSpace = false
         }
-        // 如果前面是URL字符结尾，当前是URL字符开头，可能是URL延续
-        if (couldBeUrlContinuation && looksLikeIncompleteUrl) {
+        // 明确的 URL 连续信号：连接符相连，不加空格
+        if (looksLikeIncompleteUrl && (nextStartsWithConnector || prevEndsWithConnector)) {
           needsSpace = false
+        }
+        // 如果上一段已是已知扩展名结尾，且下一段不是连接符开头，则视为句末，保持空格
+        if (prevEndsWithKnownExt && !nextStartsWithConnector) {
+          needsSpace = true
         }
       }
 
@@ -487,41 +586,121 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
     fullText += text
   })
 
-  // 在合并后的完整文本中匹配URL
-  let match: RegExpExecArray | null
-  while ((match = urlRegex.exec(fullText)) !== null) {
-    const urlStart = match.index
-    const urlEnd = match.index + match[0].length
-    const fullUrl = match[0]
-    const href = normalizeUrl(fullUrl)
-    if (!href) continue
+  // 使用字符级状态机扫描URL，避免依赖正则匹配
+  const isUrlChar = (ch: string) => /[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]/.test(ch)
+  const startsWithInsensitive = (s: string, i: number, token: string) => s.substr(i, token.length).toLowerCase() === token
+  const isWhitespace = (ch: string) => /\s/.test(ch)
+  const isNoisePunct = (ch: string) => ch === ':' || ch === '：'
+  const knownTlds = new Set([
+    'com','net','org','edu','gov','io','ai','cn','uk','us','de','fr','jp','ru','xyz','site','info','dev','app','tech','me','tv','cc','co','ac'
+  ])
 
-    // 找出这个URL跨越了哪些span
-    const affectedSpans = spanInfos.filter(info =>
-      info.globalEnd > urlStart && info.globalStart < urlEnd
-    )
+  function tryBridgeTld(start: number, lastIncluded: number, j: number): { bridged: boolean; newLast: number; newJ: number } {
+    // 仅当当前已收集片段末尾是 . + 1-2 字母时，尝试跨越噪声补全顶级域
+    const pre = fullText.slice(start, Math.min(lastIncluded + 1, n))
+    const m = pre.match(/\.([A-Za-z]{1,2})$/)
+    if (!m) return { bridged: false, newLast: lastIncluded, newJ: j }
+    const partial = (m[1] || '').toLowerCase()
 
-    // 为每个受影响的span创建对应的链接覆盖层
+    // 跳过少量噪声（空白与中/英文冒号），防止误跳太远
+    let k = j
+    let skipped = 0
+    while (k < n && (isWhitespace(fullText.charAt(k)) || isNoisePunct(fullText.charAt(k)))) {
+      k++
+      skipped++
+      if (skipped > 4) break
+    }
+    if (k >= n) return { bridged: false, newLast: lastIncluded, newJ: j }
+
+    // 尝试用已知 TLD 补全，例如 .n + et → .net；.co + m → .com
+    for (const tld of knownTlds) {
+      if (!tld.startsWith(partial)) continue
+      const need = tld.slice(partial.length)
+      if (!need) continue
+      const nextSlice = fullText.substr(k, need.length).toLowerCase()
+      if (nextSlice === need) {
+        const newLast = k + need.length - 1
+        const newJ = newLast + 1
+        return { bridged: true, newLast, newJ }
+      }
+    }
+    return { bridged: false, newLast: lastIncluded, newJ: j }
+  }
+
+  const collectUrls: Array<{ start: number; end: number; raw: string; href: string }> = []
+  let i = 0
+  const n = fullText.length
+  while (i < n) {
+    // 查找 URL 起点
+    if (
+      (i + 7 <= n && startsWithInsensitive(fullText, i, 'http://')) ||
+      (i + 8 <= n && startsWithInsensitive(fullText, i, 'https://')) ||
+      (i + 4 <= n && startsWithInsensitive(fullText, i, 'www.'))
+    ) {
+      const start = i
+      let j = i
+      let lastIncluded = i
+      // 快速跳过起始协议/前缀
+      if (startsWithInsensitive(fullText, j, 'https://')) j += 8
+      else if (startsWithInsensitive(fullText, j, 'http://')) j += 7
+      else if (startsWithInsensitive(fullText, j, 'www.')) j += 4
+      lastIncluded = j - 1
+
+      // 消费后续字符：允许URL字符；遇到空白则跳过继续（跨行合并）
+      while (j < n) {
+        const ch = fullText.charAt(j)
+        if (isUrlChar(ch)) {
+          lastIncluded = j
+          j++
+          continue
+        }
+        // 碰到空白或噪声标点：优先尝试“跨噪声补全TLD”，否则终止URL
+        if (isWhitespace(ch) || isNoisePunct(ch)) {
+          const bridged = tryBridgeTld(start, lastIncluded, j)
+          if (bridged.bridged) {
+            lastIncluded = bridged.newLast
+            j = bridged.newJ
+            continue
+          }
+          break
+        }
+        // 其他非URL字符，终止URL
+        break
+      }
+
+      // 生成原始片段并进行末尾修剪
+      const rawMatch = fullText.slice(start, lastIncluded + 1)
+      const { trimmed, href } = normalizeUrlWithTrimInfo(rawMatch)
+      if (href && trimmed) {
+        // 回退末尾被修剪的字符数，确保覆盖层不吞下一行首字
+        const endTrimCount = rawMatch.length - trimmed.length
+        const urlEnd = (lastIncluded + 1) - (endTrimCount > 0 ? endTrimCount : 0)
+        collectUrls.push({ start, end: urlEnd, raw: rawMatch, href })
+      }
+      i = j
+      continue
+    }
+    i++
+  }
+
+  // 将收集到的URL映射为覆盖层
+  for (const u of collectUrls) {
+    const urlStart = u.start
+    const urlEnd = u.end
+    const affectedSpans = spanInfos.filter(info => info.globalEnd > urlStart && info.globalStart < urlEnd)
     affectedSpans.forEach(info => {
       const textNode = info.span.firstChild
       if (!textNode) return
-
-      // 计算这个span中URL部分的本地偏移
       const localStart = Math.max(0, urlStart - info.globalStart)
       const localEnd = Math.min(info.text.length, urlEnd - info.globalStart)
-
       if (localStart >= localEnd) return
-
       try {
         const range = document.createRange()
         range.setStart(textNode, localStart)
         range.setEnd(textNode, localEnd)
         const rect = range.getBoundingClientRect()
         range.detach()
-
         if (!rect.width || !rect.height) return
-
-        // 所有行都使用完整的URL作为href
         appendLinkOverlay(
           container,
           {
@@ -530,12 +709,10 @@ function renderTextUrlOverlays(textLayer: HTMLElement, container: HTMLElement) {
             width: rect.width,
             height: rect.height
           },
-          href,
-          fullUrl // title显示完整URL
+          u.href,
+          u.raw
         )
-      } catch (e) {
-        // 忽略range设置失败的情况
-      }
+      } catch {}
     })
   }
 }
@@ -578,6 +755,8 @@ async function renderLinkLayer(annotations: any[], viewport: any, container: HTM
   // 从纯文本中额外检测 URL，生成可点击覆盖层
   if (textLayer) {
     renderTextUrlOverlays(textLayer, container)
+    // 渲染完成后，对重叠或前缀重复的链接做去重，保留更完整的覆盖层
+    dedupeLinkOverlays(container)
   }
 }
 
