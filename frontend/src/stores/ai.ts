@@ -15,7 +15,7 @@ export interface ChatSession {
 
 export const useAiStore = defineStore('ai', () => {
   const activeTab = ref<AiPanelTab['id']>('roadmap')
-  const isPanelCollapsed = ref(false)
+  const isPanelHidden = ref(false)
 
   const roadmap = ref<Roadmap | null>(null)
   const summary = ref<Summary | null>(null)
@@ -145,9 +145,9 @@ export const useAiStore = defineStore('ai', () => {
     activeTab.value = tabId
   }
 
-  // 折叠/展开面板
+  // 隐藏/显示面板
   function togglePanel() {
-    isPanelCollapsed.value = !isPanelCollapsed.value
+    isPanelHidden.value = !isPanelHidden.value
   }
 
   // 设置摘要
@@ -319,7 +319,7 @@ export const useAiStore = defineStore('ai', () => {
 
   return {
     activeTab,
-    isPanelCollapsed,
+    isPanelHidden,
     roadmap,
     summary,
     currentTranslation,

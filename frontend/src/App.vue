@@ -16,11 +16,11 @@ const pdfStore = usePdfStore()
 const themeStore = useThemeStore()
 
 // Panel minimize states
-const topMinimized = ref(false)
+const topHidden = ref(false)
 const bottomMinimized = ref(false)
 
 // Both minimized = sidebar collapses to thin bars
-const bothMinimized = computed(() => topMinimized.value && bottomMinimized.value)
+const bothMinimized = computed(() => topHidden.value && bottomMinimized.value)
 
 // Resizable sidebar width
 const sidebarWidth = ref(480) // Default w-96 = 384px
@@ -92,10 +92,10 @@ const handleKeyboard = (e: KeyboardEvent) => {
     e.preventDefault()
     toggleBottomMinimize()
   }
-  // Ctrl+Alt+N toggle Notes
+  // Ctrl+Alt+N toggle Notes (完全隐藏/显示)
   if (e.ctrlKey && e.altKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault()
-    toggleTopMinimize()
+    toggleTopHide()
   }
 }
 
@@ -111,17 +111,14 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeyboard)
 })
 
-// Toggle minimize for top panel
-const toggleTopMinimize = () => {
-  if (topMinimized.value) {
-    // Expanding top panel
-    topMinimized.value = false
-    if (!bottomMinimized.value) {
-      splitRatio.value = 0.45 // Reset to 45/55
-    }
-  } else {
-    // Minimizing top panel
-    topMinimized.value = true
+// Toggle hide for top panel
+const toggleTopHide = () => {
+  topHidden.value = !topHidden.value
+  // 如果隐藏了顶部面板，调整底部面板占满空间
+  if (topHidden.value && !bottomMinimized.value) {
+    splitRatio.value = 0 // 底部面板占满
+  } else if (!topHidden.value && !bottomMinimized.value) {
+    splitRatio.value = 0.45 // 恢复默认比例
   }
 }
 
@@ -130,7 +127,7 @@ const toggleBottomMinimize = () => {
   if (bottomMinimized.value) {
     // Expanding bottom panel
     bottomMinimized.value = false
-    if (!topMinimized.value) {
+    if (!topHidden.value) {
       splitRatio.value = 0.45 // Reset to 45/55
     }
   } else {
@@ -163,7 +160,7 @@ const stopWidthResize = () => {
 
 // Vertical resize (split between panels)
 const startSplitResize = (e: MouseEvent) => {
-  if (topMinimized.value || bottomMinimized.value) return
+  if (topHidden.value || bottomMinimized.value) return
   isResizingSplit.value = true
   document.addEventListener('mousemove', handleSplitResize)
   document.addEventListener('mouseup', stopSplitResize)
@@ -191,9 +188,9 @@ const stopSplitResize = () => {
   const topHeight = rect.height * splitRatio.value
   const bottomHeight = rect.height * (1 - splitRatio.value)
   
-  // Auto-minimize if dragged to edge
+  // Auto-hide if dragged to edge
   if (topHeight < SNAP_THRESHOLD) {
-    topMinimized.value = true
+    topHidden.value = true
     splitRatio.value = 0.5
   } else if (bottomHeight < SNAP_THRESHOLD) {
     bottomMinimized.value = true
@@ -205,25 +202,27 @@ const stopSplitResize = () => {
   document.removeEventListener('mouseup', stopSplitResize)
 }
 
-// Computed styles for panels
+// Computed styles for panels - 使用百分比高度确保拖动准确
 const topPanelStyle = computed(() => {
-  if (topMinimized.value) {
-    return { height: '36px', flexGrow: 0, flexShrink: 0 }
+  if (topHidden.value) {
+    return { height: '0px', flexShrink: 0 }
   }
   if (bottomMinimized.value) {
-    return { flexGrow: 1 }
+    return { flex: '1 1 auto' } // 占满剩余空间
   }
-  return { height: `${splitRatio.value * 100}%`, flexGrow: 0, flexShrink: 0 }
+  // 使用 calc 减去分隔线高度(4px)的一半
+  return { height: `calc(${splitRatio.value * 100}% - 2px)`, flexShrink: 0 }
 })
 
 const bottomPanelStyle = computed(() => {
   if (bottomMinimized.value) {
-    return { height: '36px', flexGrow: 0, flexShrink: 0 }
+    return { height: '36px', flexShrink: 0 }
   }
-  if (topMinimized.value) {
-    return { flexGrow: 1 }
+  if (topHidden.value) {
+    return { flex: '1 1 auto' }
   }
-  return { flexGrow: 1 }
+  // 使用 calc 减去分隔线高度(4px)的一半
+  return { height: `calc(${(1 - splitRatio.value) * 100}% - 2px)`, flexShrink: 0 }
 })
 </script>
 
@@ -258,9 +257,9 @@ const bottomPanelStyle = computed(() => {
         <div class="flex-1">
           <PdfToolbar
             v-if="pdfStore.currentPdfUrl"
-            :notes-minimized="topMinimized"
+            :notes-minimized="topHidden"
             :chat-minimized="bottomMinimized"
-            @toggle-notes="toggleTopMinimize"
+            @toggle-notes="toggleTopHide"
             @toggle-chat="toggleBottomMinimize"
           />
           <div v-else class="h-[49px]"></div>
@@ -280,12 +279,12 @@ const bottomPanelStyle = computed(() => {
           v-show="!bothMinimized"
           ref="sidebarRef"
           class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
-          :class="aiStore.isPanelCollapsed ? 'w-0 opacity-0 overflow-hidden' : ''"
-          :style="!aiStore.isPanelCollapsed ? { width: sidebarWidth + 'px' } : {}"
+          :class="aiStore.isPanelHidden ? 'w-0 opacity-0 overflow-hidden' : ''"
+          :style="!aiStore.isPanelHidden ? { width: sidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div
-            v-if="!aiStore.isPanelCollapsed"
+            v-if="!aiStore.isPanelHidden"
             class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-gray-600 transition-colors z-50"
             :class="{ 'bg-primary-500': isResizingWidth }"
             @mousedown="startWidthResize"
@@ -294,64 +293,51 @@ const bottomPanelStyle = computed(() => {
           </div>
 
           <!-- Top Panel: AI Panel -->
-          <div 
+          <div
+            v-if="!topHidden"
             class="flex flex-col border-b border-gray-200 dark:border-gray-800 overflow-hidden transition-all duration-200"
             :style="topPanelStyle"
           >
-            <!-- Minimized Bar for Top Panel -->
-            <div 
-              v-if="topMinimized"
-              class="h-9 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
-              @click="toggleTopMinimize"
-            >
-              <!-- Triangle pointing up (minimized state) -->
-              <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M7 14l5-5 5 5H7z"/>
-              </svg>
-              <span class="text-white text-xs font-medium truncate">笔记</span>
-            </div>
-            <!-- Full Panel Content -->
-            <template v-else>
-              <!-- Panel Header with Minimize Button -->
-              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
-                <div class="flex items-center">
-                  <button
-                    @click="toggleTopMinimize"
-                    class="p-1 hover:bg-gray-100 rounded transition-colors mr-2"
-                    title="最小化"
-                  >
-                    <!-- Triangle pointing down (to collapse) -->
-                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M7 10l5 5 5-5H7z"/>
-                    </svg>
-                  </button>
-                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
-                </div>
-                <!-- Add Card Button -->
+            <!-- Panel Header with Hide Button -->
+            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526]">
+              <div class="flex items-center">
                 <button
-                  @click="notesPanelRef?.addCard()"
-                  class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title="添加卡片"
+                  @click="toggleTopHide"
+                  class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors mr-2"
+                  title="隐藏笔记"
                 >
-                  <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  <!-- Hide icon (eye-slash) -->
+                  <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                   </svg>
                 </button>
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">笔记</span>
               </div>
-              <div class="flex-1 overflow-hidden">
-                <NotesPanel ref="notesPanelRef" />
-              </div>
-            </template>
+              <!-- Add Card Button -->
+              <button
+                @click="notesPanelRef?.addCard()"
+                class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                title="添加卡片"
+              >
+                <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
+            <div class="flex-1 overflow-hidden">
+              <NotesPanel ref="notesPanelRef" />
+            </div>
           </div>
 
-          <!-- Draggable Divider (only show when neither panel is minimized) -->
-          <div 
-            v-if="!topMinimized && !bottomMinimized"
-            class="h-1 bg-gray-200 hover:bg-primary-400 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
-            :class="{ 'bg-primary-500': isResizingSplit }"
+          <!-- Draggable Divider (only show when neither panel is hidden/minimized) -->
+          <div
+            v-if="!topHidden && !bottomMinimized"
+            class="h-1 bg-gray-300 dark:bg-gray-700 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
+            :class="{ 'bg-primary-500 dark:bg-primary-400': isResizingSplit }"
             @mousedown="startSplitResize"
           >
-            <div class="absolute -top-1 -bottom-1 left-0 right-0 dark:bg-gray-800"></div>
+            <!-- 扩展点击区域 -->
+            <div class="absolute -top-2 -bottom-2 left-0 right-0"></div>
           </div>
 
           <!-- Bottom Panel: Chat Box -->
@@ -369,7 +355,7 @@ const bottomPanelStyle = computed(() => {
               <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M7 14l5-5 5 5H7z"/>
               </svg>
-              <span class="text-white text-xs font-medium truncate">Chat & Ask</span>
+              <span class="text-white text-xs font-medium truncate">Chat</span>
             </div>
             <!-- Full Panel Content -->
             <template v-else>
@@ -386,7 +372,7 @@ const bottomPanelStyle = computed(() => {
                       <path d="M7 10l5 5 5-5H7z"/>
                     </svg>
                   </button>
-                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Chat & Ask</span>
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Chat</span>
                 </div>
                 <!-- History Button (Clock Icon) - Always visible -->
                 <button
