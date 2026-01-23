@@ -35,6 +35,7 @@ const pageNumbers = ref<number[]>([]) // 页面序号集合
 const pageRefs = new Map<number, PageRef>() // 每页元素引用集合
 const renderTasks = new Map<number, RenderTask>() // 每页渲染任务集合
 const visiblePages = new Set<number>() // 当前可见页面集合
+const pendingAnchor = ref<{ page: number; ratio: number } | null>(null) // 记录缩放前的视口锚点
 
 // 页面尺寸预加载（用于快速滚动时的占位）
 const pageSizes = ref<Map<number, { width: number; height: number }>>(new Map())
@@ -76,6 +77,60 @@ function getScaledPageSize(pageNumber: number) {
 // 检查页面是否已渲染
 function isPageRendered(pageNumber: number) {
   return renderedPages.value.has(pageNumber)
+}
+
+function captureCenterAnchor() {
+  const container = containerRef.value
+  if (!container || !pageNumbers.value.length) return null
+
+  const centerY = container.scrollTop + container.clientHeight / 2
+  let anchor: { page: number; ratio: number } | null = null
+
+  for (const page of pageNumbers.value) {
+    const refs = pageRefs.get(page)
+    if (!refs) continue
+    const top = refs.container.offsetTop
+    const height = refs.container.offsetHeight || refs.container.clientHeight
+    if (!height) continue
+
+    if (centerY >= top && centerY <= top + height) {
+      anchor = { page, ratio: (centerY - top) / height }
+      break
+    }
+
+    if (centerY > top) {
+      anchor = { page, ratio: Math.min(1, Math.max(0, (centerY - top) / height)) }
+    } else {
+      anchor = { page, ratio: 0 }
+      break
+    }
+  }
+
+  return anchor
+}
+
+function restoreAnchor(anchor: { page: number; ratio: number }) {
+  const container = containerRef.value
+  if (!container) return
+
+  const refs = pageRefs.get(anchor.page)
+  if (!refs) {
+    nextTick(() => {
+      if (pendingAnchor.value) {
+        restoreAnchor(pendingAnchor.value)
+      }
+    })
+    return
+  }
+
+  const height = refs.container.offsetHeight || refs.container.clientHeight
+  if (!height) return
+
+  const targetTop = refs.container.offsetTop + anchor.ratio * height - container.clientHeight / 2
+  container.scrollTo({
+    top: targetTop,
+    behavior: 'instant' as ScrollBehavior
+  })
 }
 
 function handlePageContainerRef(
@@ -156,6 +211,8 @@ const updateVisiblePages = useDebounceFn(() => {
 watch(
   () => pdfStore.scale, // 监听缩放比例
   () => {
+    pendingAnchor.value = captureCenterAnchor()
+
     // 取消当前预加载
     if (preloadAbortController) {
       preloadAbortController.abort()
@@ -170,6 +227,15 @@ watch(
 
     nextTick(() => {
       updateVisiblePages()
+
+      if (pendingAnchor.value) {
+        nextTick(() => {
+          if (pendingAnchor.value) {
+            restoreAnchor(pendingAnchor.value)
+            pendingAnchor.value = null
+          }
+        })
+      }
       // 延迟重新启动预加载
       setTimeout(() => {
         startBackgroundPreload()
