@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
+import type { PdfParagraph, TranslationPanelState } from '../types'
 
 const DEFAULT_SCALE = 1.6
 const HIGHLIGHTS_STORAGE_KEY = 'pdf-highlights'
@@ -51,6 +52,27 @@ export const usePdfStore = defineStore('pdf', () => {
   const highlightColor = ref('#F6E05E') // bright yellow by default
   const selectedHighlight = ref<Highlight | null>(null) // 当前选中的高亮
   const isEditingHighlight = ref(false) // 是否在编辑高亮模式
+
+  // 段落数据管理（所有文档的段落）
+  const allParagraphs = ref<Record<string, PdfParagraph[]>>({})
+  // 当前文档的段落（计算属性）
+  const paragraphs = computed(() => {
+    if (!currentDocumentId.value) return []
+    return allParagraphs.value[currentDocumentId.value] || []
+  })
+
+  // 翻译面板状态
+  const translationPanel = ref<TranslationPanelState>({
+    isVisible: false,
+    paragraphId: '',
+    position: { x: 0, y: 0 },
+    translation: '',
+    isLoading: false,
+    originalText: ''
+  })
+
+  // 翻译缓存（paragraphId -> translation）
+  const translationCache = ref<Record<string, string>>({})
 
   const scalePercent = computed(() => Math.round(scale.value * 100))
 
@@ -238,6 +260,54 @@ export const usePdfStore = defineStore('pdf', () => {
     imageDescription.value = !imageDescription.value
   }
 
+  // 设置文档的段落数据
+  function setParagraphs(documentId: string, paragraphsData: PdfParagraph[]) {
+    allParagraphs.value[documentId] = paragraphsData
+  }
+
+  // 获取指定页面的段落
+  function getParagraphsByPage(page: number): PdfParagraph[] {
+    return paragraphs.value.filter(p => p.page === page)
+  }
+
+  // 打开翻译面板
+  function openTranslationPanel(paragraphId: string, position: { x: number; y: number }, originalText: string) {
+    // 检查缓存
+    const cached = translationCache.value[paragraphId]
+    translationPanel.value = {
+      isVisible: true,
+      paragraphId,
+      position,
+      translation: cached || '',
+      isLoading: !cached,
+      originalText
+    }
+  }
+
+  // 关闭翻译面板
+  function closeTranslationPanel() {
+    translationPanel.value.isVisible = false
+  }
+
+  // 更新翻译面板位置
+  function updateTranslationPanelPosition(position: { x: number; y: number }) {
+    translationPanel.value.position = position
+  }
+
+  // 设置翻译结果
+  function setTranslation(paragraphId: string, translation: string) {
+    translationCache.value[paragraphId] = translation
+    if (translationPanel.value.paragraphId === paragraphId) {
+      translationPanel.value.translation = translation
+      translationPanel.value.isLoading = false
+    }
+  }
+
+  // 设置翻译加载状态
+  function setTranslationLoading(loading: boolean) {
+    translationPanel.value.isLoading = loading
+  }
+
   return {
     currentPdfUrl,
     currentDocumentId,
@@ -279,5 +349,16 @@ export const usePdfStore = defineStore('pdf', () => {
     toggleAutoHighlight,
     toggleAutoTranslate,
     toggleImageDescription,
+    // 段落管理
+    paragraphs,
+    setParagraphs,
+    getParagraphsByPage,
+    // 翻译面板
+    translationPanel,
+    openTranslationPanel,
+    closeTranslationPanel,
+    updateTranslationPanelPosition,
+    setTranslation,
+    setTranslationLoading,
   }
 })

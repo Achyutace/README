@@ -1,108 +1,183 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useLibraryStore } from '../../stores/library'
-import MarkdownIt from 'markdown-it'
-
-// 初始化 markdown-it
-const md = new MarkdownIt({
-  html: false,        // 禁用 HTML 标签
-  breaks: true,       // 将换行符转换为 <br>
-  linkify: true,      // 自动识别链接
-  typographer: true,  // 启用智能引号等排版功能
-})
+import { notesApi, type Note } from '../../api'
+import NoteEditor from './NoteEditor.vue'
 
 interface NoteCard {
-  id: string
+  id: string | number  // 可以是本地临时ID（string）或数据库ID（number）
   title: string
   content: string
   isEditing: boolean
   isCollapsed: boolean
+  showRawMd?: boolean
   createdAt: number
+  isLocal?: boolean  // 标记是否为本地临时笔记（未保存到数据库）
 }
 
 const libraryStore = useLibraryStore()
 const cards = ref<NoteCard[]>([])
+const isLoading = ref(false)
 
-// Generate unique ID
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substring(2)
+// Generate unique ID for temporary notes
+function generateTempId() {
+  return `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`
 }
 
-// Load cards when document changes
+// Load notes from database when document changes
+async function loadNotesFromDB() {
+  if (!libraryStore.currentDocument?.id) {
+    cards.value = []
+    return
+  }
+  
+  isLoading.value = true
+  try {
+    const response = await notesApi.getNotes(libraryStore.currentDocument.id)
+    cards.value = response.notes.map((note: Note) => ({
+      id: note.id,
+      title: note.title || '',
+      content: note.content || '',
+      isEditing: false,
+      isCollapsed: false,
+      showRawMd: false,
+      createdAt: new Date(note.created_time).getTime(),
+      isLocal: false
+    }))
+  } catch (error) {
+    console.error('Failed to load notes from database:', error)
+    cards.value = []
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Watch document changes and load notes
 watch(() => libraryStore.currentDocument?.id, (newId) => {
   if (newId) {
-    const savedCards = localStorage.getItem(`note-cards-${newId}`)
-    if (savedCards) {
-      // 兼容旧数据，添加 isCollapsed 默认值
-      const parsed = JSON.parse(savedCards)
-      cards.value = parsed.map((c: any) => ({
-        ...c,
-        isCollapsed: c.isCollapsed ?? false
-      }))
-    } else {
-      cards.value = []
-    }
+    loadNotesFromDB()
   } else {
     cards.value = []
   }
 }, { immediate: true })
 
-// Auto-save cards
-function saveCards() {
-  if (libraryStore.currentDocument?.id) {
-    localStorage.setItem(`note-cards-${libraryStore.currentDocument.id}`, JSON.stringify(cards.value))
+// Save note to database
+async function saveNoteToDB(card: NoteCard) {
+  if (!libraryStore.currentDocument?.id) return
+  
+  try {
+    if (card.isLocal) {
+      // 新建笔记
+      const response = await notesApi.createNote({
+        pdfId: libraryStore.currentDocument.id,
+        title: card.title,
+        content: card.content
+      })
+      // 更新卡片ID为数据库ID
+      card.id = response.id
+      card.isLocal = false
+    } else if (typeof card.id === 'number') {
+      // 更新现有笔记
+      await notesApi.updateNote(card.id, {
+        title: card.title,
+        content: card.content
+      })
+    }
+  } catch (error) {
+    console.error('Failed to save note to database:', error)
+    throw error
   }
 }
 
-// Add new card
+// Add new card (temporary, will be saved to DB when editing is done)
 function addCard() {
   const newCard: NoteCard = {
-    id: generateId(),
+    id: generateTempId(),
     title: '',
     content: '',
     isEditing: true,
     isCollapsed: false,
-    createdAt: Date.now()
+    showRawMd: false,
+    createdAt: Date.now(),
+    isLocal: true
   }
   cards.value.unshift(newCard)
-  saveCards()
 }
 
-// Delete card
-function deleteCard(id: string) {
+// Delete card from database and local state
+async function deleteCard(id: string | number) {
+  // 如果是数据库笔记，先删除数据库中的记录
+  if (typeof id === 'number') {
+    try {
+      await notesApi.deleteNote(id)
+    } catch (error) {
+      console.error('Failed to delete note from database:', error)
+      return
+    }
+  }
+  // 从本地状态中移除
   cards.value = cards.value.filter(c => c.id !== id)
-  saveCards()
 }
 
-// Toggle edit mode
-function toggleEdit(card: NoteCard) {
+// Toggle edit mode and save when exiting edit mode
+async function toggleEdit(card: NoteCard) {
+  const wasEditing = card.isEditing
   card.isEditing = !card.isEditing
-  saveCards()
+  
+  // 如果退出编辑模式，保存到数据库
+  if (wasEditing && !card.isEditing) {
+    try {
+      await saveNoteToDB(card)
+    } catch (error) {
+      // 保存失败，恢复编辑模式
+      card.isEditing = true
+    }
+  }
 }
 
-// Toggle collapse state
+// Toggle collapse state (no need to save to DB)
 function toggleCollapse(card: NoteCard, event: Event) {
   event.stopPropagation()
   card.isCollapsed = !card.isCollapsed
-  saveCards()
 }
 
-// Update card and save
+// Toggle raw markdown view (no need to save to DB)
+function toggleRawMd(card: NoteCard) {
+  card.showRawMd = !card.showRawMd
+}
+
+// Update card (just update local state, no auto-save)
+// Saving happens when exiting edit mode via toggleEdit
 function updateCard() {
-  saveCards()
+  // 仅更新本地状态，不触发保存
+  // 保存会在退出编辑模式时通过 toggleEdit 触发
 }
 
 // Get first line of content
 function getFirstLine(text: string): string {
   if (!text) return ''
-  const firstLine = text.split('\n')[0] || ''
+  // 移除 markdown 符号取纯文本预览
+  const cleanText = text.replace(/[#*`]/g, '') 
+  const firstLine = cleanText.split('\n')[0] || ''
   return firstLine
 }
 
-// 使用 markdown-it 渲染
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  return md.render(text)
+// Auto resize textarea
+function autoResize(target: HTMLTextAreaElement) {
+  target.style.height = 'auto'
+  target.style.height = target.scrollHeight + 'px'
+}
+
+// Directive to adjust height on mount
+const vAutoHeight = {
+  mounted: (el: HTMLTextAreaElement) => autoResize(el),
+  updated: (el: HTMLTextAreaElement) => autoResize(el)
+}
+
+// Handle textarea input
+function handleInput(event: Event) {
+  updateCard()
+  autoResize(event.target as HTMLTextAreaElement)
 }
 
 // Expose addCard for parent component
@@ -133,9 +208,20 @@ defineExpose({ addCard })
               @input="updateCard"
               type="text"
               placeholder="标题"
-              class="flex-1 px-3 py-1 text-sm font-medium bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
+              class="flex-1 px-3 py-1 text-base font-medium bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-400"
             />
             <div class="flex items-center gap-1 mr-2">
+              <!-- Toggle Raw MD -->
+              <button
+                @click="toggleRawMd(card)"
+                class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                :class="{ 'text-primary-500 bg-primary-50 dark:bg-primary-900/20': card.showRawMd, 'text-gray-400': !card.showRawMd }"
+                :title="card.showRawMd ? '切换渲染模式' : '切换源码模式'"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                </svg>
+              </button>
               <!-- Delete Button -->
               <button
                 @click="deleteCard(card.id)"
@@ -158,15 +244,26 @@ defineExpose({ addCard })
               </button>
             </div>
           </div>
-          <div class="border-t border-gray-100 dark:border-gray-700"></div>
-          <div class="py-2">
+          <div class="py-0 px-3">
+            <div class="border-t border-gray-100 dark:border-gray-700 w-1/4"></div>
+          </div>
+          <div class="py-2 px-3">
             <textarea
+              v-if="card.showRawMd"
               v-model="card.content"
-              @input="updateCard"
-              placeholder="内容（支持 Markdown）"
-              rows="4"
-              class="w-full px-3 py-1 text-sm bg-transparent border-none outline-none resize-none text-gray-600 dark:text-gray-400 placeholder-gray-400"
+              v-auto-height
+              @input="handleInput"
+              class="w-full text-sm font-mono bg-transparent border-none outline-none focus:ring-0 resize-none text-gray-800 dark:text-gray-200 p-0 overflow-hidden block"
+              placeholder="输入 Markdown 内容..."
+              spellcheck="false"
             ></textarea>
+            <!-- 使用 Tiptap 编辑器，提供 Markdown 即时渲染 -->
+            <NoteEditor
+              v-else
+              v-model="card.content"
+              :editable="true"
+              @update:modelValue="updateCard"
+            />
           </div>
         </template>
 
@@ -213,15 +310,18 @@ defineExpose({ addCard })
               <!-- Collapsed: show only first line -->
               <div
                 v-if="card.isCollapsed"
-                class="text-sm text-gray-600 dark:text-gray-400 truncate markdown-content"
-                v-html="renderMarkdown(getFirstLine(card.content)) || '<span class=\'text-gray-400\'>无内容</span>'"
-              ></div>
-              <!-- Expanded: show all content -->
-              <div
-                v-else
-                class="text-sm text-gray-600 dark:text-gray-400 markdown-content"
-                v-html="renderMarkdown(card.content) || '<span class=\'text-gray-400\'>无内容</span>'"
-              ></div>
+                class="text-sm text-gray-600 dark:text-gray-400 truncate"
+              >
+                {{ getFirstLine(card.content) || '无内容' }}
+              </div>
+              <!-- Expanded: show rendered content using Tiptap in read-only mode -->
+              <div v-else class="text-sm text-gray-600 dark:text-gray-400">
+                <NoteEditor
+                  v-model="card.content"
+                  :editable="false"
+                  @update:modelValue="updateCard"
+                />
+              </div>
             </div>
           </div>
         </template>
@@ -231,63 +331,55 @@ defineExpose({ addCard })
 </template>
 
 <style scoped>
-/* Markdown 渲染样式 */
+/* 
+  Tiptap 编辑器的 Markdown 渲染样式
+  通过 :deep() 深度选择器作用到 NoteEditor 组件内部
+*/
 :deep(.markdown-content) {
+  /* 基础字体设置 */
+  @apply text-sm text-gray-500 dark:text-gray-400;
+
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold text-gray-800 dark:text-gray-200 mt-3 mb-1;
+    @apply font-semibold text-gray-800 dark:text-gray-100 mt-3 mb-1 first:mt-0;
   }
-  h1 { @apply text-base; }
-  h2 { @apply text-sm; }
-  h3, h4, h5, h6 { @apply text-sm; }
+  h1 { @apply text-lg; }
+  h2 { @apply text-base; }
+  h3 { @apply text-sm; }
 
-  p {
-    @apply my-1;
-  }
+  p { @apply my-1 leading-relaxed first:mt-0 last:mb-0; }
 
-  ul, ol {
-    @apply pl-4 my-1;
-  }
-  ul {
-    @apply list-disc;
-  }
-  ol {
-    @apply list-decimal;
-  }
-  li {
-    @apply my-0.5;
-  }
+  ul, ol { @apply pl-5 my-1 last:mb-0; }
+  ul { @apply list-disc; }
+  ol { @apply list-decimal; }
+  li { @apply my-0.5; }
 
   code {
-    @apply px-1 py-0.5 bg-gray-200 dark:bg-gray-700 text-xs rounded;
+    @apply px-1 py-0.5 bg-gray-100 dark:bg-gray-700 text-xs rounded font-mono text-pink-500;
   }
 
   pre {
     @apply bg-gray-100 dark:bg-gray-800 p-2 rounded my-2 overflow-x-auto;
   }
   pre code {
-    @apply bg-transparent p-0;
+    @apply bg-transparent p-0 text-gray-800 dark:text-gray-200;
   }
 
   blockquote {
-    @apply border-l-2 border-gray-300 dark:border-gray-600 pl-2 my-2 text-gray-600 dark:text-gray-400 italic;
+    @apply border-l-4 border-gray-300 dark:border-gray-600 pl-2 my-2 text-gray-500 italic;
   }
 
   a {
-    @apply text-primary-600 dark:text-primary-500 hover:underline;
+    @apply text-blue-600 dark:text-blue-400 hover:underline cursor-pointer;
+  }
+  
+  /* Tiptap 特有的选中样式 */
+  .ProseMirror-selectednode {
+    @apply outline outline-2 outline-blue-500;
   }
 
-  hr {
-    @apply my-2 border-gray-200 dark:border-gray-700;
-  }
-
-  table {
-    @apply w-full my-2 text-xs;
-  }
-  th, td {
-    @apply border border-gray-200 dark:border-gray-700 px-2 py-1;
-  }
-  th {
-    @apply bg-gray-100 dark:bg-gray-800;
+  /* 只读模式下隐藏光标 */
+  .ProseMirror[contenteditable="false"] {
+    @apply cursor-default;
   }
 }
 </style>

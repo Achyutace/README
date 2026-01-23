@@ -2,10 +2,18 @@
 
 # README PDF Reader - Start Script
 
-rm -rf backend/uploads
-mkdir backend/uploads
-
 echo "Starting README PDF Reader..."
+
+# Check config file
+if [ ! -f "config.yaml" ]; then
+    echo "Warning: config.yaml not found."
+    echo "Please copy config_example.yaml to config.yaml and fill in your API keys."
+    exit 1
+fi
+
+# Clean and create uploads directory
+rm -rf backend/uploads
+mkdir -p backend/uploads
 
 # Start backend
 echo "Starting backend server..."
@@ -15,7 +23,7 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 source venv/bin/activate
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
 python app.py &
 BACKEND_PID=$!
 cd ..

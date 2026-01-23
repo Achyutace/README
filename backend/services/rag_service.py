@@ -6,6 +6,11 @@ import re
 import hashlib
 from typing import List, Dict, Optional
 
+from config import settings
+
+# 禁用 ChromaDB 遥测以避免错误
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 try:
     from langchain_openai import OpenAIEmbeddings
     HAS_OPENAI = True
@@ -48,14 +53,17 @@ class RAGService:
         self.chroma_dir = chroma_dir
         
         # 嵌入模型
-        if HAS_OPENAI and os.getenv('OPENAI_API_KEY'):
+        if HAS_OPENAI and settings.has_openai_key:
             embedding_kwargs = {
                 "model": "text-embedding-3-small"
             }
-            if api_base or os.getenv('OPENAI_API_BASE'):
-                embedding_kwargs["openai_api_base"] = api_base or os.getenv('OPENAI_API_BASE')
-            
-            self.embeddings = OpenAIEmbeddings(**embedding_kwargs)
+            if api_base or settings.openai.api_base:
+                embedding_kwargs["openai_api_base"] = api_base or settings.openai.api_base
+
+            self.embeddings = OpenAIEmbeddings(
+                api_key=settings.openai.api_key,
+                **embedding_kwargs
+            )
             self.has_embeddings = True
         else:
             self.embeddings = None

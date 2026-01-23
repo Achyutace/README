@@ -4,22 +4,24 @@
 实现：对接 Tavily API
 """
 
-import os
 from typing import List, Dict, Optional, Literal
 from langchain.tools import Tool
 
+from config import settings
+
+
 class WebSearchTool:
     """网络搜索工具 - 使用 Tavily API"""
-    
+
     def __init__(self, api_key: Optional[str] = None, max_results: int = 15):
         """
         Args:
             api_key: Tavily API Key
             max_results: 最大返回结果数
         """
-        self.api_key = api_key or os.getenv('TAVILY_API_KEY')
+        self.api_key = api_key or settings.tavily.api_key
         self.max_results = max_results
-        
+
         # 初始化 Tavily Client
         if self.api_key:
             try:
@@ -30,7 +32,6 @@ class WebSearchTool:
                 print("Warning: tavily-python not installed. Install with: pip install tavily-python")
                 self.tavily_client = None
                 self.has_client = False
-            
         else:
             self.tavily_client = None
             self.has_client = False
@@ -114,7 +115,12 @@ class WebSearchTool:
                 return cleaned_results
             
             except Exception as e:
-                print(f"Tavily search error: {e}")
+                error_msg = str(e)
+                # 401 错误表示 API 密钥无效
+                if "401" in error_msg or "Unauthorized" in error_msg:
+                    print(f"Tavily API 密钥无效或未授权。请检查 config.yaml 中的 tavily.api_key 配置。")
+                else:
+                    print(f"Tavily search error: {e}")
                 return self._demo_search(query)
         
         return self._demo_search(query)

@@ -1,8 +1,8 @@
-import os
 from pathlib import Path
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
-from dotenv import load_dotenv
+
+from config import settings
 
 # ==================== 1. 导入服务类 ====================
 from services.pdf_service import PdfService
@@ -17,9 +17,7 @@ from route.upload import upload_bp
 from route.chatbox import chatbox_bp
 from route.highlight import highlight_bp
 from route.translate import translate_bp
-
-# 加载环境变量 (.env)
-load_dotenv()
+from route.notes import notes_bp
 
 # 初始化 Flask 应用
 app = Flask(__name__)
@@ -73,14 +71,19 @@ app.rag_service = rag_service
 # 路由中通过 current_app.translate_service 访问
 translate_service = TranslateService(
     db=storage_service.db,
-    model=os.getenv("OPENAI_MODEL", "qwen-plus"),
+    model=settings.openai.model,
     temperature=0.3
 )
 app.translate_service = translate_service
 
 # (4) Agent 服务：负责聊天和智能问答
 # 依赖 rag_service 进行上下文检索
-agent_service = AcademicAgentService(rag_service=rag_service)
+agent_service = AcademicAgentService(
+    rag_service=rag_service,
+    openai_api_key=settings.openai.api_key,
+    openai_api_base=settings.openai.api_base,
+    model=settings.openai.model
+)
 app.agent_service = agent_service
 
 # (5) Chat 服务：负责会话数据格式化
@@ -127,6 +130,7 @@ app.register_blueprint(upload_bp)      # URL 前缀: /api/pdf
 app.register_blueprint(chatbox_bp)     # URL 前缀: /api/chatbox
 app.register_blueprint(highlight_bp)   # URL 前缀: /api/highlight
 app.register_blueprint(translate_bp)   # URL 前缀: /api/translate
+app.register_blueprint(notes_bp)       # URL 前缀: /api/notes
 
 # ==================== 7. 健康检查接口 ====================
 

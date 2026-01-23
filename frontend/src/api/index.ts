@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Keyword, Summary, Translation, ChatMessage, Roadmap } from '../types'
+import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph } from '../types'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
@@ -12,6 +12,7 @@ export interface PdfUploadResponse {
   pageCount: number
   fileHash: string
   isNewUpload: boolean
+  paragraphs?: PdfParagraph[]  // 段落数据
 }
 
 export interface ExtractTextResponse {
@@ -21,6 +22,36 @@ export interface ExtractTextResponse {
     pageNumber: number
     bbox: [number, number, number, number]
   }>
+}
+
+export interface Note {
+  id: number
+  file_hash: string
+  user_id: string
+  page_number: number | null
+  title: string
+  content: string
+  note_type: string
+  color: string
+  position: any | null
+  created_time: string
+  updated_time: string
+}
+
+export interface CreateNoteRequest {
+  pdfId: string
+  title?: string
+  content: string
+  pageNumber?: number
+  noteType?: string
+  color?: string
+  position?: any
+}
+
+export interface UpdateNoteRequest {
+  title?: string
+  content: string
+  color?: string
 }
 
 /**
@@ -72,6 +103,21 @@ export const aiApi = {
   // 如果前端只是想翻译任意文本，后端需要在 router/translate.py 加一个通用接口
   translateText: async (text: string): Promise<Translation> => {
     const { data } = await api.post<Translation>('/translate/text', { text })
+    return data
+  },
+
+  // 翻译段落 -> 对应后端 router/translate.py
+  translateParagraph: async (pdfId: string, paragraphId: string, force: boolean = false): Promise<{
+    success: boolean
+    translation: string
+    cached: boolean
+    paragraphId: string
+  }> => {
+    const { data } = await api.post('/translate/paragraph', {
+      pdfId,
+      paragraphId,
+      force
+    })
     return data
   },
 
@@ -173,6 +219,35 @@ export const chatSessionApi = {
       userId,
     })
     return data
+  },
+}
+
+export const notesApi = {
+  // 对应后端 router/notes.py
+  // 创建笔记
+  createNote: async (data: CreateNoteRequest): Promise<{ success: boolean; id: number; message: string }> => {
+    const { data: response } = await api.post('/notes', data)
+    return response
+  },
+
+  // 获取笔记列表
+  getNotes: async (pdfId: string, page?: number): Promise<{ success: boolean; notes: Note[]; total: number }> => {
+    const params: any = {}
+    if (page !== undefined) params.page = page
+    const { data } = await api.get(`/notes/${pdfId}`, { params })
+    return data
+  },
+
+  // 更新笔记
+  updateNote: async (noteId: number, data: UpdateNoteRequest): Promise<{ success: boolean; message: string }> => {
+    const { data: response } = await api.put(`/notes/${noteId}`, data)
+    return response
+  },
+
+  // 删除笔记
+  deleteNote: async (noteId: number): Promise<{ success: boolean; message: string }> => {
+    const { data: response } = await api.delete(`/notes/${noteId}`)
+    return response
   },
 }
 
