@@ -1660,7 +1660,7 @@ onBeforeUnmount(() => {
 
 :global(.dark .textLayer),
 :global(.dark .textLayer span) {
-  color: #0b0b0b !important;
+  color: transparent !important;
   mix-blend-mode: normal;
 }
 
@@ -1671,5 +1671,23 @@ onBeforeUnmount(() => {
 :global(.dark .loading-spinner) {
   border-color: #1f2937;
   border-top-color: #9ca3af;
+}
+
+/* Dark mode scrollbar for the PDF scroller */
+:global(.dark .pdf-scroll-container::-webkit-scrollbar) {
+  width: 10px;
+}
+
+:global(.dark .pdf-scroll-container::-webkit-scrollbar-track) {
+  background: #111827;
+}
+
+:global(.dark .pdf-scroll-container::-webkit-scrollbar-thumb) {
+  background: #4b5563;
+  border-radius: 6px;
+}
+
+:global(.dark .pdf-scroll-container::-webkit-scrollbar-thumb:hover) {
+  background: #6b7280;
 }
 </style>
