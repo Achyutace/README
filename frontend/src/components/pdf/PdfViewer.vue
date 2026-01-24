@@ -14,8 +14,10 @@ import 'pdfjs-dist/web/pdf_viewer.css' // 引入 pdf.js 默认样式以展示文
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url' // 使用 ?url 显式引入 worker
 import { usePdfStore } from '../../stores/pdf' // 使用 Pinia 中的 PDF 状态仓库
 import { useLibraryStore } from '../../stores/library' // 使用 Pinia 中的文库状态仓库
+import { notesApi, type Note } from '../../api' // 导入笔记 API
 import TextSelectionTooltip from './TextSelectionTooltip.vue' // 导入文字选中提示组件
-import TranslationPanel from './TranslationPanel.vue' // 导入翻译面板组件
+import TranslationPanelMulti from './TranslationPanelMulti.vue' // 导入多窗口翻译面板组件
+import NotePreviewCard from './NotePreviewCard.vue' // 导入笔记预览卡片组件
 
 GlobalWorkerOptions.workerSrc = pdfWorker // 设置 pdf.js 全局 worker 路径
 
@@ -82,6 +84,10 @@ const currentHighlightIndex = ref(0)
 let resizeObserver: ResizeObserver | null = null
 let resizeTimeout: ReturnType<typeof setTimeout> | null = null
 const isResizing = ref(false)
+
+// 笔记缓存（用于 Ctrl+点击快速查找）
+const notesCache = ref<Note[]>([])
+const isLoadingNotes = ref(false)
 
 // 获取指定页面的缩放后尺寸
 function getScaledPageSize(pageNumber: number) {
@@ -245,12 +251,15 @@ watch(
     showTooltip.value = false
     highlightsAtCurrentPoint.value = []
     currentHighlightIndex.value = 0
+    pdfStore.closeNotePreviewCard() // 关闭笔记预览卡片
 
     if (url) {
       loadPdf(url) // 地址存在则加载 PDF
+      loadNotesCache() // 加载笔记缓存
     } else {
       console.log('No PDF URL provided.') // 调试日志
       cleanup() // 地址清空则重置状态
+      notesCache.value = [] // 清空笔记缓存
     }
   },
   { immediate: true }
@@ -1195,6 +1204,12 @@ function handleMouseUp(event: MouseEvent) {
 }
 
 function handleClick(event: MouseEvent) {
+  // Ctrl+点击：查找笔记
+  if (event.ctrlKey || event.metaKey) {
+    handleCtrlClick(event)
+    return
+  }
+
   // 查找点击位置对应的页面
   const pageEl = findPageElement(event.target as Node)
   if (!pageEl || !pageEl.dataset.page) {
@@ -1336,6 +1351,7 @@ function handleClickOutside() {
   showTooltip.value = false // 隐藏提示
   pdfStore.clearSelection() // 清空选中文本
   pdfStore.clearHighlightSelection() // 清空高亮选择
+  pdfStore.closeNotePreviewCard() // 关闭笔记预览卡片
   highlightsAtCurrentPoint.value = []
   currentHighlightIndex.value = 0
 }
@@ -1346,6 +1362,128 @@ function closeTooltip() {
   pdfStore.clearHighlightSelection()
   highlightsAtCurrentPoint.value = []
   currentHighlightIndex.value = 0
+}
+
+// 加载当前文档的笔记缓存
+async function loadNotesCache() {
+  const docId = libraryStore.currentDocument?.id
+  if (!docId) {
+    notesCache.value = []
+    return
+  }
+
+  isLoadingNotes.value = true
+  try {
+    const response = await notesApi.getNotes(docId)
+    notesCache.value = response.notes || []
+  } catch (error) {
+    console.error('Failed to load notes for cache:', error)
+    notesCache.value = []
+  } finally {
+    isLoadingNotes.value = false
+  }
+}
+
+// 获取点击位置的单词
+function getWordAtPoint(x: number, y: number): string | null {
+  // 使用 document.caretPositionFromPoint 或 caretRangeFromPoint 获取点击位置
+  let range: Range | null = null
+
+  // caretRangeFromPoint (Chrome, Safari)
+  if (typeof (document as any).caretRangeFromPoint === 'function') {
+    range = (document as any).caretRangeFromPoint(x, y)
+  }
+  // caretPositionFromPoint (Firefox)
+  else if (typeof (document as any).caretPositionFromPoint === 'function') {
+    const pos = (document as any).caretPositionFromPoint(x, y)
+    if (pos && pos.offsetNode) {
+      const newRange = document.createRange()
+      newRange.setStart(pos.offsetNode, pos.offset)
+      newRange.setEnd(pos.offsetNode, pos.offset)
+      range = newRange
+    }
+  }
+
+  if (!range) return null
+
+  const node = range.startContainer
+  if (node.nodeType !== Node.TEXT_NODE) return null
+
+  const text = node.textContent || ''
+  const offset = range.startOffset
+
+  // 查找单词边界
+  let start = offset
+  let end = offset
+
+  // 向前找单词开始
+  while (start > 0 && /[\w\u4e00-\u9fa5]/.test(text[start - 1] || '')) {
+    start--
+  }
+
+  // 向后找单词结束
+  while (end < text.length && /[\w\u4e00-\u9fa5]/.test(text[end] || '')) {
+    end++
+  }
+
+  if (start === end) return null
+
+  return text.slice(start, end).trim()
+}
+
+// 查找匹配的笔记（模糊匹配标题）
+function findMatchingNote(word: string): Note | null {
+  if (!word || word.length < 2) return null
+
+  const wordLower = word.toLowerCase()
+
+  // 精确匹配优先
+  for (const note of notesCache.value) {
+    if (note.title && note.title.toLowerCase() === wordLower) {
+      return note
+    }
+  }
+
+  // 标题包含该词
+  for (const note of notesCache.value) {
+    if (note.title && note.title.toLowerCase().includes(wordLower)) {
+      return note
+    }
+  }
+
+  // 该词包含标题（标题较短时）
+  for (const note of notesCache.value) {
+    if (note.title && note.title.length >= 2 && wordLower.includes(note.title.toLowerCase())) {
+      return note
+    }
+  }
+
+  return null
+}
+
+// 处理 Ctrl+点击（查找笔记）
+function handleCtrlClick(event: MouseEvent) {
+  // 关闭其他弹出内容
+  pdfStore.closeNotePreviewCard()
+
+  const word = getWordAtPoint(event.clientX, event.clientY)
+  if (!word) return
+
+  const matchedNote = findMatchingNote(word)
+  if (matchedNote) {
+    // 计算卡片显示位置
+    const cardX = Math.min(event.clientX + 10, window.innerWidth - 340)
+    const cardY = Math.min(event.clientY + 10, window.innerHeight - 400)
+
+    pdfStore.openNotePreviewCard(
+      {
+        id: matchedNote.id,
+        title: matchedNote.title,
+        content: matchedNote.content
+      },
+      { x: Math.max(0, cardX), y: Math.max(0, cardY) }
+    )
+  }
 }
 
 // 点击段落光标，打开翻译面板
@@ -1617,10 +1755,9 @@ onBeforeUnmount(() => {
               @click="handleParagraphMarkerClick($event, paragraph.id, paragraph.content)"
               :title="'点击翻译此段落'"
             >
+              <!-- 极简小光标：小矩形指示器 -->
               <div class="marker-icon">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-                </svg>
+                <span class="marker-chevron">›</span>
               </div>
             </div>
           </div>
@@ -1650,8 +1787,11 @@ onBeforeUnmount(() => {
       @close="closeTooltip"
     />
     
-    <!-- 翻译面板（可拖动，位于最上层） -->
-    <TranslationPanel />
+    <!-- 多窗口翻译面板（可拖动，位于最上层） -->
+    <TranslationPanelMulti />
+
+    <!-- 笔记预览卡片（Ctrl+点击触发） -->
+    <NotePreviewCard />
   </div>
 </template>
 
@@ -1715,7 +1855,7 @@ onBeforeUnmount(() => {
   z-index: 5;
 }
 
-/* 段落光标样式 */
+/* 段落光标样式 - 发光 > 符号 */
 .paragraph-marker {
   z-index: 6;
 }
@@ -1724,25 +1864,37 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: white;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  width: 14px;
+  height: 14px;
   transition: all 0.2s ease;
-  opacity: 0.85;
+  opacity: 0.5;
+}
+
+.paragraph-marker .marker-chevron {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  color: rgba(100, 140, 200, 0.8);
+  line-height: 1;
+  transition: all 0.2s ease;
 }
 
 .paragraph-marker:hover .marker-icon {
   opacity: 1;
-  transform: scale(1.15);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
+  transform: scale(1.2) translateX(2px);
 }
 
-.paragraph-marker .marker-icon svg {
-  width: 12px;
-  height: 12px;
+.paragraph-marker:hover .marker-chevron {
+  color: rgba(80, 140, 255, 1);
+}
+
+/* 夜间模式段落光标 */
+:global(.dark) .paragraph-marker .marker-chevron {
+  color: rgba(140, 180, 255, 0.7);
+}
+
+:global(.dark) .paragraph-marker:hover .marker-chevron {
+  color: rgba(160, 200, 255, 0.95);
 }
 
 .zooming-layer {
