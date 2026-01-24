@@ -21,6 +21,7 @@ from langgraph.graph import StateGraph, END  # 状态图和结束节点
 
 # 本地服务和工具
 from services.rag_service import RAGService  # RAG服务
+from services.storage_service import StorageService
 from tools.web_search_tool import WebSearchTool  # 网络搜索工具
 from tools.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
 class AgentState(TypedDict):
@@ -31,6 +32,7 @@ class AgentState(TypedDict):
     paper_id: str
     
     is_general_chat: bool  # 标记是否为通用问题
+    need_full_text: bool   # 标记是否需要全文总结
     
     chat_history: List[Dict]
     local_context: List[Dict]
@@ -47,7 +49,8 @@ class AgentState(TypedDict):
 
 class AcademicAgentService:
     def __init__(self,   
-                 rag_service: RAGService,  
+                 rag_service: RAGService,
+                 storage_service: StorageService,
                  openai_api_key: Optional[str] = None,  
                  openai_api_base: Optional[str] = None,  
                  model: str = "qwen-plus",  
@@ -55,7 +58,8 @@ class AcademicAgentService:
         """  
         初始化 Agent 服务      
         """  
-        self.rag_service = rag_service  
+        self.rag_service = rag_service
+        self.storage_service = storage_service  
   
   
         api_key = openai_api_key
@@ -89,8 +93,9 @@ class AcademicAgentService:
         workflow.add_node("query_translation", self._query_translation_node) # 节点0: 意图识别
         workflow.add_node("general_chat", self._general_chat_node)         # 节点0b: 闲聊
         workflow.add_node("rag_retrieval", self._rag_retrieval_node)       # 节点1: 本地 RAG
+        workflow.add_node("full_text_retrieval", self._full_text_retrieval_node) # 节点1b: 全文检索
         
-        # [核心修改] 将 评估+规划+执行 合并为一个节点
+        # 评估+规划+执行 合并为一个节点
         workflow.add_node("adaptive_retrieval", self._adaptive_retrieval_node) # 节点2: 自适应补充检索
         
         workflow.add_node("synthesize", self._synthesize_node)             # 节点3: 综合生成
@@ -104,7 +109,8 @@ class AcademicAgentService:
             self._route_query,
             {
                 "academic": "rag_retrieval",
-                "general": "general_chat"
+                "general": "general_chat",
+                "full_text": "full_text_retrieval"
             }
         )
         
@@ -112,6 +118,7 @@ class AcademicAgentService:
         
         # 主流程：RAG -> 自适应检索 -> 综合 -> 结束
         workflow.add_edge("rag_retrieval", "adaptive_retrieval")
+        workflow.add_edge("full_text_retrieval", "adaptive_retrieval")
         workflow.add_edge("adaptive_retrieval", "synthesize")
         workflow.add_edge("synthesize", END)
         
@@ -122,7 +129,10 @@ class AcademicAgentService:
         """根据翻译结果决定下一步走向"""
         if state.get("is_general_chat", False):
             return "general"
+        if state.get("need_full_text", False):
+            return "full_text"
         return "academic"
+    
     # ====================  查询翻译节点 ====================
     def _query_translation_node(self, state: AgentState) -> AgentState:
         """节点 0: 查询翻译与优化 + 意图识别"""
@@ -138,26 +148,30 @@ class AcademicAgentService:
                 'steps': steps,
                 'current_step': '跳过翻译(Demo模式)...',
                 'retrieval_query': user_query,
-                'is_general_chat': False
+                'is_general_chat': False,
+                'need_full_text': False
             }
         # Prompt 
         prompt = f"""
-你是一个专业的学术检索查询生成专家。你的任务是将用户的输入转化为高效的英文学术检索词（Search Query），以便在英文论文库中进行 RAG 检索。
+你是一个专业的学术查询优化专家。你的任务是识别用户的意图并将用户的输入转化为高效的英文学术检索词（Search Query）。
 请严格按照以下逻辑处理：
 1. **意图识别（关键分支）**：
-   - 首先判断用户输入是否具有学术/技术检索价值。
-   - 如果输入属于闲聊、问候、无意义字符或完全非学术的话题（例如：“你好”、“你是谁”、“讲个笑话”、“今天天气”），请直接输出：N/A
+   - **FullText**: 如果用户要求“全文总结”、“总结全文”、“这篇文章讲了什么”、“概述全文”、“主要内容”、“摘要”等需要阅读整篇文档才能回答的宏观问题，请直接输出：Reference
+   - **General**: 如果输入属于闲聊、问候、无意义字符或完全非学术的话题（例如：“你好”、“你是谁”、“讲个笑话”、“今天天气”），请直接输出：N/A
+   - **Academic**: 如果是具体的学术问题（如“Transformer的架构是什么”、“实验结果如何”），请进入第2步。
 2. **翻译与重构（如果是学术问题）**：
    - 将用户问题翻译为专业的**英文**学术术语。
    - **去停用词**：去除 "How to", "Help me find", "What is", "about" 等无关词汇。
    - **关键词提取**：只保留核心实体、技术名词和研究方向。
    - **格式优化**：输出为适合检索的关键词字符串（空格分隔）。
 3. **输出约束**：
-   - 仅输出最终的英文查询字符串或 "N/A"。
+   - 仅输出最终的英文查询字符串，或者 "N/A" (闲聊)，或者 "Reference" (全文需求)。
    - 不要包含任何解释、前缀、Markdown 格式或标点符号。
 **示例：**
 User: 你好
 Agent: N/A
+User: 帮我总结一下这篇文章
+Agent: Reference
 User: 帮我找一下关于Transformer在时间序列预测中的改进模型
 Agent: transformer time series forecasting improved models
 User: 什么是低秩适应（LoRA）？
@@ -167,6 +181,7 @@ Agent:
 """
         translated_query = user_query
         is_general_chat = False
+        need_full_text = False
         step_desc = ""
         try:
             response = self.llm.invoke([HumanMessage(content=prompt)])
@@ -174,11 +189,17 @@ Agent:
             
             # 清洗数据，防止 LLM 输出多余标点
             content = content.replace('"', '').replace("'", "")
+            
             if content == "N/A":
                 # 识别为闲聊
                 is_general_chat = True
                 step_desc = "识别为非学术/闲聊意图，转入通用对话模式"
                 translated_query = "" # 闲聊不需要检索词
+            elif content == "Reference":
+                # 识别为全文总结
+                need_full_text = True
+                step_desc = "识别为全文总结意图，准备获取全文"
+                translated_query = user_query 
             else:
                 # 识别为学术问题
                 translated_query = content
@@ -192,7 +213,8 @@ Agent:
             'steps': steps,
             'current_step': step_desc,
             'retrieval_query': translated_query,
-            'is_general_chat': is_general_chat
+            'is_general_chat': is_general_chat,
+            'need_full_text': need_full_text
         }
     # ==================== 通用闲聊节点 ====================
     def _general_chat_node(self, state: AgentState) -> AgentState:
@@ -278,6 +300,57 @@ Agent:
             'current_step': f'正在检索本地知识库 (Query: {query_to_use})...',
             'local_context': results,
             'local_context_text': '\n'.join(context_parts) if context_parts else '未找到相关内容'
+        }
+    
+    # ==================== 全文检索节点 ====================
+    def _full_text_retrieval_node(self, state: AgentState) -> AgentState:
+        """节点 1b: 全文检索 (针对摘要/总结类问题)"""
+        steps = state.get('steps', [])
+        steps.append('全文获取')
+        
+        file_hash = state['paper_id']
+        local_context = []
+        local_context_text = ""
+        current_step_desc = ""
+
+        if not file_hash:
+             current_step_desc = "未指定文件，无法获取全文"
+             local_context_text = "用户未指定具体文档，无法进行全文总结。"
+        else:
+             try:
+                 # 获取全文，include_translation=False 以节约上下文
+                 full_text = self.storage_service.get_full_text(file_hash, include_translation=False)
+                 if full_text:
+                     # 限制长度，防止 LLM 上下文爆 (保留前50000字符，对大多数论文足够)
+                     limited_text = full_text[:50000] 
+                     
+                     # 构造上下文对象
+                     local_context = [{
+                         'parent_content': limited_text,
+                         'metadata': {'page': 'All', 'section': 'Full Document'}
+                     }]
+                     
+                     # 构造上下文文本（用于 adaptive_retrieval 判断）
+                     if len(full_text) > 3000:
+                         local_context_text = f"【文档全文】\n{full_text[:3000]}...\n(由于长度限制展示前 3000 字符，但完整内容已传入下文)"
+                     else:
+                         local_context_text = f"【文档全文】\n{full_text}"
+                         
+                     current_step_desc = "已获取文档全文内容"
+                 else:
+                     current_step_desc = "文档内容为空"
+                     local_context_text = "文档内容为空。"
+             except Exception as e:
+                 print(f"Full text retrieval error: {e}")
+                 current_step_desc = f"获取全文失败: {str(e)}"
+                 local_context_text = f"获取全文失败: {str(e)}"
+                 
+        return {
+            **state,
+            'steps': steps,
+            'current_step': current_step_desc,
+            'local_context': local_context,  # 传递给 synthesize 节点
+            'local_context_text': local_context_text # 传递给 adaptive_retrieval 节点
         }
     
     # ==================== 补充检索节点 ====================
@@ -689,8 +762,11 @@ Agent:
         # 初始化状态
         initial_state: AgentState = {
             'user_query': user_query,
+            'retrieval_query': '',
             'user_id': user_id,
             'paper_id': paper_id,
+            'is_general_chat': False,
+            'need_full_text': False,
             'chat_history': chat_history or [],
             'local_context': [],
             'local_context_text': '',
@@ -740,8 +816,11 @@ Agent:
         # 初始化状态
         initial_state: AgentState = {
             'user_query': user_query,
+            'retrieval_query': '',
             'user_id': user_id,
             'paper_id': paper_id,
+            'is_general_chat': False,
+            'need_full_text': False,
             'chat_history': chat_history or [],
             'local_context': [],
             'local_context_text': '',

@@ -80,6 +80,7 @@ app.translate_service = translate_service
 # 依赖 rag_service 进行上下文检索
 agent_service = AcademicAgentService(
     rag_service=rag_service,
+    storage_service=storage_service,
     openai_api_key=settings.openai.api_key,
     openai_api_base=settings.openai.api_base,
     model=settings.openai.model
