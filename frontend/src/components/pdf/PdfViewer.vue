@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与组件 -------------------------
+// 引入 Vue 核心 API、第三方工具及子组件（仅添加注释，不改变行为）
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue' // 引入 Vue 核心 API 与组件实例类型
 import { useDebounceFn } from '@vueuse/core' // 引入防抖工具
 import {

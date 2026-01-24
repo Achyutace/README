@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与笔记管理 -------------------------
+// 引入 Vue 响应式 API、文库 store 与笔记 API，以及内部编辑器组件
 import { ref, watch, nextTick } from 'vue'
 import { useLibraryStore } from '../../stores/library'
 import { notesApi, type Note } from '../../api'

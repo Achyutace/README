@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与子组件 -------------------------
+// 引入 Vue 响应式 API、PDF store 以及内部使用的子组件
 import { ref, computed, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
 import NoteEditor from '../notes/NoteEditor.vue'

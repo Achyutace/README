@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与编辑器初始化 -------------------------
+// 引入 TipTap 编辑器所需的扩展与 Vue 响应式 API
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'

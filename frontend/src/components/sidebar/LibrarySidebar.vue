@@ -1,13 +1,19 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与 store -------------------------
+// 从 Vue 导入响应式 API，以及需要的 store
 import { ref, computed } from 'vue'
 import { useLibraryStore } from '../../stores/library'
 import { usePdfStore } from '../../stores/pdf'
 import { useAiStore } from '../../stores/ai'
 
+// ------------------------- 初始化 store 实例 -------------------------
+// 组合式 store 实例用于访问应用级状态和方法
 const libraryStore = useLibraryStore()
 const pdfStore = usePdfStore()
 const aiStore = useAiStore()
 
+// ------------------------- 侧边栏折叠与交互状态 -------------------------
+// 控制侧边栏折叠 / 悬停状态，以及上传文件输入引用
 const isCollapsed = ref(false)
 const isHovering = ref(false) // 鼠标是否悬停在左边缘
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -17,6 +23,7 @@ const showNarrowView = computed(() => isCollapsed.value && isHovering.value)
 // 是否显示完整内容 (未折叠时)
 const showFullContent = computed(() => !isCollapsed.value)
 
+// ------------------------- 侧边栏折叠控制 -------------------------
 function toggleSidebar() {
   isCollapsed.value = !isCollapsed.value
   // 展开时重置悬停状态
@@ -26,6 +33,7 @@ function toggleSidebar() {
 }
 
 // 处理鼠标进入左边缘区域
+// ------------------------- 鼠标悬停处理 -------------------------
 function handleEdgeMouseEnter() {
   if (isCollapsed.value) {
     isHovering.value = true
@@ -37,6 +45,8 @@ function handleSidebarMouseLeave() {
   isHovering.value = false
 }
 
+// ------------------------- 文件上传流程 -------------------------
+// 触发文件选择框并处理上传（仅支持 PDF）
 function triggerFileUpload() {
   fileInput.value?.click()
 }
@@ -62,6 +72,7 @@ async function handleFileUpload(event: Event) {
   target.value = ''
 }
 
+// ------------------------- 文档选择与删除 -------------------------
 function selectDocument(id: string) {
   const doc = libraryStore.documents.find((d: { id: string }) => d.id === id)
   if (doc) {

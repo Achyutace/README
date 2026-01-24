@@ -1,113 +1,145 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与组件 -------------------------
+// 从 Vue 导入响应式和生命周期 API
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+// 导入页面中使用到的子组件
 import LibrarySidebar from './components/sidebar/LibrarySidebar.vue'
 import PdfViewer from './components/pdf/PdfViewer.vue'
 import PdfToolbar from './components/pdf/PdfToolbar.vue'
 import NotesPanel from './components/notes/NotesPanel.vue'
 import ChatTab from './components/chat-box/ChatTab.vue'
+// 导入 Pinia store 的组合式使用函数（用于全局状态）
 import { useLibraryStore } from './stores/library'
 import { useAiStore } from './stores/ai'
 import { usePdfStore } from './stores/pdf'
 import { useThemeStore } from './stores/theme'
 
+// ------------------------- 初始化 store 实例 -------------------------
+// Store 本质上保存的是 应用状态 + 相关逻辑
+// 通过组合式函数获取各个 store 的实例，供组件内部使用
 const libraryStore = useLibraryStore()
 const aiStore = useAiStore()
 const pdfStore = usePdfStore()
 const themeStore = useThemeStore()
 
-// --- Panel States ---
-// Visible: Controlled by Toolbar buttons (Show/Hide)
+// ------------------------- 初始化 Chat 和 Note 状态 -------------------------
+// Chat 和 Note 是否可见
 const notesVisible = ref(true)
 const chatVisible = ref(true)
 
-// Minimized: Controlled by Panel Header buttons (Expand/Collapse)
+// Chat 和 Note 是否被折叠
 const notesMinimized = ref(false)
 const chatMinimized = ref(false)
 
-// Sidebar is visible if at least one panel is visible and not both minimized
+// Sidebar 是否可见：至少有一个面板可见且不同时都最小化
 const sidebarVisible = computed(() => {
+  // 如果 Chat 或 Notes 其中一个可见，且不同时都最小化，则 Sidebar 可见
   const hasVisiblePanel = notesVisible.value || chatVisible.value
-  const bothMinimized = notesVisible.value && notesMinimized.value && chatVisible.value && chatMinimized.value
+  const bothMinimized = notesVisible.value && notesMinimized.value 
+    && chatVisible.value && chatMinimized.value
   return hasVisiblePanel && !bothMinimized
 })
 
-// Resizable sidebar width
-const sidebarWidth = ref(480) // Default w-96 = 384px
-const isResizingWidth = ref(false)
+// Chat 占 Chat + Notes 的比例，默认 0.45
+const splitRatio = ref(0.45) 
+
+// 是否正在拖动分割条调整 Chat/Notes 高度
+const isResizingSplit = ref(false) 
+
+// 对整个 sidebar 的引用，类型可以是 HTML 元素或 null（初始值）
+const sidebarRef = ref<HTMLElement | null>(null) 
+
+// 对 Chat 面板的引用，不类型检查
+const chatTabRef = ref<any>(null) 
+
+// 对 Notes 面板的引用，不类型检查
+const notesPanelRef = ref<any>(null) 
+
+// 拖到底部或顶部时自动最小化的阈值（像素）
+const SNAP_THRESHOLD = 60 
+
+// ------------------------- 初始化侧边栏 -------------------------
+const sidebarWidth = ref(480) // 当前侧边栏宽度（像素），默认 480px
+const isResizingWidth = ref(false) // 是否正在拖动调整宽度
+// 宽度上下限
 const MIN_SIDEBAR_WIDTH = 380
 const MAX_SIDEBAR_WIDTH = 650
 
-// Vertical split ratio (0 to 1, representing top panel percentage)
-const splitRatio = ref(0.45)
-const isResizingSplit = ref(false)
-const sidebarRef = ref<HTMLElement | null>(null)
-const chatTabRef = ref<any>(null)
-const notesPanelRef = ref<any>(null)
+// ---------------------------- 初始化主题切换按钮 ----------------------------
+// 记录按钮位置（相对于窗口左上角），初始化放在右上角附近
+const themeButtonPos = ref({ x: window.innerWidth - 60, y: 16 }) 
 
-const SNAP_THRESHOLD = 60 // Distance from edge to trigger auto-minimize
+// 是否正在拖动主题按钮
+const isDraggingThemeButton = ref(false) 
 
-// Theme toggle button drag state
-const themeButtonPos = ref({ x: window.innerWidth - 60, y: 16 })
-const isDraggingThemeButton = ref(false)
-const hasDragged = ref(false)
-const dragOffset = ref({ x: 0, y: 0 })
-const dragStartPos = ref({ x: 0, y: 0 })
+// 标记是否发生过实际拖动（用于区分点击与拖动）
+const hasDragged = ref(false) 
 
+// 鼠标与按钮左上角的偏移
+const dragOffset = ref({ x: 0, y: 0 }) 
+
+// 拖动开始时鼠标的位置
+const dragStartPos = ref({ x: 0, y: 0 }) 
+
+
+// ---------------------------- 主题按钮拖动处理 ----------------------------
+// 开始拖动主题按钮：记录初始位置与偏移（点击时触发）
 const startDragThemeButton = (e: MouseEvent) => {
-  isDraggingThemeButton.value = true
+  isDraggingThemeButton.value = true  // 标记开始拖动
+  // 判定是否真的拖动了一定距离（初值为 false，因为刚开始还没移动）
   hasDragged.value = false
-  dragStartPos.value = { x: e.clientX, y: e.clientY }
+  dragStartPos.value = { x: e.clientX, y: e.clientY }  // 记录鼠标位置
+  // 记录鼠标与按钮左上角的偏移
   dragOffset.value = {
     x: e.clientX - themeButtonPos.value.x,
     y: e.clientY - themeButtonPos.value.y
   }
-  e.preventDefault()
+  e.preventDefault()  // 阻止浏览器对默认拖动行为的处理
 }
 
+// 拖动主题按钮过程：更新按钮位置（鼠标移动时触发）
 const onDragThemeButton = (e: MouseEvent) => {
-  if (!isDraggingThemeButton.value) return
-
-  // Check if actually dragged (moved more than 5px)
+  if (!isDraggingThemeButton.value) return  // 如果没有在拖动，直接返回
+  // 检查是否真正移动超过阈值（5px），用于区分点击与拖动
   const dx = Math.abs(e.clientX - dragStartPos.value.x)
   const dy = Math.abs(e.clientY - dragStartPos.value.y)
   if (dx > 5 || dy > 5) {
     hasDragged.value = true
   }
-
+  // 计算新的按钮位置
   const newX = e.clientX - dragOffset.value.x
   const newY = e.clientY - dragOffset.value.y
-  // Keep button within viewport bounds
+  // 限制按钮在窗口可见范围内（确保不会被拖出屏幕）
   themeButtonPos.value = {
     x: Math.max(0, Math.min(window.innerWidth - 44, newX)),
     y: Math.max(0, Math.min(window.innerHeight - 44, newY))
   }
 }
 
+// 停止拖动主题按钮（鼠标抬起时触发）
 const stopDragThemeButton = () => {
-  isDraggingThemeButton.value = false
+  isDraggingThemeButton.value = false // 标记停止拖动
 }
 
+// 主题按钮点击处理：切换主题（点击时触发）
 const handleThemeButtonClick = () => {
-  // Only toggle theme if not dragged
-  if (!hasDragged.value) {
-    themeStore.toggleTheme()
-  }
+  if (!hasDragged.value) themeStore.toggleTheme() // 切换主题
 }
 
-// --- Toggles ---
-
-// Toggle Visibility (Hide/Show)
+// ------------------------- Notes 和 Chat 切换 -------------------------
+// 切换 Notes 面板可见性（工具栏按钮触发）
 const toggleNotesVisibility = () => {
-  notesVisible.value = !notesVisible.value
+  notesVisible.value = !notesVisible.value // 对状态取反
 }
+// 切换 Chat 面板可见性（工具栏按钮触发）
 const toggleChatVisibility = () => {
-  chatVisible.value = !chatVisible.value
+  chatVisible.value = !chatVisible.value // 对状态取反
 }
 
-// Toggle Minimize (Collapse/Expand)
+// 切换 Notes 面板最小化/展开（面板头部点击触发）
 const toggleNotesMinimize = () => {
   notesMinimized.value = !notesMinimized.value
-  // 如果两个都最小化了，自动隐藏它们
+  // 如果两个面板都最小化了，则自动隐藏它们并重置最小化状态
   if (notesMinimized.value && chatMinimized.value) {
     notesVisible.value = false
     chatVisible.value = false
@@ -115,9 +147,10 @@ const toggleNotesMinimize = () => {
     chatMinimized.value = false
   }
 }
+// 切换 Chat 面板最小化/展开（面板头部点击触发）
 const toggleChatMinimize = () => {
   chatMinimized.value = !chatMinimized.value
-  // 如果两个都最小化了，自动隐藏它们
+  // 如果两个面板都最小化了，则自动隐藏它们并重置最小化状态
   if (notesMinimized.value && chatMinimized.value) {
     notesVisible.value = false
     chatVisible.value = false
@@ -126,87 +159,79 @@ const toggleChatMinimize = () => {
   }
 }
 
-// Keyboard shortcuts handler
+// 键盘快捷键处理：监听 Ctrl+Alt+/ 与 Ctrl+Alt+N
 const handleKeyboard = (e: KeyboardEvent) => {
-  // Ctrl+Alt+/ toggle Chat Minimize (Keep existing shortcut behavior)
+  // Ctrl+Alt+/ 切换 Chat 最小化
   if (e.ctrlKey && e.altKey && e.key === '/') {
-    e.preventDefault()
-    toggleChatMinimize()
+    e.preventDefault() // 阻止浏览器默认行为
+    toggleChatMinimize() // 切换 Chat 最小化状态
   }
-  // Ctrl+Alt+N toggle Notes Visibility (Hide/Show)
+  // Ctrl+Alt+N 切换 Notes 可见性
   if (e.ctrlKey && e.altKey && (e.key === 'n' || e.key === 'N')) {
-    e.preventDefault()
-    toggleNotesVisibility()
+    e.preventDefault() // 阻止浏览器默认行为
+    toggleNotesMinimize() // 切换 Notes 最小化状态
   }
 }
 
-onMounted(() => {
-  document.addEventListener('mousemove', onDragThemeButton)
-  document.addEventListener('mouseup', stopDragThemeButton)
-  document.addEventListener('keydown', handleKeyboard)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('mousemove', onDragThemeButton)
-  document.removeEventListener('mouseup', stopDragThemeButton)
-  document.removeEventListener('keydown', handleKeyboard)
-})
-
-// Horizontal resize (sidebar width)
+// ------------------------------- 侧边栏缩放 --------------------------------
+// 开始调整宽度（点击分割条时触发）
 const startWidthResize = (e: MouseEvent) => {
-  if (!sidebarVisible.value) return // Don't resize when hidden
-  isResizingWidth.value = true
-  document.addEventListener('mousemove', handleWidthResize)
-  document.addEventListener('mouseup', stopWidthResize)
-  e.preventDefault()
+  if (!sidebarVisible.value) return // 不可见时不允许调整
+  isResizingWidth.value = true // 正在调整宽度
+  e.preventDefault() // 阻止浏览器默认行为，避免选中文本
 }
 
+// 处理宽度调整（鼠标移动时触发）
 const handleWidthResize = (e: MouseEvent) => {
-  if (!isResizingWidth.value) return
-  const windowWidth = window.innerWidth
-  const newWidth = windowWidth - e.clientX
-  sidebarWidth.value = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, newWidth))
+  if (!isResizingWidth.value) return // 如果不在调整状态，直接返回
+  const newWidth = window.innerWidth - e.clientX // 计算新宽度
+  // 限制宽度在最小值和最大值之间
+  sidebarWidth.value = Math.min(MAX_SIDEBAR_WIDTH, 
+    Math.max(MIN_SIDEBAR_WIDTH, newWidth))
 }
 
+// 停止宽度调整（鼠标抬起时触发）
 const stopWidthResize = () => {
   isResizingWidth.value = false
-  document.removeEventListener('mousemove', handleWidthResize)
-  document.removeEventListener('mouseup', stopWidthResize)
 }
 
-// Vertical resize (split between panels)
+// ------------------------- Chat 和 Notes 分割条调整 -------------------------
+// 开始分割条调整（点击分割条时触发）
 const startSplitResize = (e: MouseEvent) => {
-  // Only allow resize if both are visible and NOT minimized
-  if (!notesVisible.value || notesMinimized.value || !chatVisible.value || chatMinimized.value) return
-  
-  isResizingSplit.value = true
-  document.addEventListener('mousemove', handleSplitResize)
-  document.addEventListener('mouseup', stopSplitResize)
-  e.preventDefault()
+  // 如果有一个不可见/最小化，则不允许调整
+  if (!notesVisible.value || notesMinimized.value || 
+    !chatVisible.value || chatMinimized.value) return
+  isResizingSplit.value = true // 标记正在调整分割条
+  e.preventDefault() // 阻止浏览器默认行为
 }
 
+// 处理分割条移动（鼠标移动时触发）
 const handleSplitResize = (e: MouseEvent) => {
+  // 如果不在调整状态或状态栏不存在，直接返回
   if (!isResizingSplit.value || !sidebarRef.value) return
+  // 计算调整后位置
+  const rect = sidebarRef.value.getBoundingClientRect() // 获取侧边栏尺寸
+  const relativeY = e.clientY - rect.top // 鼠标到顶部距离
+  const totalHeight = rect.height // 侧边栏总高度
   
-  const rect = sidebarRef.value.getBoundingClientRect()
-  const relativeY = e.clientY - rect.top
-  const totalHeight = rect.height
+  // 限制比例在 0.1 - 0.9 之间，避免过度收缩
+  let newRatio = relativeY / totalHeight // 计算新比例
+  newRatio = Math.max(0.1, Math.min(0.9, newRatio)) // 限制在范围内
   
-  // Calculate new ratio
-  let newRatio = relativeY / totalHeight
-  newRatio = Math.max(0.1, Math.min(0.9, newRatio))
-  
-  splitRatio.value = newRatio
+  splitRatio.value = newRatio // 更新比例
 }
 
+// 停止分割条调整（鼠标抬起时触发）
 const stopSplitResize = () => {
+  // 如果不在调整状态或状态栏不存在，直接返回
   if (!isResizingSplit.value || !sidebarRef.value) return
+  // 计算当前上/下面板高度
+  const rect = sidebarRef.value.getBoundingClientRect() // 获取侧边栏尺寸
+  const topHeight = rect.height * splitRatio.value // Notes 面板高度
+  const bottomHeight = rect.height * (1 - splitRatio.value) // Chat 面板高度
   
-  const rect = sidebarRef.value.getBoundingClientRect()
-  const topHeight = rect.height * splitRatio.value
-  const bottomHeight = rect.height * (1 - splitRatio.value)
-  
-  // Auto-minimize if dragged to edge
+  // 如果 Notes 或者 Chat 面板高度小于阈值，则自动最小化该面板
+  // 如果侧边栏高度 > 600，则本条件不会触发，而是会被 0.1 - 0.9 限制覆盖
   if (topHeight < SNAP_THRESHOLD) {
     notesMinimized.value = true
     splitRatio.value = 0.5
@@ -214,40 +239,75 @@ const stopSplitResize = () => {
     chatMinimized.value = true
     splitRatio.value = 0.5
   }
-  
+  // 停止调整状态
   isResizingSplit.value = false
-  document.removeEventListener('mousemove', handleSplitResize)
-  document.removeEventListener('mouseup', stopSplitResize)
 }
 
-// Computed styles for panels
+// ------------------------- 通过 Chat 和 Notes 状态计算样式 -------------------------
 const topPanelStyle = computed(() => {
+  // 如果不可见
   if (!notesVisible.value) return { display: 'none' }
+  // 如果最小化，则固定高度为 36px
   if (notesMinimized.value) return { height: '36px', flexShrink: 0 }
   
-  // If Notes is expanded...
-  // And Chat is hidden OR minimized -> Notes takes full remaining space
+  // 当 Notes 展开且 Chat 隐藏/最小化时，Notes 占据剩余空间
   if (!chatVisible.value || chatMinimized.value) {
     return { flex: '1 1 auto' }
   }
   
-  // Both expanded -> Use split ratio
+  // 两者都展开时，使用 splitRatio 计算高度
   return { height: `calc(${splitRatio.value * 100}% - 2px)`, flexShrink: 0 }
 })
 
 const bottomPanelStyle = computed(() => {
+  // 如果不可见
   if (!chatVisible.value) return { display: 'none' }
+  // 如果最小化，则固定高度为 36px
   if (chatMinimized.value) return { height: '36px', flexShrink: 0 }
   
-  // If Chat is expanded...
-  // And Notes is hidden OR minimized -> Chat takes full remaining space
+  // 当 Chat 展开且 Notes 隐藏/最小化时，Chat 占据剩余空间
   if (!notesVisible.value || notesMinimized.value) {
     return { flex: '1 1 auto' }
   }
   
-  // Both expanded -> Use split ratio
+  // 两者都展开时，使用 splitRatio 计算高度
   return { height: `calc(${(1 - splitRatio.value) * 100}% - 2px)`, flexShrink: 0 }
 })
+
+// ------------------------- 在组件挂载/卸载时，注册/移除全局事件-------------------------
+onMounted(() => {
+  // 鼠标移动 -> 拖动主题按钮 & 调整侧边栏宽度 & 调整分割条
+  document.addEventListener('mousemove', onDragThemeButton)
+  document.addEventListener('mousemove', handleWidthResize)
+  document.addEventListener('mousemove', handleSplitResize)
+  
+  // 鼠标抬起 -> 停止拖动主题按钮 & 停止调整侧边栏宽度 & 停止调整分割条
+  document.addEventListener('mouseup', stopDragThemeButton)
+  document.addEventListener('mouseup', stopWidthResize)
+  document.addEventListener('mouseup', stopSplitResize)
+  
+  // 键盘按下 -> 处理快捷键
+  document.addEventListener('keydown', handleKeyboard)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onDragThemeButton)
+  document.removeEventListener('mousemove', handleWidthResize)
+  document.removeEventListener('mousemove', handleSplitResize)
+  
+  document.removeEventListener('mouseup', stopDragThemeButton)
+  document.removeEventListener('mouseup', stopWidthResize)
+  document.removeEventListener('mouseup', stopSplitResize)
+
+  document.removeEventListener('keydown', handleKeyboard)
+})
+
+// ------------------------- 组件脚本结束 -------------------------
+// ---------------------------------------------------------------
+
+
+// ------------------------- 组件模板开始 -------------------------
+// （以下内容可以在 F12 开发者工具中查看）
 </script>
 
 <template>

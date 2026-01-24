@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与状态 -------------------------
+// 引入 Vue 响应式 API 并初始化需要的 store
 import { ref, computed, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
 

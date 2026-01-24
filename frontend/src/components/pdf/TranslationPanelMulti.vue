@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与 store -------------------------
+// 引入 Vue 响应式 API、工具函数以及所需的 store 和 API
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { usePdfStore } from '../../stores/pdf'

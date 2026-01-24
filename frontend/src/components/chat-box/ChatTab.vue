@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与 store -------------------------
+// 引入 Vue 响应式 API、Markdown 支持、代码高亮及应用 store/API
 import { ref, nextTick, watch, onMounted, computed, reactive } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { useLibraryStore } from '../../stores/library'

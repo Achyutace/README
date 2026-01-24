@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与 store -------------------------
+// 引入 Vue 响应式 API、VueFlow 相关组件以及所需的 store
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'

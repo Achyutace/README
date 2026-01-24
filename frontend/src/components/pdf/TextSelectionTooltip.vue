@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与 store -------------------------
+// 引入 Vue 响应式 API、store 以及外部 API
 import { ref, onUnmounted } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { useLibraryStore } from '../../stores/library'

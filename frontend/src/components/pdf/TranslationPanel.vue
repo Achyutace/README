@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与 store -------------------------
+// 引入 Vue 响应式 API、PDF store、AI API 及文库 store
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
 import { aiApi } from '../../api'

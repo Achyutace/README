@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// ------------------------- 导入依赖与组件 -------------------------
+// 从 Vue 导入响应式 API，和当前组件所需的 store/子组件
 import { ref, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
 // 1. 引入组件 (请确保 RoadmapTab.vue 文件存在于同级目录)
