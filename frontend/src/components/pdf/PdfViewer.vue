@@ -2020,7 +2020,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.textLayer span) {
-  color: gray !important;
+  color: transparent !important;
   line-height: 1.0 !important;
   letter-spacing: 0.2px !important;
   transform-origin: 0 0;
