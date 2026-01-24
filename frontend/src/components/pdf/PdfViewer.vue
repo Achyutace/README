@@ -352,6 +352,16 @@ watch(
   }
 )
 
+watch(
+  () => pdfStore.selectedText,
+  (newText) => {
+    if (!newText) {
+      window.getSelection()?.removeAllRanges()
+      showTooltip.value = false
+    }
+  }
+)
+
 async function renderPage(pageNumber: number, options?: { preserveContent?: boolean }) {
   const pdf = pdfDoc.value // 当前文档实例
   const refs = pageRefs.get(pageNumber) // 当前页的引用集合

@@ -2,6 +2,7 @@
 import { ref, nextTick, watch, onMounted, computed, reactive } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { useLibraryStore } from '../../stores/library'
+import { usePdfStore } from '../../stores/pdf'
 import { chatSessionApi } from '../../api'
 
 // --- Markdown Imports ---
@@ -14,6 +15,7 @@ import 'highlight.js/styles/atom-one-dark.css'
 
 const aiStore = useAiStore()
 const libraryStore = useLibraryStore()
+const pdfStore = usePdfStore()
 
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -682,7 +684,14 @@ defineExpose({
     <!-- Input Area -->
     <div class="p-4 border-t border-gray-100 dark:border-gray-800 bg-white/50 dark:bg-[#252526]/50 backdrop-blur-sm" @click.self="closeMenus">
       <!-- Preview boxes -->
-      <div v-if="selectedReferences.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-1.5 mb-2">
+      <div v-if="selectedReferences.length > 0 || attachedFiles.length > 0 || pdfStore.selectedText" class="flex flex-wrap gap-1.5 mb-2">
+        <!-- PDF Selection Preview -->
+        <div v-if="pdfStore.selectedText" class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg>
+          <span class="max-w-20 truncate" :title="pdfStore.selectedText">{{ pdfStore.selectedText }}</span>
+          <button @click="pdfStore.clearSelection()" class="hover:text-gray-900 dark:hover:text-white"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+
         <div v-for="ref in selectedReferences" :key="ref.id" class="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded text-xs">
           <span class="text-primary-500">@</span><span class="max-w-20 truncate">{{ ref.label }}</span>
           <button @click="removeReference(ref.id)" class="hover:text-primary-900"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
