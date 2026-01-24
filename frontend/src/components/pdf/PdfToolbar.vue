@@ -108,14 +108,39 @@ watch(
           </span>
         </button>
 
+        <!-- 分割线 -->
         <div class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
-        <button @click="emit('toggle-notes-visibility')" :class="['px-2 py-1 text-sm rounded-lg transition-colors flex items-center gap-1', props.notesVisible ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400']" :title="props.notesVisible ? '隐藏笔记' : '显示笔记'">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        <!-- 笔记开关 -->
+        <button
+          @click="emit('toggle-notes-visibility')"
+          :class="[
+            'px-2 py-1 text-sm rounded-lg transition-colors flex items-center gap-1',
+            props.notesVisible
+              ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
+          ]"
+          :title="props.notesVisible ? '隐藏笔记' : '显示笔记'"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
         </button>
 
-        <button @click="emit('toggle-chat-visibility')" :class="['px-2 py-1 text-sm rounded-lg transition-colors flex items-center gap-1', props.chatVisible ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400']" :title="props.chatVisible ? '隐藏对话' : '显示对话'">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+        <!-- 对话开关 -->
+        <button
+          @click="emit('toggle-chat-visibility')"
+          :class="[
+            'px-2 py-1 text-sm rounded-lg transition-colors flex items-center gap-1',
+            props.chatVisible
+              ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
+          ]"
+          :title="props.chatVisible ? '隐藏对话' : '显示对话'"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
         </button>
       </div>
     </div>
