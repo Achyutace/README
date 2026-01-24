@@ -419,6 +419,40 @@ export const usePdfStore = defineStore('pdf', () => {
     }
   }
 
+  // 笔记预览卡片状态
+  const notePreviewCard = ref<{
+    isVisible: boolean
+    note: { id: number | string; title: string; content: string } | null
+    position: { x: number; y: number }
+  }>({
+    isVisible: false,
+    note: null,
+    position: { x: 0, y: 0 }
+  })
+
+  // 打开笔记预览卡片
+  function openNotePreviewCard(note: { id: number | string; title: string; content: string }, position: { x: number; y: number }) {
+    notePreviewCard.value = {
+      isVisible: true,
+      note,
+      position
+    }
+  }
+
+  // 关闭笔记预览卡片
+  function closeNotePreviewCard() {
+    notePreviewCard.value = {
+      isVisible: false,
+      note: null,
+      position: { x: 0, y: 0 }
+    }
+  }
+
+  // 更新笔记预览卡片位置
+  function updateNotePreviewPosition(position: { x: number; y: number }) {
+    notePreviewCard.value.position = position
+  }
+
   return {
     currentPdfUrl,
     currentDocumentId,
@@ -480,5 +514,10 @@ export const usePdfStore = defineStore('pdf', () => {
     setPanelSnapMode,
     setPanelLoading,
     bringPanelToFront,
+    // 笔记预览卡片
+    notePreviewCard,
+    openNotePreviewCard,
+    closeNotePreviewCard,
+    updateNotePreviewPosition,
   }
 })
