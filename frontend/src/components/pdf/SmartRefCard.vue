@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
-import { useLibraryStore } from '../../stores/library'
 
 const pdfStore = usePdfStore()
-const libraryStore = useLibraryStore()
 
 // 卡片状态
 const isExpanded = ref(false)

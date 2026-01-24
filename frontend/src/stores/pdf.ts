@@ -453,6 +453,39 @@ export const usePdfStore = defineStore('pdf', () => {
     notePreviewCard.value.position = position
   }
 
+  // 智能引用卡片状态
+  const smartRefCard = ref<{
+    isVisible: boolean
+    isLoading: boolean
+    paper: any | null
+    position: { x: number; y: number }
+    error?: string | null
+  }>({
+    isVisible: false,
+    isLoading: false,
+    paper: null,
+    position: { x: 0, y: 0 },
+    error: null
+  })
+
+  function openSmartRefCard(paperData: any, position: { x: number; y: number }) {
+    smartRefCard.value = {
+      isVisible: true,
+      isLoading: false,
+      paper: paperData,
+      position,
+      error: null
+    }
+  }
+
+  function closeSmartRefCard() {
+    smartRefCard.value.isVisible = false
+  }
+
+  function updateSmartRefPosition(position: { x: number; y: number }) {
+    smartRefCard.value.position = position
+  }
+
   return {
     currentPdfUrl,
     currentDocumentId,
@@ -519,5 +552,10 @@ export const usePdfStore = defineStore('pdf', () => {
     openNotePreviewCard,
     closeNotePreviewCard,
     updateNotePreviewPosition,
+    // 智能引用卡片
+    smartRefCard,
+    openSmartRefCard,
+    closeSmartRefCard,
+    updateSmartRefPosition,
   }
 })

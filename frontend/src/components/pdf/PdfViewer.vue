@@ -2028,4 +2028,8 @@ onBeforeUnmount(() => {
   white-space: pre;
   cursor: text;
 }
+
+:deep(.textLayer ::selection) {
+  background: rgba(59, 130, 246, 0.3) !important;
+}
 </style>

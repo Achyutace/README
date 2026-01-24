@@ -25,7 +25,7 @@ html, body, #app {
 }
 
 /* PDF Text Selection */
-.pdf-text-layer ::selection {
+.textLayer ::selection {
   background: rgba(59, 130, 246, 0.3);
 }
 
