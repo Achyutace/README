@@ -430,12 +430,62 @@ async function renderPage(pageNumber: number, options?: { preserveContent?: bool
   
   // 仅任务未被取消时才继续渲染文本
   const textContent = await page.getTextContent() // 获取文字内容
+  const textDivs: HTMLElement[] = []
   await renderTextLayer({
     textContentSource: textContent, // 提供文字内容
     container: refs.textLayer, // 指定文字层容器
     viewport, // 提供视口信息
-    textDivs: [] // 文字节点数组占位
+    textDivs // Capture created divs
   }).promise // 等待文字层绘制完成
+
+  // 修复：强制调整文字宽度以对齐 PDF 原始内容
+  if (textContent && textContent.items && textDivs.length === textContent.items.length) {
+    const items = textContent.items as any[]
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const div = textDivs[i]
+      
+      // 跳过空内容
+      if (!item.str || !item.width || !div) continue
+
+      // item.width 是 PDF 坐标系下的宽度
+      // viewport.scale 是当前的缩放倍率
+      const targetWidth = item.width * viewport.scale
+      
+      // 获取当前 DOM 元素的实际渲染尺寸（包括 transform）
+      const rect = div.getBoundingClientRect()
+      
+      // 判断文字方向
+      // item.transform [a, b, c, d, e, f]
+      // 水平文字通常 b=0, c=0
+      // 垂直文字通常 a=0, d=0 (90或270度旋转)
+      const transform = item.transform
+      const isVertical = transform && Math.abs(transform[0]) < 1e-3 && Math.abs(transform[3]) < 1e-3
+      const isHorizontal = !transform || (Math.abs(transform[1]) < 1e-3 && Math.abs(transform[2]) < 1e-3)
+
+      let currentLength = 0
+      if (isVertical) {
+        currentLength = rect.height
+      } else if (isHorizontal) {
+        currentLength = rect.width
+      } else {
+        // 对于非正交旋转的文字，跳过宽度调整以避免破坏
+        continue 
+      }
+      
+      if (currentLength > 0) {
+        // 计算需要的水平缩放比例
+        const scaleFactor = targetWidth / currentLength
+        
+        // 只有当偏差超过一定阈值才调整
+        if (Math.abs(scaleFactor - 1) > 0.01) {
+            const existingTransform = div.style.transform || ''
+            // 追加 scaling，保留原有的旋转和平移
+            div.style.transform = `${existingTransform} scaleX(${scaleFactor})`
+        }
+      }
+    }
+  }
 
   try {
     const annotations = await page.getAnnotations()
@@ -1962,5 +2012,20 @@ onBeforeUnmount(() => {
 
 :global(.dark .pdf-scroll-container::-webkit-scrollbar-thumb:hover) {
   background: #6b7280;
+}
+
+/* Fix for PDF text layer alignment and font matching (ICML / Times New Roman) */
+:deep(.textLayer) {
+  opacity: 1;
+}
+
+:deep(.textLayer span) {
+  color: gray !important;
+  line-height: 1.0 !important;
+  letter-spacing: 0.2px !important;
+  transform-origin: 0 0;
+  font-family: "Times New Roman", "Nimbus Roman No9 L", "FreeSerif", "Liberation Serif", serif !important;
+  white-space: pre;
+  cursor: text;
 }
 </style>
