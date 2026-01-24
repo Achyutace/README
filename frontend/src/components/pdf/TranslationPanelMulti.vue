@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { usePdfStore } from '../../stores/pdf'
 import { aiApi } from '../../api'
 import { useLibraryStore } from '../../stores/library'
@@ -29,6 +30,27 @@ const DEFAULT_FONT_SIZE = 14
 const MIN_FONT_SIZE = 12
 const MAX_FONT_SIZE = 24
 
+// 复制状态
+const copiedPanelId = ref<string | null>(null)
+
+// 复制翻译内容
+async function copyTranslation(panel: TranslationPanelInstance) {
+  if (!panel.translation) return
+
+  try {
+    await navigator.clipboard.writeText(panel.translation)
+    copiedPanelId.value = panel.id
+    // 2秒后重置状态
+    setTimeout(() => {
+      if (copiedPanelId.value === panel.id) {
+        copiedPanelId.value = null
+      }
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
+}
+
 function getFontSize(panelId: string): number {
   return fontSizeMap[panelId] || DEFAULT_FONT_SIZE
 }
@@ -52,8 +74,8 @@ const MIN_WIDTH = 280
 const MAX_WIDTH = 900
 const MIN_HEIGHT = 150
 const MAX_HEIGHT = 600
-const SIDEBAR_SNAP_THRESHOLD = 80
-const PARAGRAPH_SNAP_THRESHOLD = 100
+const SIDEBAR_SNAP_THRESHOLD = 100
+const PARAGRAPH_SNAP_THRESHOLD = 150
 
 // 获取所有可吸附的段落位置
 function getAllParagraphRects(): Array<{ id: string; rect: DOMRect; page: number }> {
@@ -75,37 +97,23 @@ function calculateParagraphSnapPosition(paragraphId: string) {
   const paragraphs = pdfStore.paragraphs
   const paragraph = paragraphs.find(p => p.id === paragraphId)
   if (!paragraph) return null
-  
+
   const pageElement = document.querySelector(`.pdf-page[data-page="${paragraph.page}"]`) as HTMLElement
   if (!pageElement) return null
-  
+
   const pageRect = pageElement.getBoundingClientRect()
-  
-  // 直接使用pageElement的尺寸和bbox的百分比计算
-  // bbox的坐标是相对于原始PDF页面尺寸的绝对值
-  // 我们需要根据当前渲染尺寸进行缩放
-  const pageWidth = pageElement.offsetWidth
-  const pageHeight = pageElement.offsetHeight
-  
-  // 获取原始PDF页面尺寸（从canvas获取）
-  const canvas = pageElement.querySelector('canvas')
-  if (!canvas) return null
-  
-  // canvas的width/height是像素尺寸（包含devicePixelRatio），需要除以dpr得到CSS尺寸
-  const dpr = window.devicePixelRatio || 1
-  const originalWidth = canvas.width / dpr
-  const originalHeight = canvas.height / dpr
-  
-  // 计算缩放比例
-  const scaleX = pageWidth / originalWidth
-  const scaleY = pageHeight / originalHeight
-  
-  // 计算精确的吸附位置
-  const left = pageRect.left + (paragraph.bbox.x0 * scaleX)
-  const top = pageRect.top + (paragraph.bbox.y0 * scaleY)
-  const width = paragraph.bbox.width * scaleX
-  const height = paragraph.bbox.height * scaleY
-  
+
+  // 直接使用 pdfStore.scale 作为缩放因子
+  const scaleFactor = pdfStore.scale
+
+  // bbox坐标是相对于原始PDF尺寸（scale=1）的绝对坐标
+  // 需要乘以当前缩放因子得到当前渲染尺寸下的坐标
+  // pageRect.left/top 是页面在屏幕上的位置（会随滚动变化）
+  const left = pageRect.left + (paragraph.bbox.x0 * scaleFactor)
+  const top = pageRect.top + (paragraph.bbox.y0 * scaleFactor)
+  const width = paragraph.bbox.width * scaleFactor
+  const height = paragraph.bbox.height * scaleFactor
+
   return {
     left,
     top,
@@ -158,19 +166,28 @@ function onDrag(e: MouseEvent) {
   if (!isNearSidebar.value) {
     const allParagraphs = getAllParagraphRects()
     let nearestParagraph: { id: string; distance: number; rect: DOMRect } | null = null
-    
+
+    // 使用面板中心点来计算距离
+    const panelCenterX = newX + panel.size.width / 2
+    const panelCenterY = newY + panel.size.height / 2
+
     for (const p of allParagraphs) {
-      const centerX = p.rect.left + p.rect.width / 2
-      const centerY = p.rect.top + p.rect.height / 2
-      const distance = Math.sqrt(Math.pow(newX - centerX, 2) + Math.pow(newY - centerY, 2))
-      
+      // 计算段落光标的中心点
+      const markerCenterX = p.rect.left + p.rect.width / 2
+      const markerCenterY = p.rect.top + p.rect.height / 2
+
+      // 同时检测面板左上角和面板中心到光标的距离
+      const distanceFromCorner = Math.sqrt(Math.pow(newX - markerCenterX, 2) + Math.pow(newY - markerCenterY, 2))
+      const distanceFromCenter = Math.sqrt(Math.pow(panelCenterX - markerCenterX, 2) + Math.pow(panelCenterY - markerCenterY, 2))
+      const distance = Math.min(distanceFromCorner, distanceFromCenter)
+
       if (distance < PARAGRAPH_SNAP_THRESHOLD) {
         if (!nearestParagraph || distance < nearestParagraph.distance) {
           nearestParagraph = { id: p.id, distance, rect: p.rect }
         }
       }
     }
-    
+
     if (nearestParagraph) {
       isNearSnapTarget.value = true
       snapTargetParagraphId.value = nearestParagraph.id
@@ -342,8 +359,16 @@ watch(() => pdfStore.translationPanels.length, () => {
   })
 }, { immediate: true })
 
-// 监听PDF滚动，更新吸附面板位置
-function onPdfScroll() {
+// 监听PDF缩放变化，更新吸附面板位置
+watch(() => pdfStore.scale, () => {
+  // 延迟执行以等待DOM更新
+  setTimeout(() => {
+    debouncedUpdatePositions()
+  }, 100)
+})
+
+// 更新所有吸附到段落的面板位置
+function updateSnappedPanelPositions() {
   pdfStore.translationPanels.forEach(panel => {
     if (panel.snapMode === 'paragraph' && panel.snapTargetParagraphId) {
       const snapPos = calculateParagraphSnapPosition(panel.snapTargetParagraphId)
@@ -352,8 +377,31 @@ function onPdfScroll() {
           x: snapPos.left,
           y: snapPos.top
         })
+        // 同时更新宽度以匹配段落
+        pdfStore.updatePanelSize(panel.id, {
+          width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapPos.width)),
+          height: panel.size.height
+        })
       }
     }
+  })
+}
+
+// 防抖的位置更新函数
+const debouncedUpdatePositions = useDebounceFn(updateSnappedPanelPositions, 16)
+
+// 使用 requestAnimationFrame 实现平滑滚动跟随
+let scrollRafId: number | null = null
+
+function onPdfScroll() {
+  // 取消之前的 RAF 请求
+  if (scrollRafId) {
+    cancelAnimationFrame(scrollRafId)
+  }
+  // 使用 RAF 确保流畅更新
+  scrollRafId = requestAnimationFrame(() => {
+    updateSnappedPanelPositions()
+    scrollRafId = null
   })
 }
 
@@ -362,23 +410,75 @@ function focusPanel(panelId: string) {
   pdfStore.bringPanelToFront(panelId)
 }
 
+// 存储事件监听器引用
+let pdfContainerRef: Element | null = null
+let resizeObserver: ResizeObserver | null = null
+
+// 绑定滚动监听器（带重试机制）
+let bindRetryCount = 0
+const MAX_BIND_RETRIES = 10
+
+function bindScrollListener() {
+  if (pdfContainerRef) return // 已绑定
+
+  pdfContainerRef = document.querySelector('.pdf-scroll-container')
+  if (pdfContainerRef) {
+    pdfContainerRef.addEventListener('scroll', onPdfScroll, { passive: true })
+
+    // 监听容器大小变化
+    resizeObserver = new ResizeObserver(() => {
+      debouncedUpdatePositions()
+    })
+    resizeObserver.observe(pdfContainerRef)
+    bindRetryCount = 0 // 重置重试计数
+  } else if (bindRetryCount < MAX_BIND_RETRIES) {
+    // 容器未找到，延迟重试
+    bindRetryCount++
+    setTimeout(bindScrollListener, 200)
+  }
+}
+
+// 监听 PDF URL 变化，重新绑定监听器
+watch(() => pdfStore.currentPdfUrl, () => {
+  // 先解绑旧的监听器
+  if (pdfContainerRef) {
+    pdfContainerRef.removeEventListener('scroll', onPdfScroll)
+    if (resizeObserver) {
+      resizeObserver.disconnect()
+      resizeObserver = null
+    }
+    pdfContainerRef = null
+  }
+  bindRetryCount = 0
+  // PDF 切换时重新绑定
+  setTimeout(bindScrollListener, 200)
+}, { immediate: true })
+
 onMounted(() => {
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
-  
-  const pdfContainer = document.querySelector('.pdf-scroll-container')
-  if (pdfContainer) {
-    pdfContainer.addEventListener('scroll', onPdfScroll)
-  }
+
+  // 延迟绑定，确保 PDF 容器已渲染
+  setTimeout(bindScrollListener, 200)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
-  
-  const pdfContainer = document.querySelector('.pdf-scroll-container')
-  if (pdfContainer) {
-    pdfContainer.removeEventListener('scroll', onPdfScroll)
+
+  if (pdfContainerRef) {
+    pdfContainerRef.removeEventListener('scroll', onPdfScroll)
+    pdfContainerRef = null
+  }
+
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+
+  if (scrollRafId) {
+    cancelAnimationFrame(scrollRafId)
+    scrollRafId = null
   }
 })
 </script>
@@ -433,6 +533,20 @@ onBeforeUnmount(() => {
           <span v-if="panel.snapMode === 'paragraph'" class="text-[10px] text-gray-400 dark:text-gray-500">· 已吸附</span>
         </div>
         <div class="flex items-center gap-0.5">
+          <!-- 复制按钮 -->
+          <button
+            @click.stop="copyTranslation(panel)"
+            class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors"
+            :title="copiedPanelId === panel.id ? '已复制' : '复制译文'"
+            :disabled="panel.isLoading || !panel.translation"
+          >
+            <svg v-if="copiedPanelId === panel.id" class="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            <svg v-else class="w-3 h-3 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </button>
           <!-- 字体减小按钮 -->
           <button
             @click.stop="decreaseFontSize(panel.id)"
@@ -478,17 +592,17 @@ onBeforeUnmount(() => {
       </div>
       
       <!-- 内容区域 -->
-      <div class="panel-content flex-1 overflow-y-auto p-3 cursor-auto" @mousedown.stop>
+      <div class="panel-content flex-1 overflow-y-auto p-3 cursor-auto select-text" @mousedown.stop>
         <!-- 加载中状态 -->
         <div v-if="panel.isLoading" class="flex flex-col items-center justify-center py-6">
           <div class="loading-spinner mb-2"></div>
           <span class="text-gray-400 dark:text-gray-500 text-xs">翻译中...</span>
         </div>
-        
+
         <!-- 翻译内容 -->
-        <div 
-          v-else 
-          class="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
+        <div
+          v-else
+          class="translation-text text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
           :style="{ fontSize: getFontSize(panel.id) + 'px' }"
         >
           {{ panel.translation || '暂无翻译' }}
@@ -657,10 +771,16 @@ onBeforeUnmount(() => {
 
 /* 吸附提示框 */
 .snap-hint {
-  border: 2px dashed rgba(120, 140, 160, 0.5);
+  border: 2px dashed rgba(59, 130, 246, 0.6);
   border-radius: 6px;
-  background: rgba(120, 140, 160, 0.08);
+  background: rgba(59, 130, 246, 0.1);
   transition: all 0.15s ease;
+  animation: snap-pulse 1s ease-in-out infinite;
+}
+
+@keyframes snap-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
 }
 
 .snap-hint-text {
@@ -668,19 +788,20 @@ onBeforeUnmount(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  padding: 4px 10px;
-  background: rgba(80, 100, 120, 0.85);
+  padding: 4px 12px;
+  background: rgba(59, 130, 246, 0.9);
   color: white;
   font-size: 11px;
   font-weight: 500;
   border-radius: 4px;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 /* 侧边栏吸附提示 */
 .sidebar-snap-hint {
-  background: linear-gradient(to left, rgba(120, 140, 160, 0.15), transparent);
-  border-left: 2px dashed rgba(120, 140, 160, 0.4);
+  background: linear-gradient(to left, rgba(59, 130, 246, 0.15), transparent);
+  border-left: 2px dashed rgba(59, 130, 246, 0.5);
 }
 
 .sidebar-hint-text {
@@ -688,12 +809,13 @@ onBeforeUnmount(() => {
   top: 50%;
   right: 16px;
   transform: translateY(-50%) rotate(-90deg);
-  padding: 4px 10px;
-  background: rgba(80, 100, 120, 0.85);
+  padding: 4px 12px;
+  background: rgba(59, 130, 246, 0.9);
   color: white;
   font-size: 11px;
   font-weight: 500;
   border-radius: 4px;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 </style>

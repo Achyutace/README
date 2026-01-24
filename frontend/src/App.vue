@@ -201,14 +201,35 @@ const chatPanelStyle = computed(() => {
   return { height: `${splitRatio2.value * 100}%`, flexShrink: 0 }
 })
 
+// 键盘快捷键处理
+const handleKeyboard = (e: KeyboardEvent) => {
+  // Ctrl+Alt+/ 切换 Chat
+  if (e.ctrlKey && e.altKey && e.key === '/') {
+    e.preventDefault()
+    toggleChat()
+  }
+  // Ctrl+Alt+N 切换笔记面板
+  if (e.ctrlKey && e.altKey && (e.key === 'n' || e.key === 'N')) {
+    e.preventDefault()
+    toggleNotes()
+  }
+  // Ctrl+Alt+. 切换翻译面板
+  if (e.ctrlKey && e.altKey && e.key === '.') {
+    e.preventDefault()
+    toggleTranslation()
+  }
+}
+
 onMounted(() => {
   document.addEventListener('mousemove', onDragThemeButton)
   document.addEventListener('mouseup', stopDragThemeButton)
+  document.addEventListener('keydown', handleKeyboard)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onDragThemeButton)
   document.removeEventListener('mouseup', stopDragThemeButton)
+  document.removeEventListener('keydown', handleKeyboard)
 })
 </script>
 
