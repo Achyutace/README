@@ -105,3 +105,18 @@ export interface TranslationPanelState {
   isLoading: boolean
   originalText: string
 }
+
+// 多窗口翻译面板实例
+export interface TranslationPanelInstance {
+  id: string                    // 唯一ID
+  paragraphId: string           // 关联的段落ID
+  position: { x: number; y: number }
+  size: { width: number; height: number }
+  translation: string
+  isLoading: boolean
+  originalText: string
+  // 吸附相关
+  snapMode: 'none' | 'paragraph' | 'sidebar'  // 吸附模式
+  snapTargetParagraphId: string | null        // 吸附到的目标段落ID（可与原始paragraphId不同）
+  isSidebarDocked: boolean                    // 是否停靠到侧边栏
+}

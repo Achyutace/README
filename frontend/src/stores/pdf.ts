@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import type { PdfParagraph, TranslationPanelState } from '../types'
+import type { PdfParagraph, TranslationPanelState, TranslationPanelInstance } from '../types'
 
 const DEFAULT_SCALE = 1.5 // 实际缩放 150%，显示为 100%
 const HIGHLIGHTS_STORAGE_KEY = 'pdf-highlights'
@@ -61,7 +61,7 @@ export const usePdfStore = defineStore('pdf', () => {
     return allParagraphs.value[currentDocumentId.value] || []
   })
 
-  // 翻译面板状态
+  // 翻译面板状态（保留向后兼容）
   const translationPanel = ref<TranslationPanelState>({
     isVisible: false,
     paragraphId: '',
@@ -70,6 +70,12 @@ export const usePdfStore = defineStore('pdf', () => {
     isLoading: false,
     originalText: ''
   })
+
+  // 多翻译窗口实例列表
+  const translationPanels = ref<TranslationPanelInstance[]>([])
+
+  // 侧边栏停靠的翻译面板ID列表
+  const sidebarDockedPanels = ref<string[]>([])
 
   // 翻译缓存（paragraphId -> translation）
   const translationCache = ref<Record<string, string>>({})
@@ -271,10 +277,38 @@ export const usePdfStore = defineStore('pdf', () => {
     return paragraphs.value.filter(p => p.page === page)
   }
 
-  // 打开翻译面板
+  // 打开翻译面板（新版本：支持多窗口）
   function openTranslationPanel(paragraphId: string, position: { x: number; y: number }, originalText: string) {
     // 检查缓存
     const cached = translationCache.value[paragraphId]
+    
+    // 检查是否已存在该段落的翻译窗口
+    const existingPanel = translationPanels.value.find(p => p.paragraphId === paragraphId)
+    if (existingPanel) {
+      // 已存在，将其移到前面（聚焦）
+      const index = translationPanels.value.indexOf(existingPanel)
+      translationPanels.value.splice(index, 1)
+      translationPanels.value.push(existingPanel)
+      return
+    }
+    
+    // 创建新的翻译面板实例
+    const newPanel: TranslationPanelInstance = {
+      id: `tp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      paragraphId,
+      position,
+      size: { width: 420, height: 280 },
+      translation: cached || '',
+      isLoading: !cached,
+      originalText,
+      snapMode: 'none',
+      snapTargetParagraphId: null,
+      isSidebarDocked: false
+    }
+    
+    translationPanels.value.push(newPanel)
+    
+    // 同时更新旧版状态以保持兼容
     translationPanel.value = {
       isVisible: true,
       paragraphId,
@@ -285,28 +319,104 @@ export const usePdfStore = defineStore('pdf', () => {
     }
   }
 
-  // 关闭翻译面板
+  // 关闭翻译面板（旧版本兼容）
   function closeTranslationPanel() {
     translationPanel.value.isVisible = false
   }
+  
+  // 关闭指定的翻译面板
+  function closeTranslationPanelById(panelId: string) {
+    const index = translationPanels.value.findIndex(p => p.id === panelId)
+    if (index !== -1) {
+      // 从侧边栏列表中移除
+      const sidebarIndex = sidebarDockedPanels.value.indexOf(panelId)
+      if (sidebarIndex !== -1) {
+        sidebarDockedPanels.value.splice(sidebarIndex, 1)
+      }
+      translationPanels.value.splice(index, 1)
+    }
+  }
 
-  // 更新翻译面板位置
+  // 更新翻译面板位置（旧版本兼容）
   function updateTranslationPanelPosition(position: { x: number; y: number }) {
     translationPanel.value.position = position
+  }
+  
+  // 更新指定面板的位置
+  function updatePanelPosition(panelId: string, position: { x: number; y: number }) {
+    const panel = translationPanels.value.find(p => p.id === panelId)
+    if (panel) {
+      panel.position = position
+    }
+  }
+  
+  // 更新指定面板的尺寸
+  function updatePanelSize(panelId: string, size: { width: number; height: number }) {
+    const panel = translationPanels.value.find(p => p.id === panelId)
+    if (panel) {
+      panel.size = size
+    }
+  }
+  
+  // 设置面板吸附模式
+  function setPanelSnapMode(panelId: string, mode: 'none' | 'paragraph' | 'sidebar', targetParagraphId?: string) {
+    const panel = translationPanels.value.find(p => p.id === panelId)
+    if (panel) {
+      panel.snapMode = mode
+      panel.snapTargetParagraphId = targetParagraphId || null
+      panel.isSidebarDocked = mode === 'sidebar'
+      
+      // 管理侧边栏列表
+      const sidebarIndex = sidebarDockedPanels.value.indexOf(panelId)
+      if (mode === 'sidebar' && sidebarIndex === -1) {
+        sidebarDockedPanels.value.push(panelId)
+      } else if (mode !== 'sidebar' && sidebarIndex !== -1) {
+        sidebarDockedPanels.value.splice(sidebarIndex, 1)
+      }
+    }
   }
 
   // 设置翻译结果
   function setTranslation(paragraphId: string, translation: string) {
     translationCache.value[paragraphId] = translation
+    
+    // 更新旧版状态
     if (translationPanel.value.paragraphId === paragraphId) {
       translationPanel.value.translation = translation
       translationPanel.value.isLoading = false
     }
+    
+    // 更新所有匹配的面板
+    translationPanels.value.forEach(panel => {
+      if (panel.paragraphId === paragraphId) {
+        panel.translation = translation
+        panel.isLoading = false
+      }
+    })
   }
 
   // 设置翻译加载状态
   function setTranslationLoading(loading: boolean) {
     translationPanel.value.isLoading = loading
+  }
+  
+  // 设置指定面板的加载状态
+  function setPanelLoading(panelId: string, loading: boolean) {
+    const panel = translationPanels.value.find(p => p.id === panelId)
+    if (panel) {
+      panel.isLoading = loading
+    }
+  }
+  
+  // 将面板移动到最前面（聚焦）
+  function bringPanelToFront(panelId: string) {
+    const index = translationPanels.value.findIndex(p => p.id === panelId)
+    if (index !== -1 && index !== translationPanels.value.length - 1) {
+      const panel = translationPanels.value.splice(index, 1)[0]
+      if (panel) {
+        translationPanels.value.push(panel)
+      }
+    }
   }
 
   return {
@@ -361,5 +471,14 @@ export const usePdfStore = defineStore('pdf', () => {
     updateTranslationPanelPosition,
     setTranslation,
     setTranslationLoading,
+    // 多窗口翻译面板
+    translationPanels,
+    sidebarDockedPanels,
+    closeTranslationPanelById,
+    updatePanelPosition,
+    updatePanelSize,
+    setPanelSnapMode,
+    setPanelLoading,
+    bringPanelToFront,
   }
 })

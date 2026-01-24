@@ -15,7 +15,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url' // 使用 ?url �
 import { usePdfStore } from '../../stores/pdf' // 使用 Pinia 中的 PDF 状态仓库
 import { useLibraryStore } from '../../stores/library' // 使用 Pinia 中的文库状态仓库
 import TextSelectionTooltip from './TextSelectionTooltip.vue' // 导入文字选中提示组件
-import TranslationPanel from './TranslationPanel.vue' // 导入翻译面板组件
+import TranslationPanelMulti from './TranslationPanelMulti.vue' // 导入多窗口翻译面板组件
 
 GlobalWorkerOptions.workerSrc = pdfWorker // 设置 pdf.js 全局 worker 路径
 
@@ -1617,10 +1617,9 @@ onBeforeUnmount(() => {
               @click="handleParagraphMarkerClick($event, paragraph.id, paragraph.content)"
               :title="'点击翻译此段落'"
             >
+              <!-- 极简小光标：小矩形指示器 -->
               <div class="marker-icon">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-                </svg>
+                <span class="marker-chevron">›</span>
               </div>
             </div>
           </div>
@@ -1650,8 +1649,8 @@ onBeforeUnmount(() => {
       @close="closeTooltip"
     />
     
-    <!-- 翻译面板（可拖动，位于最上层） -->
-    <TranslationPanel />
+    <!-- 多窗口翻译面板（可拖动，位于最上层） -->
+    <TranslationPanelMulti />
   </div>
 </template>
 
@@ -1715,7 +1714,7 @@ onBeforeUnmount(() => {
   z-index: 5;
 }
 
-/* 段落光标样式 */
+/* 段落光标样式 - 发光 > 符号 */
 .paragraph-marker {
   z-index: 6;
 }
@@ -1724,25 +1723,47 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: white;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  width: 14px;
+  height: 14px;
   transition: all 0.2s ease;
-  opacity: 0.85;
+  opacity: 0.5;
+}
+
+.paragraph-marker .marker-chevron {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  color: rgba(100, 140, 200, 0.9);
+  line-height: 1;
+  text-shadow: 0 0 6px rgba(100, 160, 255, 0.5);
+  transition: all 0.2s ease;
 }
 
 .paragraph-marker:hover .marker-icon {
   opacity: 1;
-  transform: scale(1.15);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
+  transform: scale(1.2) translateX(2px);
 }
 
-.paragraph-marker .marker-icon svg {
-  width: 12px;
-  height: 12px;
+.paragraph-marker:hover .marker-chevron {
+  color: rgba(80, 140, 255, 1);
+  text-shadow: 
+    0 0 8px rgba(80, 160, 255, 0.8),
+    0 0 16px rgba(80, 160, 255, 0.4),
+    0 0 24px rgba(80, 160, 255, 0.2);
+}
+
+/* 夜间模式段落光标 - 更明显的发光效果 */
+:global(.dark) .paragraph-marker .marker-chevron {
+  color: rgba(140, 180, 255, 0.85);
+  text-shadow: 0 0 8px rgba(100, 160, 255, 0.6);
+}
+
+:global(.dark) .paragraph-marker:hover .marker-chevron {
+  color: rgba(160, 200, 255, 1);
+  text-shadow: 
+    0 0 10px rgba(100, 180, 255, 0.9),
+    0 0 20px rgba(100, 180, 255, 0.5),
+    0 0 30px rgba(100, 180, 255, 0.3);
 }
 
 .zooming-layer {
