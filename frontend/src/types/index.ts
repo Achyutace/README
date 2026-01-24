@@ -42,10 +42,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
-  citations?: Array<{
-    pageNumber: number
-    text: string
-  }>
+  citations?: any[] 
 }
 
 export interface RoadmapNodeData {

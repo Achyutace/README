@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, onMounted, computed } from 'vue'
+import { ref, nextTick, watch, onMounted, computed, reactive } from 'vue'
 import { useAiStore } from '../../stores/ai'
 import { useLibraryStore } from '../../stores/library'
 import { chatSessionApi } from '../../api'
@@ -17,6 +17,16 @@ const libraryStore = useLibraryStore()
 
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
+
+// --- Tooltip State ---
+// 控制引用悬浮窗的状态
+const tooltipState = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  content: null as any // 存储当前的引用数据
+})
+let tooltipTimeout: any = null
 
 // @ Menu state
 const showAtMenu = ref(false)
@@ -97,15 +107,86 @@ const md: MarkdownIt = new MarkdownIt({
   }
 } as Options)
 
-// Markdown 渲染函数
+// 渲染 Markdown 并处理引用标记
 const renderMarkdown = (content: string) => {
   if (!content) return ''
-  const rawHtml = md.render(content)
-  // 净化 HTML 防止 XSS 攻击
-  return DOMPurify.sanitize(rawHtml, {
-    ADD_TAGS: ['iframe'], // 如果需要支持 iframe (视情况而定)
-    ADD_ATTR: ['target']
+  
+  // 1. 先进行基础 Markdown 渲染
+  let html = md.render(content)
+
+  // 2. 正则替换 [n] 为带有特殊 class 和 data-id 的 span
+  // 注意：这里使用了简化的正则，避免替换代码块中的内容可能需要更复杂的逻辑，
+  // 但对于标准学术回复 [n] 格式通常足够。
+  // 替换逻辑：找到 [数字]，替换为 <span class="citation-ref ...">[数字]</span>
+  html = html.replace(/\[(\d+)\]/g, (_match, id) => {
+    return `<span class="citation-ref text-primary-600 bg-primary-50 px-1 rounded cursor-pointer font-medium hover:bg-primary-100 transition-colors select-none" data-id="${id}">[${id}]</span>`
   })
+
+  // 3. 净化 HTML，配置允许的标签和属性
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['iframe'],
+    ADD_ATTR: ['target', 'data-id', 'class'] // 关键：允许 data-id 和 class 通过净化
+  })
+}
+
+// --- Interaction Handlers ---
+
+// 处理鼠标在消息内容上的移动（用于显示 Tooltip）
+const handleMessageMouseOver = (event: MouseEvent, citations: any[]) => {
+  const target = event.target as HTMLElement
+  
+  // 如果鼠标悬停在引用标签上
+  if (target.classList.contains('citation-ref')) {
+    const id = parseInt(target.getAttribute('data-id') || '0')
+    const citationData = citations.find(c => c.id === id)
+    
+    if (citationData) {
+      if (tooltipTimeout) clearTimeout(tooltipTimeout)
+      
+      // 计算位置
+      const rect = target.getBoundingClientRect()
+      // 相对于视口的位置
+      tooltipState.x = rect.left + window.scrollX
+      tooltipState.y = rect.top + window.scrollY - 10 // 稍微向上偏移
+      tooltipState.content = citationData
+      tooltipState.visible = true
+    }
+  }
+}
+
+const handleMessageMouseOut = (event: MouseEvent) => {
+  const target = event.target as HTMLElement
+  if (target.classList.contains('citation-ref')) {
+    // 延迟隐藏，防止鼠标移向 tooltip 时瞬间消失（如果需要交互 tooltip 内容）
+    tooltipTimeout = setTimeout(() => {
+      tooltipState.visible = false
+      tooltipState.content = null
+    }, 300)
+  }
+}
+
+// 保持 tooltip 显示（当鼠标移入 tooltip 本身时）
+const handleTooltipEnter = () => {
+  if (tooltipTimeout) clearTimeout(tooltipTimeout)
+}
+
+const handleTooltipLeave = () => {
+  tooltipState.visible = false
+  tooltipState.content = null
+}
+
+// 处理点击引用（针对外部链接直接跳转）
+const handleMessageClick = (event: MouseEvent, citations: any[]) => {
+  const target = event.target as HTMLElement
+  if (target.classList.contains('citation-ref')) {
+    const id = parseInt(target.getAttribute('data-id') || '0')
+    const citationData = citations.find(c => c.id === id)
+    
+    if (citationData && citationData.source_type === 'external' && citationData.url) {
+      window.open(citationData.url, '_blank')
+    }
+    // 本地引用点击暂时不做跳转，或者可以滚动到底部列表
+  }
 }
 
 // Lifecycle
@@ -398,6 +479,42 @@ defineExpose({
 <template>
   <div class="h-full flex flex-col relative">
     
+    <!-- Tooltip Component (Global Absolute Position) -->
+    <div 
+      v-if="tooltipState.visible && tooltipState.content"
+      class="fixed z-[100] w-80 bg-white dark:bg-[#2d2d30] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 transition-opacity duration-200"
+      :style="{ left: Math.min(tooltipState.x - 20, 1024) + 'px', top: (tooltipState.y - 10) + 'px', transform: 'translateY(-100%)' }"
+      @mouseenter="handleTooltipEnter"
+      @mouseleave="handleTooltipLeave"
+    >
+      <!-- Header: Icon + Type -->
+      <div class="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-gray-400">
+        <span v-if="tooltipState.content.source_type === 'local'" class="flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          本地文档 - P{{ tooltipState.content.page || 'N/A' }}
+        </span>
+        <span v-else class="flex items-center gap-1 text-blue-500">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+          网络来源
+        </span>
+      </div>
+      
+      <!-- Title -->
+      <h4 class="font-semibold text-sm text-gray-800 dark:text-gray-100 mb-2 leading-tight">
+        {{ tooltipState.content.title }}
+      </h4>
+
+      <!-- Snippet -->
+      <p class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-black/20 p-2 rounded mb-2 border-l-2 border-primary-400 line-clamp-4 italic">
+        "{{ tooltipState.content.snippet }}"
+      </p>
+
+      <!-- Action Hint -->
+      <div v-if="tooltipState.content.source_type === 'external'" class="text-xs text-blue-600 dark:text-blue-400 flex items-center justify-end gap-1">
+        点击跳转原文 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+      </div>
+    </div>
+
     <!-- Custom Model Modal -->
     <div v-if="showCustomModelModal" class="absolute inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
       <div class="bg-white dark:bg-[#252526] rounded-xl w-full max-w-sm p-5 border border-gray-200 dark:border-gray-700">
@@ -475,14 +592,18 @@ defineExpose({
     </div>
 
     <!-- Messages Area -->
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-6">
       <template v-if="aiStore.chatMessages.length > 0">
         <div v-for="message in aiStore.chatMessages" :key="message.id" :class="[message.role === 'user' ? 'max-w-[85%] ml-auto' : 'w-full']">
-          <div v-if="message.role === 'user'" class="px-5 py-3.5 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100/80 dark:from-[#2d2d30] dark:to-[#3e3e42] text-gray-800 dark:text-gray-200 rounded-br-md border border-gray-100/50 dark:border-gray-700/50">
+          
+          <!-- User Message -->
+          <div v-if="message.role === 'user'" class="px-5 py-3.5 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100/80 dark:from-[#2d2d30] dark:to-[#3e3e42] text-gray-800 dark:text-gray-200 rounded-br-md border border-gray-100/50 dark:border-gray-700/50 shadow-sm">
             <p class="text-sm whitespace-pre-wrap leading-relaxed">{{ message.content }}</p>
           </div>
-          <!-- Assistant Message (支持 Markdown 渲染) -->
-          <div v-else class="space-y-3 pl-1 pr-4">
+          
+          <!-- Assistant Message -->
+          <div v-else class="space-y-4 pl-1 pr-4">
+            <!-- 1. Content with Citations -->
             <div 
               class="markdown-body prose prose-sm max-w-none dark:prose-invert 
                      prose-p:leading-relaxed prose-pre:bg-[#282c34] prose-pre:m-0
@@ -490,18 +611,71 @@ defineExpose({
                      prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
                      text-gray-800 dark:text-gray-200"
               v-html="renderMarkdown(message.content)"
+              @mouseover="handleMessageMouseOver($event, message.citations || [])"
+              @mouseout="handleMessageMouseOut"
+              @click="handleMessageClick($event, message.citations || [])"
             ></div>
             
-            <!-- 如果有引用来源 -->
-            <div v-if="message.citations && message.citations.length > 0" class="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700/50">
-              <span v-for="(_, idx) in message.citations" :key="idx" class="text-xs text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded cursor-pointer hover:bg-primary-100">
-                [{{ idx + 1 }}] 引用
-              </span>
+            <!-- 2. Structured Reference List (Bottom) -->
+            <div v-if="message.citations && message.citations.length > 0" class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/50">
+              <h4 class="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">参考来源</h4>
+              <div class="grid grid-cols-1 gap-2">
+                <div 
+                  v-for="cite in message.citations" 
+                  :key="cite.id"
+                  class="flex items-start gap-3 p-2 rounded-lg border border-transparent hover:border-gray-200 dark:hover:border-gray-700 hover:bg-gray-50 dark:hover:bg-[#3e3e42] transition-colors group"
+                >
+                  <!-- Index Badge -->
+                  <div class="flex-shrink-0 w-5 h-5 flex items-center justify-center text-[10px] font-bold text-primary-600 bg-primary-50 rounded mt-0.5">
+                    {{ cite.id }}
+                  </div>
+                  
+                  <!-- Content -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-0.5">
+                      <span v-if="cite.source_type === 'local'" class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">PDF</span>
+                      <span v-else class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">Web</span>
+                      
+                      <a 
+                        v-if="cite.source_type === 'external' && cite.url"
+                        :href="cite.url" 
+                        target="_blank"
+                        class="text-xs font-medium text-gray-800 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
+                      >
+                        {{ cite.title }}
+                      </a>
+                      <span v-else class="text-xs font-medium text-gray-800 dark:text-gray-200 truncate block">
+                        {{ cite.title }}
+                      </span>
+                    </div>
+                    
+                    <p class="text-xs text-gray-400 truncate">
+                      {{ cite.snippet }}
+                    </p>
+                  </div>
+
+                  <!-- Action Icon (External Link) -->
+                  <a 
+                     v-if="cite.source_type === 'external' && cite.url"
+                     :href="cite.url"
+                     target="_blank"
+                     class="flex-shrink-0 text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                     title="打开链接"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
+          
           <p class="text-xs text-gray-400 mt-1 px-1" :class="message.role === 'user' ? 'text-right' : ''">{{ message.timestamp.toLocaleTimeString() }}</p>
         </div>
-        <div v-if="aiStore.isLoadingChat" class="flex items-center gap-2 text-gray-500"><div class="flex gap-1"><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></span></div><span class="text-sm">正在思考...</span></div>
+        
+        <div v-if="aiStore.isLoadingChat" class="flex items-center gap-2 text-gray-500 p-4">
+          <div class="flex gap-1"><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></span></div>
+          <span class="text-sm">正在深度思考...</span>
+        </div>
       </template>
     </div>
 
@@ -700,5 +874,10 @@ defineExpose({
 .dark .markdown-body :not(pre) > code {
   background-color: rgba(255, 255, 255, 0.1);
   color: #ff7b72;
+}
+
+/* 引用标签悬浮效果 */
+.citation-ref:hover {
+  text-decoration: underline;
 }
 </style>

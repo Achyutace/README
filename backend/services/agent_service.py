@@ -30,22 +30,20 @@ class AgentState(TypedDict):
     user_id: str
     paper_id: str
     
-    chat_history: List[Dict]
+    is_general_chat: bool  # 标记是否为通用问题
     
+    chat_history: List[Dict]
     local_context: List[Dict]
     local_context_text: str
-    
     is_sufficient: bool
     missing_info: str
-    
     tool_calls: List[Dict]
     external_context: List[Dict]
-    
     final_response: str
     citations: List[Dict]
-    
     steps: List[str]
     current_step: str
+
 
 class AcademicAgentService:
     def __init__(self,   
@@ -87,89 +85,159 @@ class AcademicAgentService:
         """构建 LangGraph 工作流"""
         workflow = StateGraph(AgentState)
         
-        # 添加节点
-        workflow.add_node("query_translation", self._query_translation_node) # [新增] 节点0: 查询翻译
-        workflow.add_node("rag_retrieval", self._rag_retrieval_node)  # 节点1: RAG检索
-        workflow.add_node("sufficiency_judge", self._sufficiency_judge_node)  # 节点2: 评估
-        workflow.add_node("tool_planning", self._tool_planning_node)  # 节点3: 工具调用
-        workflow.add_node("synthesize", self._synthesize_node)  # 节点4: 综合生成
+        # 节点定义
+        workflow.add_node("query_translation", self._query_translation_node) # 节点0: 意图识别
+        workflow.add_node("general_chat", self._general_chat_node)         # 节点0b: 闲聊
+        workflow.add_node("rag_retrieval", self._rag_retrieval_node)       # 节点1: 本地 RAG
         
-        # 入口点为查询翻译
+        # [核心修改] 将 评估+规划+执行 合并为一个节点
+        workflow.add_node("adaptive_retrieval", self._adaptive_retrieval_node) # 节点2: 自适应补充检索
+        
+        workflow.add_node("synthesize", self._synthesize_node)             # 节点3: 综合生成
+        
+        # 设置入口
         workflow.set_entry_point("query_translation")
         
-        workflow.add_edge("query_translation", "rag_retrieval")
-        workflow.add_edge("rag_retrieval", "sufficiency_judge")
-        
-        # 条件边
+        # 意图路由 
         workflow.add_conditional_edges(
-            "sufficiency_judge",
-            self._should_use_tools,
+            "query_translation",
+            self._route_query,
             {
-                "use_tools": "tool_planning",
-                "sufficient": "synthesize"
+                "academic": "rag_retrieval",
+                "general": "general_chat"
             }
         )
         
-        workflow.add_edge("tool_planning", "synthesize")
+        workflow.add_edge("general_chat", END)
+        
+        # 主流程：RAG -> 自适应检索 -> 综合 -> 结束
+        workflow.add_edge("rag_retrieval", "adaptive_retrieval")
+        workflow.add_edge("adaptive_retrieval", "synthesize")
         workflow.add_edge("synthesize", END)
         
         return workflow.compile()
 
-    # ==================== 查询翻译节点 ====================
+    # ====================  路由逻辑 ====================
+    def _route_query(self, state: AgentState) -> str:
+        """根据翻译结果决定下一步走向"""
+        if state.get("is_general_chat", False):
+            return "general"
+        return "academic"
+    # ====================  查询翻译节点 ====================
     def _query_translation_node(self, state: AgentState) -> AgentState:
-        """节点 0: 查询翻译与优化"""
+        """节点 0: 查询翻译与优化 + 意图识别"""
         steps = state.get('steps', [])
-        steps.append('查询优化')
+        steps.append('意图识别与查询优化')
         
         user_query = state['user_query']
         
-        # 如果没有 LLM，直接使用原始查询
         if not self.has_llm:
+            # Demo 模式默认视为学术问题
             return {
                 **state,
                 'steps': steps,
                 'current_step': '跳过翻译(Demo模式)...',
-                'retrieval_query': user_query
+                'retrieval_query': user_query,
+                'is_general_chat': False
             }
-
-        # 构建 Prompt
-        # 目标：将用户的中文问题转换为适合在英文学术论文中检索的英文关键词/短句
+        # Prompt 
         prompt = f"""
-你是一个学术搜索优化专家。用户的原始问题可能是中文，而目标检索库是英文学术论文。
-请将用户的问题转化为**英文**的检索查询（Search Query）。
-
-要求：
-1. 翻译为英文。
-2. 提取核心关键词，去除无关的语气词。
-3. 保持学术术语的准确性。
-4. 直接输出优化后的英文查询字符串，不要包含任何解释或 JSON 格式。
-
-用户问题：{user_query}
-英文检索词：
+你是一个专业的学术检索查询生成专家。你的任务是将用户的输入转化为高效的英文学术检索词（Search Query），以便在英文论文库中进行 RAG 检索。
+请严格按照以下逻辑处理：
+1. **意图识别（关键分支）**：
+   - 首先判断用户输入是否具有学术/技术检索价值。
+   - 如果输入属于闲聊、问候、无意义字符或完全非学术的话题（例如：“你好”、“你是谁”、“讲个笑话”、“今天天气”），请直接输出：N/A
+2. **翻译与重构（如果是学术问题）**：
+   - 将用户问题翻译为专业的**英文**学术术语。
+   - **去停用词**：去除 "How to", "Help me find", "What is", "about" 等无关词汇。
+   - **关键词提取**：只保留核心实体、技术名词和研究方向。
+   - **格式优化**：输出为适合检索的关键词字符串（空格分隔）。
+3. **输出约束**：
+   - 仅输出最终的英文查询字符串或 "N/A"。
+   - 不要包含任何解释、前缀、Markdown 格式或标点符号。
+**示例：**
+User: 你好
+Agent: N/A
+User: 帮我找一下关于Transformer在时间序列预测中的改进模型
+Agent: transformer time series forecasting improved models
+User: 什么是低秩适应（LoRA）？
+Agent: low-rank adaptation LoRA parameter efficient fine-tuning
+User: {user_query}
+Agent:
 """
+        translated_query = user_query
+        is_general_chat = False
+        step_desc = ""
         try:
             response = self.llm.invoke([HumanMessage(content=prompt)])
-            translated_query = response.content.strip()
+            content = response.content.strip()
             
-            # 简单的后处理，防止 LLM 啰嗦 TODO
-            if "Here is" in translated_query or ":" in translated_query:
-                 # 如果 LLM 返回了 "Here is the translation: keyword"，尝试提取冒号后的内容
-                 parts = translated_query.split(":")
-                 if len(parts) > 1:
-                     translated_query = parts[-1].strip()
-
-            current_step_desc = f'已将问题优化为检索词: "{translated_query}"'
+            # 清洗数据，防止 LLM 输出多余标点
+            content = content.replace('"', '').replace("'", "")
+            if content == "N/A":
+                # 识别为闲聊
+                is_general_chat = True
+                step_desc = "识别为非学术/闲聊意图，转入通用对话模式"
+                translated_query = "" # 闲聊不需要检索词
+            else:
+                # 识别为学术问题
+                translated_query = content
+                step_desc = f'已将问题优化为检索词: "{translated_query}"'
             
         except Exception as e:
             print(f"Translation error: {e}")
-            translated_query = user_query # 降级处理
-            current_step_desc = '翻译服务异常，使用原始查询'
-
+            step_desc = '翻译服务异常，使用原始查询'
         return {
             **state,
             'steps': steps,
-            'current_step': current_step_desc,
-            'retrieval_query': translated_query
+            'current_step': step_desc,
+            'retrieval_query': translated_query,
+            'is_general_chat': is_general_chat
+        }
+    # ==================== 通用闲聊节点 ====================
+    def _general_chat_node(self, state: AgentState) -> AgentState:
+        """节点 0b: 通用闲聊处理 (不查库)"""
+        steps = state.get('steps', [])
+        steps.append('通用对话生成')
+        
+        user_query = state['user_query']
+        chat_history = state.get('chat_history', [])
+        
+        if not self.has_llm:
+            return {
+                **state,
+                'steps': steps,
+                'current_step': '通用对话(Demo)...',
+                'final_response': f"你好！我是学术助手。(Demo回覆: {user_query})",
+                'citations': []
+            }
+        # 简单的对话 Prompt
+        system_prompt = "你是一个专业的学术论文阅读助手。虽然用户当前的问题与特定的学术检索无关，但请保持专业、友好、积极的态度进行回答。"
+        
+        messages = [SystemMessage(content=system_prompt)]
+        
+        # 加入历史记录 (最近 3 轮即可，避免上下文过长)
+        for msg in chat_history[-3:]:
+            if msg['role'] == 'user':
+                messages.append(HumanMessage(content=msg['content']))
+            elif msg['role'] == 'assistant':
+                messages.append(AIMessage(content=msg['content']))
+        
+        messages.append(HumanMessage(content=user_query))
+        
+        response_text = ""
+        try:
+            response = self.llm.invoke(messages)
+            response_text = response.content
+        except Exception as e:
+            response_text = "抱歉，我现在无法处理您的请求。"
+            print(f"General chat error: {e}")
+        return {
+            **state,
+            'steps': steps,
+            'current_step': '已生成通用回复',
+            'final_response': response_text,
+            'citations': [] # 闲聊没有引用
         }
 
     # ==================== RAG 检索节点 ====================
@@ -212,273 +280,245 @@ class AcademicAgentService:
             'local_context_text': '\n'.join(context_parts) if context_parts else '未找到相关内容'
         }
     
-    def _sufficiency_judge_node(self, state: AgentState) -> AgentState:
-        """节点 2: 相关性与充分性评估"""
+    # ==================== 补充检索节点 ====================
+    def _adaptive_retrieval_node(self, state: AgentState) -> AgentState:
+        """节点 2: 自适应补充检索 (评估 + 工具规划 + 执行)"""
         steps = state.get('steps', [])
-        steps.append('信息充分性评估')
-        
-        if not self.has_llm:
-            # Demo 模式：简单判断
-            is_sufficient = len(state['local_context']) >= 1
-            return {
-                **state,
-                'steps': steps,
-                'current_step': '正在评估信息是否充足...',
-                'is_sufficient': is_sufficient,
-                'missing_info': '' if is_sufficient else '需要更多外部信息'
-            }
-        
-        # 使用 LLM 判断
-        judge_prompt = f"""
-你是一个信息充分性评估专家。请根据用户的问题和检索到的本地上下文，判断信息是否足够回答问题。
-
-用户问题：
-{state['user_query']}
-
-本地上下文：
-{state['local_context_text'][:3000]} 
-
-请判断：
-1. 如果本地上下文包含足够的信息可以完整、准确地回答用户问题，输出 JSON：{{"sufficient": true, "missing": ""}}
-2. 如果本地上下文不足以回答问题，输出 JSON：{{"sufficient": false, "missing": "缺少的信息的具体描述"}}
-
-只输出 JSON，不要有其他内容，输出的缺少的信息尽量简洁。
-"""
-        
-        try:
-            response = self.llm.invoke([HumanMessage(content=judge_prompt)])
-            # 清理可能的 markdown 标记
-            content = response.content.strip()
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
-                
-            result = json.loads(content)
-            
-            return {
-                **state,
-                'steps': steps,
-                'current_step': '正在评估信息是否充足...',
-                'is_sufficient': result.get('sufficient', False),
-                'missing_info': result.get('missing', '')
-            }
-        
-        except Exception as e:
-            print(f"Judge error: {e}")
-            return {
-                **state,
-                'steps': steps,
-                'current_step': '评估出错，默认继续...',
-                'is_sufficient': True,  # 出错时默认认为足够
-                'missing_info': ''
-            }
-    
-    def _should_use_tools(self, state: AgentState) -> str:
-        """条件判断：是否需要使用工具"""
-        return "sufficient" if state['is_sufficient'] else "use_tools"
-    
-    def _tool_planning_node(self, state: AgentState) -> AgentState:
-        """节点 3: 工具规划与执行"""
-        steps = state.get('steps', [])
-        steps.append('工具调用')
         
         if not self.has_llm:
             # Demo 模式
+            steps.append('自适应检索(Demo)')
             return {
                 **state,
                 'steps': steps,
-                'current_step': '信息不足，正在使用外部工具(Demo)...',
-                'external_context': self._demo_tool_execution(state)
+                'current_step': '跳过外部检索(Demo)...',
+                'external_context': [],
+                'is_sufficient': True
             }
+
+        user_query = state['user_query']
+        local_context = state['local_context_text']
         
-        # 使用 LLM 规划工具调用（支持多个工具）
-        tool_prompt = f"""
-你是一个工具调用规划专家。用户的问题缺少某些信息，需要使用工具获取。
+        # 构建 Prompt：要求 LLM 同时输出“是否充足”和“如果不足需要的工具调用”
+        prompt = f"""
+你是一个专业的学术研究助手。你的任务是根据用户的提问和已经检索到的本地文档内容，决定是否需要进行额外的外部搜索。
 
 用户问题：
-{state['user_query']}
+{user_query}
 
-缺少的信息：
-{state['missing_info']}
+本地文档内容（RAG结果）：
+{local_context[:3000]}
+
+请仔细分析：
+1. 本地文档是否足以全面、准确地回答用户问题？
+2. 如果不足，需要补充哪些信息？通过什么工具获取？
 
 可用工具：
-1. web_search: 搜索互联网获取最新信息、背景知识、概念定义或实时数据
-   - 适用场景：查找基础概念、最新新闻、技术文档、通用知识
-   - 返回：网页标题、内容摘要、来源链接
+- web_search: 搜索互联网 (通用概念、最新新闻、代码文档)
+- search_papers: 搜索学术数据库 (ArXiv/Semantic Scholar 查找相关论文)
 
-2. search_papers: 在学术数据库（ArXiv、Semantic Scholar）中搜索论文
-   - 适用场景：查找相关研究、了解学术进展、获取论文详情
-   - 返回：论文标题、作者、摘要、发表日期、引用数、相关性评分、PDF链接
-   - 支持：自然语言查询、ArXiv分类（如 'cat:cs.CL'）、标题搜索（如 'ti:"transformer"'）
-
-请根据缺失的信息类型选择合适的工具（可以选择多个），并提供精确的查询参数。
-
-输出 JSON 格式（支持单个或多个工具）：
+请输出 JSON 格式：
 {{
-    "tools": [
-        {{"tool": "工具名称1", "query": "查询字符串1"}},
-        {{"tool": "工具名称2", "query": "查询字符串2"}}
+    "status": "sufficient" 或 "insufficient",
+    "reason": "判断的理由",
+    "tool_calls": [  // 如果 status 为 sufficient，此项为空列表
+        {{"tool": "web_search" 或 "search_papers", "query": "具体的查询关键词"}},
+        ...
     ]
 }}
-
-只输出 JSON，不要有其他内容。
 """
-        
+        steps.append('评估与补充检索')
         external_context = []
-        tool_descriptions = []
-        
+        is_sufficient = True
+        current_step_desc = "信息充足，无需外部检索"
+
         try:
-            # LLM 决定使用哪些工具以及如何调用
-            response = self.llm.invoke([HumanMessage(content=tool_prompt)])
+            # 1. 调用 LLM 做决策
+            response = self.llm.invoke([HumanMessage(content=prompt)])
             
+            # 解析 JSON
             content = response.content.strip()
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
-                
-            tool_plan = json.loads(content)
+            if content.startswith("```"):
+                content = content.split("```json")[1].split("```")[0].strip() if "json" in content else content.split("```")[1].strip()
             
-            # 支持旧格式（单个工具）和新格式（多个工具）
-            tools_to_execute = []
-            if 'tools' in tool_plan:
-                # 新格式：多个工具
-                tools_to_execute = tool_plan['tools']
-            elif 'tool' in tool_plan:
-                # 旧格式：单个工具，转换为列表
-                tools_to_execute = [{'tool': tool_plan['tool'], 'query': tool_plan['query']}]
+            decision = json.loads(content)
             
-            # 执行所有规划的工具
-            for tool_item in tools_to_execute:
-                tool_name = tool_item.get('tool')
-                query = tool_item.get('query')
+            # 2. 根据决策行动
+            if decision.get("status") == "insufficient":
+                is_sufficient = False
+                tool_calls = decision.get("tool_calls", [])
                 
-                if not tool_name or not query:
-                    continue
+                tool_logs = []
                 
-                try:
-                    if tool_name == 'web_search':
-                        # 网络搜索
-                        results = self.web_search.search(query)
-                        external_context.extend(results)
-                        tool_descriptions.append(f'网络搜索: {query}')
+                # 3. 如果不足，执行工具
+                for call in tool_calls:
+                    tool_name = call.get("tool")
+                    query = call.get("query")
                     
-                    elif tool_name == 'search_papers':
-                        # ArXiv 论文搜索
-                        results = self.paper_discovery.search_papers(query)
-                        external_context.extend(results)
-                        tool_descriptions.append(f'论文搜索: {query}')
-                    
-                    else:
-                        print(f"Unknown tool: {tool_name}")
+                    if not tool_name or not query: 
+                        continue
+                        
+                    try:
+                        if tool_name == 'web_search':
+                            results = self.web_search.search(query)
+                            external_context.extend(results)
+                            tool_logs.append(f"Web: {query}")
+                            
+                        elif tool_name == 'search_papers':
+                            results = self.paper_discovery.search_papers(query)
+                            external_context.extend(results)
+                            tool_logs.append(f"Paper: {query}")
+                            
+                    except Exception as t_err:
+                        print(f"Tool execution failed: {t_err}")
                 
-                except Exception as tool_error:
-                    print(f"Tool {tool_name} execution error: {tool_error}")
-                    tool_descriptions.append(f'{tool_name} 执行失败')
+                if tool_logs:
+                    current_step_desc = f"补充检索执行中: {', '.join(tool_logs)}"
+                else:
+                    current_step_desc = "需要补充检索，但工具规划为空"
             
-            # 构建状态描述
-            if tool_descriptions:
-                current_step_desc = f'已完成 {len(tool_descriptions)} 个工具调用: {", ".join(tool_descriptions)}'
             else:
-                current_step_desc = '工具调用完成，但未获取到有效结果'
-            
+                # 信息充足
+                current_step_desc = "本地信息充足，跳过外部检索"
+
         except Exception as e:
-            # 工具执行出错，降级到 demo 模式
-            print(f"Tool planning error: {e}")
-            import traceback
-            traceback.print_exc()
-            external_context = self._demo_tool_execution(state)
-            current_step_desc = '工具规划出错，使用模拟数据'
-        
+            print(f"Adaptive retrieval error: {e}")
+            current_step_desc = "自适应检索模块出错，使用现有信息"
+
         return {
             **state,
             'steps': steps,
             'current_step': current_step_desc,
-            'external_context': external_context
+            'is_sufficient': is_sufficient,
+            'external_context': external_context,
+            'tool_calls': decision.get("tool_calls", []) if 'decision' in locals() else []
         }
     
-    def _demo_tool_execution(self, state: AgentState) -> List[Dict]:
-        """Demo 模式的工具执行"""
-        return [
-            {
-                'title': '外部搜索结果',
-                'snippet': f'根据"{state["user_query"]}"的外部搜索，找到了相关信息...',
-                'source': 'demo'
-            }
-        ]
-    
     def _synthesize_node(self, state: AgentState) -> AgentState:
-        """节点 4: 综合生成"""
+        """节点 3: 综合生成 (支持 JSON 格式引用)"""
         steps = state.get('steps', [])
         steps.append('综合生成答案')
         
-        if not self.has_llm:
-            # Demo 模式
-            return {
-                **state,
-                'steps': steps,
-                'current_step': '正在生成最终回答(Demo)...',
-                'final_response': self._demo_response(state),
-                'citations': self._extract_citations(state)
-            }
-        
-        # 构建综合 prompt
+        # --- 1. 准备上下文 (关键：必须包含元数据供 LLM 提取) ---
+        # 格式化本地上下文，带上 ID 方便 LLM 引用
+        local_context_str = ""
+        for i, item in enumerate(state.get('local_context', []), 1):
+            # 确保 page 和 section 存在
+            page = item.get('page', item.get('metadata', {}).get('page', 'N/A'))
+            section = item.get('section', item.get('metadata', {}).get('section', '未知章节'))
+            local_context_str += f"【本地文档-{i}】(页码: {page}, 章节: {section}):\n{item.get('parent_content', '')}\n\n"
+
+        # 格式化外部上下文
+        external_context_str = ""
+        if state.get('external_context'):
+            # 复用之前的格式化逻辑，或者稍微简化，确保带上 URL
+            for i, item in enumerate(state.get('external_context', [])[:5], 1): # 限制前5条
+                title = item.get('title', '未命名')
+                url = item.get('url', '')
+                snippet = item.get('snippet', item.get('abstract', ''))
+                external_context_str += f"【外部来源-{i}】(标题: {title}, 链接: {url}):\n{snippet}\n\n"
+
+        # --- 2. 构建 Prompt ---
         synthesis_prompt = f"""
-你是一个学术论文阅读助手。请根据本地文档和（如果有的话）外部信息，回答用户的问题。
+你是一个专业的学术论文阅读助手。请根据提供的资料回答用户问题。
 
 用户问题：
 {state['user_query']}
 
-本地文档内容：
-{state['local_context_text'][:4000]}
+=== 资料区域 ===
+{local_context_str}
+{external_context_str}
+==============
+
+**任务要求**：
+1. **综合回答**：使用 Markdown 格式回答问题。回答中提到的每一个观点，**必须**在句子末尾标注引用来源，格式为 `[n]` (例如 `[1]`, `[2]`)。
+2. **结构化引用**：将所有对应的引用来源整理为 JSON 数据。
+3. **严格格式**：**只输出一个纯 JSON 对象**，不要包含 markdown 代码块标记（如 ```json），不要包含其他废话。
+
+**JSON 输出结构定义**：
+{{
+    "answer": "你的回答文本，包含 [1] 这样的标记...",
+    "citations": [
+        {{
+            "id": 1,                   // 对应文中的 [1]
+            "source_type": "local",    // 必须是 "local" 或 "external"
+            "title": "章节标题或网页标题",
+            "snippet": "引用的原文片段(简短)",
+            "page": "12",              // 如果是 local，填页码；如果是 external，填 null
+            "url": "http://..."        // 如果是 external，填链接；如果是 local，填 null
+        }}
+    ]
+}}
 """
         
-        if state.get('external_context'):
-            external_text = self._format_external_context(state['external_context'])
-            synthesis_prompt += f"""
+        if not self.has_llm:
+            return self._demo_synthesize(state)
 
-外部搜索结果：
-{external_text}
-"""
-        
-        synthesis_prompt += """
+        final_response_text = ""
+        citations_json = []
 
-请提供详细、准确的回答，并在引用信息时明确标注来源：
-- 对于本地文档的引用，使用 [本地文档: 页X, 章节Y]
-- 对于外部信息的引用，使用 [外部来源: 标题]
-
-回答：
-"""
-        
-        final_response = ""
         try:
-            # 添加对话历史
-            messages = []
-            for msg in state.get('chat_history', [])[-5:]:  # 最近5轮
-                if msg['role'] == 'user':
-                    messages.append(HumanMessage(content=msg['content']))
-                else:
-                    messages.append(AIMessage(content=msg['content']))
+            # --- 3. 调用 LLM ---
+            response = self.llm.invoke([HumanMessage(content=synthesis_prompt)])
+            content = response.content.strip()
+
+            # --- 4. 解析 JSON (增强健壮性) ---
+            # 去除可能的 Markdown 标记
+            if content.startswith("```json"):
+                content = content.split("```json")[1]
+            if content.endswith("```"):
+                content = content.rsplit("```", 1)[0]
+            content = content.strip()
+
+            data = json.loads(content)
             
-            # 添加当前问题和上下文
-            messages.append(HumanMessage(content=synthesis_prompt))
-            
-            response = self.llm.invoke(messages)
-            final_response = response.content
-        
+            final_response_text = data.get("answer", "")
+            citations_json = data.get("citations", [])
+
+        except json.JSONDecodeError:
+            print("JSON Parsing failed, falling back to raw text.")
+            # 降级处理：如果在回答中包含了 JSON 但解析失败，尝试提取文本部分
+            final_response_text = content 
+            citations_json = [] 
         except Exception as e:
-            # 生成出错，降级到 demo 模式
-            print(f"Synthesis error: {e}")
-            final_response = self._demo_response(state)
-            
+            print(f"Synthesize error: {e}")
+            final_response_text = "抱歉，生成答案时发生错误。"
+
         return {
             **state,
             'steps': steps,
-            'current_step': '正在生成最终回答...',
-            'final_response': final_response,
-            'citations': self._extract_citations(state)
+            'current_step': '回答生成完毕',
+            'final_response': final_response_text,
+            'citations': citations_json # 现在这里是结构化的 JSON 数据
         }
+
+    def _demo_synthesize(self, state):
+        """Demo 模式的模拟返回"""
+        return {
+            **state,
+            'steps': state.get('steps', []) + ['综合生成(Demo)'],
+            'current_step': '完成',
+            'final_response': f"这是一个关于 '{state['user_query']}' 的演示回答。我们发现了一些有趣的点 [1]。并且外部搜索也证实了这一点 [2]。",
+            'citations': [
+                {
+                    "id": 1,
+                    "source_type": "local",
+                    "title": "Introduction",
+                    "snippet": "Transformers are powerful...",
+                    "page": "1",
+                    "url": None
+                },
+                {
+                    "id": 2,
+                    "source_type": "external",
+                    "title": "Attention is all you need",
+                    "snippet": "Abstract of the paper...",
+                    "page": None,
+                    "url": "https://arxiv.org/abs/1706.03762"
+                }
+            ]
+        }
+
     
     def _format_external_context(self, external_context: List[Dict]) -> str:
         """格式化外部上下文"""
