@@ -1,33 +1,60 @@
 <script setup lang="ts">
-// ------------------------- 导入依赖与笔记管理 -------------------------
-// 引入 Vue 响应式 API、文库 store 与笔记 API，以及内部编辑器组件
+/**
+ * NotesPanel.vue
+ * 说明：该文件实现笔记列表（卡片式）的显示、编辑、创建与删除逻辑。
+ * - 支持在当前打开的文档（PDF）下加载并展示笔记
+ * - 支持本地临时笔记（未保存）与数据库中持久笔记的混合管理
+ * - 编辑时可使用富文本/渲染模式（NoteEditor）或源码（Raw Markdown）模式
+ */
+
+// ------------------------- 导入与初始化 -------------------------
+// 使用 Vue 的 Composition API
 import { ref, watch, nextTick } from 'vue'
+// 引入应用级的 store，用于获取当前文档（pdf）信息
 import { useLibraryStore } from '../../stores/library'
+// 与后端交互的笔记 API 和类型定义
 import { notesApi, type Note } from '../../api'
+// 内部使用的编辑器组件（基于 Tiptap）
 import NoteEditor from './NoteEditor.vue'
 
+// ------------------------- 数据类型定义（TypeScript） -------------------------
+/**
+ * NoteCard
+ * - 用于在 UI 中表示一条笔记卡片的数据结构
+ * - id 可以是数据库自增 ID（number）或本地临时 ID（string）
+ */
 interface NoteCard {
-  id: string | number  // 可以是本地临时ID（string）或数据库ID（number）
-  title: string
-  content: string
-  isEditing: boolean
-  isCollapsed: boolean
-  showRawMd?: boolean
-  createdAt: number
-  isLocal?: boolean  // 标记是否为本地临时笔记（未保存到数据库）
+  id: string | number  // 本地临时ID（string，如 temp-...）或数据库ID（number）
+  title: string        // 笔记标题
+  content: string      // 笔记正文（Markdown）
+  isEditing: boolean   // 是否处于编辑模式
+  isCollapsed: boolean // 在已完成（非编辑）状态下是否折叠显示只读预览
+  showRawMd?: boolean  // 编辑模式下是否显示原始 Markdown 文本编辑器
+  createdAt: number    // 创建时间的时间戳（用于 UI 排序或展示）
+  isLocal?: boolean    // 是否为本地临时笔记（尚未保存到后端）
 }
 
-const libraryStore = useLibraryStore()
-const cards = ref<NoteCard[]>([])
-const isLoading = ref(false)
-const containerRef = ref<HTMLElement | null>(null)
+// ------------------------- 响应式状态 -------------------------
+const libraryStore = useLibraryStore()        // 读取当前文档 id 等信息
+const cards = ref<NoteCard[]>([])             // 卡片列表（UI 数据源）
+const isLoading = ref(false)                 // 加载状态（用于展示加载动画等）
+const containerRef = ref<HTMLElement | null>(null) // 卡片列表容器的 DOM 引用（用于滚动）
 
-// Generate unique ID for temporary notes
+// ------------------------- 工具函数 -------------------------
+/**
+ * 生成临时 ID
+ * 用于本地新建的笔记，在保存到后端前用字符串 ID 占位
+ */
 function generateTempId() {
   return `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`
 }
 
-// Load notes from database when document changes
+// ------------------------- 与后端交互：加载笔记 -------------------------
+/**
+ * 从数据库加载当前文档对应的笔记列表，并转换为 NoteCard
+ * - 当没有 currentDocument 时清空 cards
+ * - 捕获并打印错误以便查错
+ */
 async function loadNotesFromDB() {
   if (!libraryStore.currentDocument?.id) {
     cards.value = []
@@ -36,7 +63,9 @@ async function loadNotesFromDB() {
   
   isLoading.value = true
   try {
+    // 请求后端 API：根据当前文档 id 获取笔记
     const response = await notesApi.getNotes(libraryStore.currentDocument.id)
+    // 将后端返回的 Note 转换为 UI 使用的 NoteCard 格式
     cards.value = response.notes.map((note: Note) => ({
       id: note.id,
       title: note.title || '',
@@ -48,6 +77,7 @@ async function loadNotesFromDB() {
       isLocal: false
     }))
   } catch (error) {
+    // 加载失败时清空并打印错误，避免残留旧数据影响展示
     console.error('Failed to load notes from database:', error)
     cards.value = []
   } finally {
@@ -55,7 +85,13 @@ async function loadNotesFromDB() {
   }
 }
 
-// Watch document changes and load notes
+// ------------------------- 监听：文档切换时刷新笔记 -------------------------
+/**
+ * 监听当前文档的 id 变化
+ * - newId 存在时加载对应笔记
+ * - 否则清空笔记列表
+ * - immediate: true 确保组件初始化时立即执行一次
+ */
 watch(() => libraryStore.currentDocument?.id, (newId) => {
   if (newId) {
     loadNotesFromDB()
@@ -64,35 +100,47 @@ watch(() => libraryStore.currentDocument?.id, (newId) => {
   }
 }, { immediate: true })
 
-// Save note to database
+// ------------------------- 保存到后端 -------------------------
+/**
+ * 保存笔记到数据库
+ * - 如果 card.isLocal 为 true：创建笔记并替换临时 id
+ * - 否则（存在数据库 id 的情况）进行更新
+ * - 抛出异常由调用方处理（例如恢复编辑状态）
+ */
 async function saveNoteToDB(card: NoteCard) {
   if (!libraryStore.currentDocument?.id) return
   
   try {
     if (card.isLocal) {
-      // 新建笔记
+      // 新建笔记：发送 pdfId、title、content
       const response = await notesApi.createNote({
         pdfId: libraryStore.currentDocument.id,
         title: card.title,
         content: card.content
       })
-      // 更新卡片ID为数据库ID
+      // 将本地临时 ID 更新为后端返回的数据库 ID，并标记为已持久化
       card.id = response.id
       card.isLocal = false
     } else if (typeof card.id === 'number') {
-      // 更新现有笔记
+      // 更新笔记
       await notesApi.updateNote(card.id, {
         title: card.title,
         content: card.content
       })
     }
   } catch (error) {
+    // 上层调用会根据异常恢复编辑状态或提示用户
     console.error('Failed to save note to database:', error)
     throw error
   }
 }
 
-// Add new card (temporary, will be saved to DB when editing is done)
+// ------------------------- 新建与删除 -------------------------
+/**
+ * 新增临时卡片（处于编辑状态）
+ * - 仅在 UI 层创建本地记录，保存时再写入后端
+ * - 新建后自动滚动到底部以方便继续输入
+ */
 function addCard() {
   const newCard: NoteCard = {
     id: generateTempId(),
@@ -106,13 +154,13 @@ function addCard() {
   }
   cards.value.push(newCard)
   nextTick(() => {
+    // 平滑滚动至容器底部，提升 UX
     containerRef.value?.scrollTo({ top: containerRef.value.scrollHeight, behavior: 'smooth' })
   })
 }
 
-// Delete card from database and local state
+// ------------------------- 删除卡片 -------------------------
 async function deleteCard(id: string | number) {
-  // 如果是数据库笔记，先删除数据库中的记录
   if (typeof id === 'number') {
     try {
       await notesApi.deleteNote(id)
@@ -121,72 +169,84 @@ async function deleteCard(id: string | number) {
       return
     }
   }
-  // 从本地状态中移除
+  // 本地状态移除卡片
   cards.value = cards.value.filter(c => c.id !== id)
 }
 
-// Toggle edit mode and save when exiting edit mode
+// ------------------------- 编辑状态切换与保存 -------------------------
+/**
+ * 切换编辑模式
+ * - 从编辑->非编辑时触发保存操作（保存失败则恢复为编辑模式）
+ */
 async function toggleEdit(card: NoteCard) {
   const wasEditing = card.isEditing
   card.isEditing = !card.isEditing
   
-  // 如果退出编辑模式，保存到数据库
   if (wasEditing && !card.isEditing) {
     try {
       await saveNoteToDB(card)
     } catch (error) {
-      // 保存失败，恢复编辑模式
+      // 保存失败时恢复编辑，避免用户丢失输入
       card.isEditing = true
     }
   }
 }
 
-// Toggle collapse state (no need to save to DB)
+// ------------------------- UI 小工具 -------------------------
+/**
+ * 切换折叠状态（只影响 UI 展示，无需持久化）
+ */
 function toggleCollapse(card: NoteCard, event: Event) {
+  // 阻止冒泡，避免触发卡片的整体点击（切换到编辑）
   event.stopPropagation()
   card.isCollapsed = !card.isCollapsed
 }
 
-// Toggle raw markdown view (no need to save to DB)
+/**
+ * 切换源码模式（编辑时在 Markdown 文本框与富文本渲染器之间切换）
+ */
 function toggleRawMd(card: NoteCard) {
   card.showRawMd = !card.showRawMd
 }
 
-// Update card (just update local state, no auto-save)
-// Saving happens when exiting edit mode via toggleEdit
+/**
+ * 本函数仅用于触发本地状态更新（例如 v-model 双向绑定时调用）
+ * 真正的持久化保存在退出编辑时触发
+ */
 function updateCard() {
   // 仅更新本地状态，不触发保存
-  // 保存会在退出编辑模式时通过 toggleEdit 触发
 }
 
-// Get first line of content
+/**
+ * 获取文本的首行（用于折叠时显示摘要）
+ * - 移除一些常见的 Markdown 标记作为简化的预览
+ */
 function getFirstLine(text: string): string {
   if (!text) return ''
-  // 移除 markdown 符号取纯文本预览
   const cleanText = text.replace(/[#*`]/g, '') 
   const firstLine = cleanText.split('\n')[0] || ''
   return firstLine
 }
 
-// Auto resize textarea
+// ------------------------- 文本域自适应高度 -------------------------
 function autoResize(target: HTMLTextAreaElement) {
   target.style.height = 'auto'
   target.style.height = target.scrollHeight + 'px'
 }
 
-// Directive to adjust height on mount
+// 指令：在 mounted / updated 时自动调整高度
 const vAutoHeight = {
   mounted: (el: HTMLTextAreaElement) => autoResize(el),
   updated: (el: HTMLTextAreaElement) => autoResize(el)
 }
 
-// Handle textarea input
+// 文本框输入处理：更新本地状态并自适应高度
 function handleInput(event: Event) {
   updateCard()
   autoResize(event.target as HTMLTextAreaElement)
 }
 
-// Expose addCard for parent component
+// 将 addCard 暴露给父组件（如侧栏或工具条调用新建功能）
 defineExpose({ addCard })
 </script>
 
@@ -378,12 +438,10 @@ defineExpose({ addCard })
     @apply text-blue-600 dark:text-blue-400 hover:underline cursor-pointer;
   }
   
-  /* Tiptap 特有的选中样式 */
   .ProseMirror-selectednode {
     @apply outline outline-2 outline-blue-500;
   }
 
-  /* 只读模式下隐藏光标 */
   .ProseMirror[contenteditable="false"] {
     @apply cursor-default;
   }

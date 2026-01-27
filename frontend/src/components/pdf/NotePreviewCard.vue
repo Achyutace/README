@@ -1,59 +1,68 @@
 <script setup lang="ts">
 // ------------------------- 导入依赖与子组件 -------------------------
-// 引入 Vue 响应式 API、PDF store 以及内部使用的子组件
+// 引入 Vue 的响应式 API（ref、computed、watch），用于管理组件状态和响应式数据
 import { ref, computed, watch } from 'vue'
+// 引入 PDF store，用于管理 PDF 相关的状态和数据
 import { usePdfStore } from '../../stores/pdf'
+// 引入 NoteEditor 组件，用于渲染笔记内容
 import NoteEditor from '../notes/NoteEditor.vue'
 
+// 获取 PDF store 的实例，用于访问和修改 PDF 相关状态
 const pdfStore = usePdfStore()
 
-// 拖动状态
-const isDragging = ref(false)
-const dragOffset = ref({ x: 0, y: 0 })
+// 定义拖动相关的响应式状态变量
+const isDragging = ref(false)  // 标记当前是否正在拖动卡片
+const dragOffset = ref({ x: 0, y: 0 })  // 存储拖动时的鼠标偏移量，用于计算新位置
 
-// 从 store 获取数据
-const isVisible = computed(() => pdfStore.notePreviewCard.isVisible)
-const note = computed(() => pdfStore.notePreviewCard.note)
-const position = computed(() => pdfStore.notePreviewCard.position)
+// 从 PDF store 中获取计算属性，用于响应式地获取卡片的可见性、笔记数据和位置
+const isVisible = computed(() => pdfStore.notePreviewCard.isVisible)  // 卡片是否可见
+const note = computed(() => pdfStore.notePreviewCard.note)  // 当前预览的笔记对象
+const position = computed(() => pdfStore.notePreviewCard.position)  // 卡片在屏幕上的位置
 
-// 拖动开始
+// 拖动开始函数，当用户按下鼠标时触发
 function startDrag(e: MouseEvent) {
-  isDragging.value = true
+  isDragging.value = true  // 设置拖动状态为 true
+  // 计算鼠标按下时的偏移量，用于后续拖动计算
   dragOffset.value = {
-    x: e.clientX - position.value.x,
-    y: e.clientY - position.value.y
+    x: e.clientX - position.value.x,  // 鼠标 X 坐标减去卡片当前位置 X
+    y: e.clientY - position.value.y   // 鼠标 Y 坐标减去卡片当前位置 Y
   }
+  // 添加全局鼠标移动和鼠标释放事件监听器
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
-  e.preventDefault()
+  e.preventDefault()  // 阻止默认事件，如文本选择
 }
 
-// 拖动中
+// 拖动过程中函数，当鼠标移动时触发
 function onDrag(e: MouseEvent) {
-  if (!isDragging.value) return
+  if (!isDragging.value) return  // 如果没有在拖动状态，直接返回
+  // 计算新的卡片位置
   const newX = e.clientX - dragOffset.value.x
   const newY = e.clientY - dragOffset.value.y
-  // 保持在视口内
-  const clampedX = Math.max(0, Math.min(window.innerWidth - 320, newX))
-  const clampedY = Math.max(0, Math.min(window.innerHeight - 100, newY))
+  // 限制卡片位置在视口内，避免拖出屏幕
+  const clampedX = Math.max(0, Math.min(window.innerWidth - 320, newX))  // 320 是卡片宽度
+  const clampedY = Math.max(0, Math.min(window.innerHeight - 100, newY))  // 100 是底部边距
+  // 更新 PDF store 中的卡片位置
   pdfStore.updateNotePreviewPosition({ x: clampedX, y: clampedY })
 }
 
-// 拖动结束
+// 拖动结束函数，当鼠标释放时触发
 function stopDrag() {
-  isDragging.value = false
+  isDragging.value = false  // 重置拖动状态
+  // 移除全局事件监听器，清理资源
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
 }
 
-// 关闭卡片
+// 关闭卡片函数，隐藏笔记预览卡片
 function closeCard() {
-  pdfStore.closeNotePreviewCard()
+  pdfStore.closeNotePreviewCard()  // 调用 store 方法关闭卡片
 }
 
-// 组件卸载时清理
+// 监听卡片可见性变化，用于组件卸载时的清理工作
 watch(isVisible, (visible) => {
-  if (!visible) {
+  if (!visible) {  // 当卡片变为不可见时
+    // 移除事件监听器，防止内存泄漏
     document.removeEventListener('mousemove', onDrag)
     document.removeEventListener('mouseup', stopDrag)
   }

@@ -1,49 +1,62 @@
 <script setup lang="ts">
 // ------------------------- 导入依赖与组件 -------------------------
-// 从 Vue 导入响应式 API，和当前组件所需的 store/子组件
+// 从 Vue 导入响应式 API（ref、watch），用于管理组件状态和监听变化
 import { ref, watch } from 'vue'
+// 引入 PDF store，用于管理 PDF 相关的状态和操作
 import { usePdfStore } from '../../stores/pdf'
-// 1. 引入组件 (请确保 RoadmapTab.vue 文件存在于同级目录)
+// 引入 RoadmapTab 组件，用于显示思维导图功能（确保 RoadmapTab.vue 文件存在于同级目录）
 import RoadmapTab from '../roadmap/RoadmapTab.vue'
 
+// 定义组件的 props，用于接收父组件传递的属性
 const props = defineProps<{
-  notesVisible?: boolean
-  chatVisible?: boolean
+  notesVisible?: boolean  // 笔记面板是否可见的可选属性
+  chatVisible?: boolean   // 聊天面板是否可见的可选属性
 }>()
 
+// 定义组件的 emits，用于向父组件发出事件
 const emit = defineEmits<{
-  (e: 'toggle-notes-visibility'): void
-  (e: 'toggle-chat-visibility'): void
+  (e: 'toggle-notes-visibility'): void  // 切换笔记可见性的事件
+  (e: 'toggle-chat-visibility'): void   // 切换聊天可见性的事件
 }>()
 
+// 获取 PDF store 的实例，用于访问和修改 PDF 相关状态
 const pdfStore = usePdfStore()
-const pageInput = ref('')
-const scaleInput = ref(String(pdfStore.scalePercent))
-// 控制 Roadmap 显示的状态
-const showRoadmap = ref(false)
 
+// 定义页面输入框的响应式变量，用于跳转到指定页面
+const pageInput = ref('')  // 存储用户输入的页面号
+
+// 定义缩放输入框的响应式变量，初始值为当前缩放百分比的字符串形式
+const scaleInput = ref(String(pdfStore.scalePercent))  // 存储用户输入的缩放百分比
+
+// 控制 Roadmap（思维导图）显示状态的响应式变量
+const showRoadmap = ref(false)  // 是否显示 Roadmap 面板
+
+// 处理页面输入的函数，当用户输入页面号并按回车时调用
 function handlePageInput() {
-  const page = parseInt(pageInput.value)
-  if (!isNaN(page)) {
-    pdfStore.goToPage(page)
+  const page = parseInt(pageInput.value)  // 将输入转换为整数
+  if (!isNaN(page)) {  // 如果转换成功
+    pdfStore.goToPage(page)  // 调用 store 方法跳转到指定页面
   }
-  pageInput.value = ''
+  pageInput.value = ''  // 清空输入框
 }
 
+// 应用缩放输入的函数，当用户输入缩放值并按回车或失去焦点时调用
 function applyScaleInput() {
-  const value = parseFloat(scaleInput.value)
-  if (isNaN(value)) {
-    scaleInput.value = String(pdfStore.scalePercent)
-    return
+  const value = parseFloat(scaleInput.value)  // 将输入转换为浮点数
+  if (isNaN(value)) {  // 如果转换失败
+    scaleInput.value = String(pdfStore.scalePercent)  // 重置为当前缩放百分比
+    return  // 退出函数
   }
+  // 计算新的缩放比例（假设基础缩放为 1.5），并设置到 store
   pdfStore.setScale((value / 100) * 1.5)
-  scaleInput.value = String(pdfStore.scalePercent)
+  scaleInput.value = String(pdfStore.scalePercent)  // 更新输入框值为新的百分比
 }
 
+// 监听 PDF store 中的缩放百分比变化，同步更新输入框
 watch(
-  () => pdfStore.scalePercent,
-  (val) => {
-    scaleInput.value = String(val)
+  () => pdfStore.scalePercent,  // 监听的响应式值
+  (val) => {  // 当值变化时执行的回调
+    scaleInput.value = String(val)  // 将新值转换为字符串并赋值给输入框
   }
 )
 </script>
