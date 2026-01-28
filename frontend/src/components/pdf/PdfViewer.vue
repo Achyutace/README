@@ -1126,6 +1126,7 @@ function IoU(rectA: { left: number; top: number; width: number; height: number }
 // ------------------------- 高亮与文本选择处理 -------------------------
 
 // 手动文本选择的处理逻辑（逐行中文注释）
+// TODO: 目前选框的时候，如果鼠标移动到了两行中间，那么此时就会将整个页面下面全部选中，所以如果我不断往下拉就会出现 选一行->全部选中->选两行->全部选中 这样一闪一闪的情况，体验感会变差
 function handleTextSelection() {
   const selection = window.getSelection() // 获取当前窗口选择
   
