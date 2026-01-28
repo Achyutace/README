@@ -113,8 +113,8 @@ let preloadAbortController: AbortController | null = null // 用于取消预加�
 
 // 点击/拖动检测相关
 const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
-const CLICK_THRESHOLD = 5 // 移动距离小于此值视为点击
 const CLICK_TIME_THRESHOLD = 300 // 点击时间小于此值视为点击（毫秒）
+const linksDisabled = ref(false) // 拖拽选中时临时关闭链接点击，避免 selection 终点落在 linkLayer
 
 // 循环选择高亮相关
 const highlightsAtCurrentPoint = ref<ReturnType<typeof pdfStore.getHighlightsAtPoint>>([])
@@ -263,7 +263,6 @@ function restoreAnchor(anchor: ZoomAnchor) {
 }
 
 // ------------------------- 引用处理与资源管理 -------------------------
-
 // 处理页面容器的引用挂载
 function handlePageContainerRef(
   pageNumber: number, // 当前页码
@@ -296,7 +295,7 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
       container: el, // 存储页面容器
       canvas, // 存储画布引用
       textLayer, // 存储 Text Layer 引用
-      linkLayer, // 存储 Link Layer引用
+      linkLayer, // 存储 Link Layer 引用
       highlightLayer // 存储高亮层引用
     })
   }
@@ -882,6 +881,7 @@ function handleMouseEnterContainer() {
 // 鼠标离开 PDF 框
 function handleMouseLeaveContainer() {
   isPointerOverPdf.value = false
+  linksDisabled.value = false
 }
 
 // 水平划动 + 缩放 PDF
@@ -989,6 +989,17 @@ const handleScroll = useDebounceFn(() => { // useDebounceFn 是防抖函数，�
   }
 }, 50)
 
+// 鼠标移动：按下超过阈值时间视为拖动，期间关闭链接点击，避免 selection 终点落在 linkLayer
+function handleMouseMove(_event: MouseEvent) {
+  const down = mouseDownInfo.value
+  if (!down || linksDisabled.value) return
+
+  const elapsed = Date.now() - down.time
+  if (elapsed >= CLICK_TIME_THRESHOLD) {
+    linksDisabled.value = true
+  }
+}
+
 // ------------------------- 点击与选择处理 -------------------------
 // 鼠标点击
 function handleMouseDown(event: MouseEvent) {
@@ -998,6 +1009,7 @@ function handleMouseDown(event: MouseEvent) {
     y: event.clientY,
     time: Date.now()
   }
+  linksDisabled.value = false
 }
 
 // 鼠标抬起（此时处理是点击还是拖动）
@@ -1011,6 +1023,7 @@ function handleMouseUp(event: MouseEvent) {
   if (isDrag) {
     // 判定为拖动：全部当作文本选择处理
     handleTextSelection()
+    linksDisabled.value = false
     return
   }
 
@@ -1018,11 +1031,13 @@ function handleMouseUp(event: MouseEvent) {
   const target = event.target as HTMLElement
   if (target.tagName === 'A' || target.closest('a') || target.classList.contains('internal-link') || target.closest('.internal-link')) {
     // 点击在链接上，保持默认行为
+    linksDisabled.value = false
     return
   }
 
   // 非拖动且非链接：视作点击并交给常规点击处理逻辑（包括 Ctrl+点击查找笔记等）
   handleClick(event)
+  linksDisabled.value = false
 }
 
 // 处理普通点击事件
@@ -1094,17 +1109,29 @@ function handleClick(event: MouseEvent) {
   window.getSelection()?.removeAllRanges()
 }
 
+function IoU(rectA: { left: number; top: number; width: number; height: number }, rectB: { left: number; top: number; width: number; height: number }) {
+  const xA = Math.max(rectA.left, rectB.left)
+  const yA = Math.max(rectA.top, rectB.top)
+  const xB = Math.min(rectA.left + rectA.width, rectB.left + rectB.width)
+  const yB = Math.min(rectA.top + rectA.height, rectB.top + rectB.height)
+
+  const intersectionArea = Math.max(0, xB - xA) * Math.max(0, yB - yA)
+  const boxAArea = rectA.width * rectA.height
+  const boxBArea = rectB.width * rectB.height
+
+  const iou = intersectionArea / (boxAArea + boxBArea - intersectionArea)
+  return iou
+}
+
 // ------------------------- 高亮与文本选择处理 -------------------------
 
 // 手动文本选择的处理逻辑（逐行中文注释）
 function handleTextSelection() {
-  console.log('Handling text selection...')
   const selection = window.getSelection() // 获取当前窗口选择
   
   // 如果没有选择或仅包含空白字符，直接退出
   // TODO: 是否支持划空白？
   if (!selection || !selection.toString().trim()) {
-    console.warn('No valid text selected.')
     return
   }
   // 清除任何已有的高亮选择状态（优先处理文本选择）
@@ -1112,6 +1139,7 @@ function handleTextSelection() {
 
   // 获取选中的纯文本（去除首尾空白）
   const text = selection.toString().trim()
+  console.log('Selected text:', text)
   // 获取选区的第一个 Range（代表一段连续的文本范围）
   const range = selection.getRangeAt(0)
   // 从 Range 的 commonAncestorContainer 向上查找所属的页面元素（.pdf-page）
@@ -1119,20 +1147,20 @@ function handleTextSelection() {
 
   // 如果无法定位到页面元素或该元素没有 page 数据属性，则放弃处理
   if (!pageEl || !pageEl.dataset.page) {
-    console.warn('Cannot find page element for selected text.')
     return
   }
 
   // 解析页面的页码（dataset 存储的是字符串）
   // TODO: 以后要支持跨页的高亮
   const pageNumber = Number(pageEl.dataset.page)
+
   // 找到当前页面上的文本层（textLayer），用于计算坐标和尺寸
   const textLayer = pageEl.querySelector('.textLayer') as HTMLDivElement | null
-  console.log('Selected text on page', pageNumber, ':', text)
   if (!textLayer) return
 
   // 获取文本层在视口中的边界（DOMRect），用于坐标归一化
   const layerRect = textLayer.getBoundingClientRect()
+
   // 若宽或高为 0（不可见或未渲染），则退出
   if (!layerRect.width || !layerRect.height) return
 
@@ -1151,15 +1179,14 @@ function handleTextSelection() {
   // 如果没有有效的矩形（例如只包含不可见字符），则退出
   if (!rects.length) return
 
-  // 去重处理：仅移除完全相同的重复矩形，避免把相邻行误判为重复
-  const seen = new Set<string>()
+  // IoU 去重
   const dedupedRects: typeof rects = []
   rects.forEach((rect) => {
-    // 构造用于比较的 key，使用 toFixed 保持小数位一致以便稳定比较
-    const key = `${rect.left.toFixed(5)}|${rect.top.toFixed(5)}|${rect.width.toFixed(5)}|${rect.height.toFixed(5)}`
-    if (seen.has(key)) return // 已存在则跳过
-    seen.add(key) // 标记已见
-    dedupedRects.push(rect) // 将不重复的矩形加入最终数组
+    // 如果与已有的某个矩形重叠度过高，则认为是重复
+    const isDuplicate = dedupedRects.some((existing) => IoU(rect, existing) > 0.3)
+    if (!isDuplicate) {
+      dedupedRects.push(rect)
+    }
   })
 
   // 获取选区的边界矩形（用于在屏幕上定位工具提示的位置）
@@ -1500,10 +1527,12 @@ onBeforeUnmount(() => {
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
       class="pdf-scroll-container flex-1 overflow-auto p-4"
+      :class="{ 'links-disabled': linksDisabled }"
       @mouseenter="handleMouseEnterContainer"
       @mouseleave="handleMouseLeaveContainer"
       @mousedown="handleMouseDown"
       @mouseup="handleMouseUp"
+      @mousemove="handleMouseMove"
       @wheel="handleWheel"
       @scroll="handleScroll"
     >
@@ -1623,6 +1652,12 @@ onBeforeUnmount(() => {
 .linkLayer {
   z-index: 3;
   pointer-events: none; /* 让非链接区域透传，文本仍可选中 */
+}
+
+.links-disabled :deep(.linkLayer),
+.links-disabled :deep(.linkLayer a),
+.links-disabled :deep(.linkLayer .internal-link) {
+  pointer-events: none !important; /* 拖拽选中时关闭链接事件，避免 selection 落在 linkLayer */
 }
 
 .highlight-rect {
