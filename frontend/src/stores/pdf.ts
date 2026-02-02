@@ -160,6 +160,7 @@ export const usePdfStore = defineStore('pdf', () => {
     }
   }
 
+  // 缩放最大最小限制在 0.5（33%） 到 4.5（300%） 之间
   function setScale(value: number) {
     scale.value = Math.max(0.5, Math.min(4.5, value))
   }

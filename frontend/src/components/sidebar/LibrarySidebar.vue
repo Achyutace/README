@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/*
+----------------------------------------------------------------------
+                            左侧边栏组件
+----------------------------------------------------------------------
+*/ 
+
 // ------------------------- 导入依赖与 store -------------------------
 // 从 Vue 导入响应式 API，以及需要的 store
 import { ref, computed } from 'vue'
@@ -12,81 +18,109 @@ const libraryStore = useLibraryStore()
 const pdfStore = usePdfStore()
 const aiStore = useAiStore()
 
-// ------------------------- 侧边栏折叠与交互状态 -------------------------
-// 控制侧边栏折叠 / 悬停状态，以及上传文件输入引用
-const isCollapsed = ref(false)
-const isHovering = ref(false) // 鼠标是否悬停在左边缘
-const fileInput = ref<HTMLInputElement | null>(null)
+// ------------------------- 初始化侧边栏折叠与交互状态 -------------------------
+// 控制左侧边栏折叠 / 悬停状态，以及上传文件输入引用
+const isCollapsed = ref(false) // 侧边栏是否折叠
+const isHovering = ref(false) // 鼠标是否悬停在屏幕左边缘（显示折叠侧栏）
+const fileInput = ref<HTMLInputElement | null>(null) // 文件输入引用
 
 // 是否显示窄视图 (折叠且悬停时)
 const showNarrowView = computed(() => isCollapsed.value && isHovering.value)
 // 是否显示完整内容 (未折叠时)
 const showFullContent = computed(() => !isCollapsed.value)
 
-// ------------------------- 侧边栏折叠控制 -------------------------
+// ------------------------- 左侧边栏折叠控制 -------------------------
+// 切换左侧边栏折叠状态
 function toggleSidebar() {
-  isCollapsed.value = !isCollapsed.value
+  isCollapsed.value = !isCollapsed.value // 状态取反
   // 展开时重置悬停状态
-  if (!isCollapsed.value) {
-    isHovering.value = false
-  }
+  if (!isCollapsed.value) isHovering.value = false
 }
 
-// 处理鼠标进入左边缘区域
-// ------------------------- 鼠标悬停处理 -------------------------
+// 鼠标进入屏幕左边缘时显示侧边栏悬停状态
 function handleEdgeMouseEnter() {
-  if (isCollapsed.value) {
-    isHovering.value = true
-  }
+  // 如果侧边栏已折叠，则显示悬停状态
+  if (isCollapsed.value) isHovering.value = true 
 }
 
-// 处理鼠标离开侧边栏
+// 处理鼠标离开侧边栏悬停区域
 function handleSidebarMouseLeave() {
+  // 离开时取消悬停状态
   isHovering.value = false
 }
 
 // ------------------------- 文件上传流程 -------------------------
-// 触发文件选择框并处理上传（仅支持 PDF）
+// 点击上传PDF按钮
 function triggerFileUpload() {
   fileInput.value?.click()
 }
 
+// 处理文件上传，这是异步函数，接受一个事件参数
 async function handleFileUpload(event: Event) {
+  // 获取文件输入元素
   const target = event.target as HTMLInputElement
+
+  // 获取上传的文件列表
   const files = target.files
+
   if (files && files.length > 0) {
+    // 每次只处理一个文件的上传
+    // TODO: 可以扩展为多文件上传
     const file = files[0]
+    // 只处理 PDF 文件
     if (file && file.type === 'application/pdf') {
       try {
+        // 添加文档到库中（见 library.ts）
         const doc = await libraryStore.addDocument(file)
+
+        // 选择刚上传的文档（见 library.ts）
         libraryStore.selectDocument(doc.id)
+
+        // 设置当前 PDF 文档（见 pdf.ts）
         pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID
+
+        // 重置 AI Store 的状态（见 ai.ts）
         aiStore.resetForNewDocument()
+
         // 上传成功后自动收起左侧边栏
         isCollapsed.value = true
+
       } catch (error) {
         alert('上传失败，请确保后端服务已启动')
       }
     }
   }
+
+  // 重置文件输入以允许上传同一文件
   target.value = ''
 }
 
 // ------------------------- 文档选择与删除 -------------------------
+// 选择文档
 function selectDocument(id: string) {
+  // 去库中查找对应文档
   const doc = libraryStore.documents.find((d: { id: string }) => d.id === id)
+  // 如果找到则选择该文档
   if (doc) {
-    libraryStore.selectDocument(id)
-    pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID
-    aiStore.resetForNewDocument()
+    libraryStore.selectDocument(id) // 选择该文档（见 library.ts）
+    pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID（见 pdf.ts）
+    aiStore.resetForNewDocument() // 重置 AI Store 状态（见 ai.ts）
   }
 }
 
+// 删除文档（同时清理对应的高亮）
 function removeDocument(id: string, event: Event) {
-  event.stopPropagation()
-  pdfStore.removeDocumentHighlights(id) // 删除文档时清理对应的高亮
-  libraryStore.removeDocument(id)
+  event.stopPropagation() // 阻止事件冒泡，避免触发选择文档
+  pdfStore.removeDocumentHighlights(id) // 删除文档时清理对应的高亮（见 pdf.ts）
+  libraryStore.removeDocument(id) // 删除文档（见 library.ts）
 }
+
+// ------------------------- 组件脚本结束 -------------------------
+// ---------------------------------------------------------------
+
+
+// ------------------------- 组件模板开始 -------------------------
+// （以下内容可以在 F12 开发者工具中查看）
 </script>
 
 <template>

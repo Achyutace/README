@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/*
+----------------------------------------------------------------------
+                            Roadmap 组件
+----------------------------------------------------------------------
+*/ 
+
 // ------------------------- 导入依赖与 store -------------------------
 // 引入 Vue 响应式 API、VueFlow 相关组件以及所需的 store
 import { ref, onMounted, onUnmounted, watch } from 'vue'
@@ -12,14 +18,19 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
+// ------------------------- 初始化 store 实例 -------------------------
+// 组合式 store 实例用于访问应用级状态和 VueFlow 辅助函数
 const aiStore = useAiStore()
 const libraryStore = useLibraryStore()
 const { onNodeClick, fitView } = useVueFlow()
 
 const selectedNode = ref<any>(null)
 
-// --- 拖拽窗口逻辑 ---
+// ------------------------- 拖拽窗口逻辑 -------------------------
+// 窗口引用
 const windowRef = ref<HTMLElement | null>(null)
+
+// 拖拽状态
 const dragState = ref({
   isDragging: false,
   startX: 0,
@@ -31,65 +42,78 @@ const dragState = ref({
 // 初始位置：屏幕右上区域，避开工具栏
 const position = ref({ x: window.innerWidth - 450, y: 120 })
 
+// 拖拽处理函数
 function startDrag(event: MouseEvent) {
+  // 确保窗口存在
   if (!windowRef.value) return
+
+  // 初始化拖拽状态
   dragState.value.isDragging = true
   dragState.value.startX = event.clientX
   dragState.value.startY = event.clientY
   
+  // 获取窗口当前位置信息
   const rect = windowRef.value.getBoundingClientRect()
   dragState.value.initialLeft = rect.left
   dragState.value.initialTop = rect.top
 
+  // 监听全局鼠标移动和释放事件
   window.addEventListener('mousemove', onDrag)
   window.addEventListener('mouseup', stopDrag)
 }
 
+// 拖拽过程中更新位置
 function onDrag(event: MouseEvent) {
+  // 保证正在拖拽
   if (!dragState.value.isDragging) return
+
+  // 计算位置偏移
   const deltaX = event.clientX - dragState.value.startX
   const deltaY = event.clientY - dragState.value.startY
   
+  // 更新窗口位置
   position.value.x = dragState.value.initialLeft + deltaX
   position.value.y = dragState.value.initialTop + deltaY
 }
 
+// 停止拖拽
 function stopDrag() {
+  // 重置拖拽状态
   dragState.value.isDragging = false
+
+  // 移除全局事件监听
   window.removeEventListener('mousemove', onDrag)
   window.removeEventListener('mouseup', stopDrag)
 }
 
-onUnmounted(() => {
-  window.removeEventListener('mousemove', onDrag)
-  window.removeEventListener('mouseup', stopDrag)
-})
-// --------------------
-
+// ------------------------- Roadmap 加载与生命周期 -------------------------
+// 负责从 AI store 拉取 roadmap 数据并在视图上自适应
 async function loadRoadmap() {
+  // 确保有当前文档
   if (libraryStore.currentDocument) {
-    await aiStore.fetchRoadmap(libraryStore.currentDocument.id)
+    // 拉取 roadmap 数据（见 ai.ts）
+    await aiStore.fetchRoadmap(libraryStore.currentDocument.id) 
+    // 100ms 后超时，加载默认页面
     setTimeout(() => fitView(), 100)
   }
 }
 
-onMounted(() => {
-  if (!aiStore.roadmap) {
-    loadRoadmap()
-  }
-})
-
+// 监听当前文档变化，重新加载 roadmap
 watch(() => libraryStore.currentDocument?.id, (newId) => {
+  
   if (newId) {
     selectedNode.value = null
     loadRoadmap()
   }
 })
 
+// 监听节点点击事件，显示节点详情
 onNodeClick((event) => {
   selectedNode.value = event.node.data
 })
 
+// ------------------------- 导出与交互函数 -------------------------
+// 导出 roadmap 为 JSON，及关闭节点详情的辅助函数
 function exportRoadmap() {
   const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(aiStore.roadmap, null, 2));
   const downloadAnchorNode = document.createElement('a');
@@ -103,6 +127,25 @@ function exportRoadmap() {
 function closeDetail() {
   selectedNode.value = null
 }
+
+onMounted(() => {
+  if (!aiStore.roadmap) {
+    loadRoadmap()
+  }
+})
+
+// 防御性移除：组件卸载时确保事件监听被清理
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onDrag)
+  window.removeEventListener('mouseup', stopDrag)
+})
+
+// ------------------------- 组件脚本结束 -------------------------
+// ---------------------------------------------------------------
+
+
+// ------------------------- 组件模板开始 -------------------------
+// （以下内容可以在 F12 开发者工具中查看）
 </script>
 
 <template>

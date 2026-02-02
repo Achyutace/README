@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/*
+----------------------------------------------------------------------
+                            主应用组件
+----------------------------------------------------------------------
+*/ 
+
 // ------------------------- 导入依赖与组件 -------------------------
 // 从 Vue 导入响应式和生命周期 API
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -58,8 +64,8 @@ const notesPanelRef = ref<any>(null)
 // 拖到底部或顶部时自动最小化的阈值（像素）
 const SNAP_THRESHOLD = 60 
 
-// ------------------------- 初始化侧边栏 -------------------------
-const sidebarWidth = ref(480) // 当前侧边栏宽度（像素），默认 480px
+// ------------------------- 初始化右侧边栏 -------------------------
+const sidebarWidth = ref(480) // 当前右侧边栏宽度（像素），默认 480px
 const isResizingWidth = ref(false) // 是否正在拖动调整宽度
 // 宽度上下限
 const MIN_SIDEBAR_WIDTH = 380
@@ -94,6 +100,11 @@ const startDragThemeButton = (e: MouseEvent) => {
     x: e.clientX - themeButtonPos.value.x,
     y: e.clientY - themeButtonPos.value.y
   }
+  
+  // 动态注册全局监听，提升性能
+  document.addEventListener('mousemove', onDragThemeButton)
+  document.addEventListener('mouseup', stopDragThemeButton)
+  
   e.preventDefault()  // 阻止浏览器对默认拖动行为的处理
 }
 
@@ -119,6 +130,8 @@ const onDragThemeButton = (e: MouseEvent) => {
 // 停止拖动主题按钮（鼠标抬起时触发）
 const stopDragThemeButton = () => {
   isDraggingThemeButton.value = false // 标记停止拖动
+  document.removeEventListener('mousemove', onDragThemeButton)
+  document.removeEventListener('mouseup', stopDragThemeButton)
 }
 
 // 主题按钮点击处理：切换主题（点击时触发）
@@ -178,6 +191,11 @@ const handleKeyboard = (e: KeyboardEvent) => {
 const startWidthResize = (e: MouseEvent) => {
   if (!sidebarVisible.value) return // 不可见时不允许调整
   isResizingWidth.value = true // 正在调整宽度
+  
+  // 动态注册全局监听
+  document.addEventListener('mousemove', handleWidthResize)
+  document.addEventListener('mouseup', stopWidthResize)
+  
   e.preventDefault() // 阻止浏览器默认行为，避免选中文本
 }
 
@@ -185,7 +203,7 @@ const startWidthResize = (e: MouseEvent) => {
 const handleWidthResize = (e: MouseEvent) => {
   if (!isResizingWidth.value) return // 如果不在调整状态，直接返回
   const newWidth = window.innerWidth - e.clientX // 计算新宽度
-  // 限制宽度在最小值和最大值之间
+  // 限制宽度在最小值 and 最大值之间
   sidebarWidth.value = Math.min(MAX_SIDEBAR_WIDTH, 
     Math.max(MIN_SIDEBAR_WIDTH, newWidth))
 }
@@ -193,6 +211,8 @@ const handleWidthResize = (e: MouseEvent) => {
 // 停止宽度调整（鼠标抬起时触发）
 const stopWidthResize = () => {
   isResizingWidth.value = false
+  document.removeEventListener('mousemove', handleWidthResize)
+  document.removeEventListener('mouseup', stopWidthResize)
 }
 
 // ------------------------- Chat 和 Notes 分割条调整 -------------------------
@@ -202,6 +222,11 @@ const startSplitResize = (e: MouseEvent) => {
   if (!notesVisible.value || notesMinimized.value || 
     !chatVisible.value || chatMinimized.value) return
   isResizingSplit.value = true // 标记正在调整分割条
+  
+  // 动态注册全局监听
+  document.addEventListener('mousemove', handleSplitResize)
+  document.addEventListener('mouseup', stopSplitResize)
+  
   e.preventDefault() // 阻止浏览器默认行为
 }
 
@@ -241,6 +266,10 @@ const stopSplitResize = () => {
   }
   // 停止调整状态
   isResizingSplit.value = false
+  
+  // 移除全局监听
+  document.removeEventListener('mousemove', handleSplitResize)
+  document.removeEventListener('mouseup', stopSplitResize)
 }
 
 // ------------------------- 通过 Chat 和 Notes 状态计算样式 -------------------------
@@ -276,21 +305,15 @@ const bottomPanelStyle = computed(() => {
 
 // ------------------------- 在组件挂载/卸载时，注册/移除全局事件-------------------------
 onMounted(() => {
-  // 鼠标移动 -> 拖动主题按钮 & 调整侧边栏宽度 & 调整分割条
-  document.addEventListener('mousemove', onDragThemeButton)
-  document.addEventListener('mousemove', handleWidthResize)
-  document.addEventListener('mousemove', handleSplitResize)
-  
-  // 鼠标抬起 -> 停止拖动主题按钮 & 停止调整侧边栏宽度 & 停止调整分割条
-  document.addEventListener('mouseup', stopDragThemeButton)
-  document.addEventListener('mouseup', stopWidthResize)
-  document.addEventListener('mouseup', stopSplitResize)
-  
-  // 键盘按下 -> 处理快捷键
+  // 键盘按下 -> 处理快捷键（全局一直监听）
   document.addEventListener('keydown', handleKeyboard)
 })
 
 onBeforeUnmount(() => {
+  // 移除键盘监听
+  document.removeEventListener('keydown', handleKeyboard)
+
+  // 防御性移除：防止组件卸载时仍处于拖拽状态
   document.removeEventListener('mousemove', onDragThemeButton)
   document.removeEventListener('mousemove', handleWidthResize)
   document.removeEventListener('mousemove', handleSplitResize)
@@ -298,8 +321,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', stopDragThemeButton)
   document.removeEventListener('mouseup', stopWidthResize)
   document.removeEventListener('mouseup', stopSplitResize)
-
-  document.removeEventListener('keydown', handleKeyboard)
 })
 
 // ------------------------- 组件脚本结束 -------------------------
