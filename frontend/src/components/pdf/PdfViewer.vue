@@ -88,8 +88,10 @@ const isPointerOverPdf = ref(false)
 const isZooming = ref(false)
 
 // 页面尺寸预加载（用于快速滚动时的占位）
-// TODO: 是否可以认为论文每页大小相同？
-const pageSizes = ref<Map<number, { width: number; height: number }>>(new Map())
+// 优化：如果是常数（大部分论文），使用 pageSizesConstant；否则使用 pageSizesArray 并配合 accumulatedHeights 进行二分查找
+const pageSizesConstant = ref<{ width: number; height: number } | null>(null)
+const pageSizesArray = ref<{ width: number; height: number }[] | null>(null)
+const pageHeightAccumulator = ref<number[]>([]) // 前缀和数组，用于二分查找
 
 // 已渲染完成的页面集合
 // TODO: 渲染完成的难道不应该是连续的吗？记录两端即可
@@ -114,6 +116,7 @@ let preloadAbortController: AbortController | null = null // 用于取消预加�
 // 点击/拖动检测相关
 const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
 const CLICK_TIME_THRESHOLD = 300 // 点击时间小于此值视为点击（毫秒）
+const DRAG_DISTANCE_THRESHOLD = 6 // 鼠标移动超过此像素数视为拖动（px）
 const linksDisabled = ref(false) // 拖拽选中时临时关闭链接点击，避免 selection 终点落在 linkLayer
 
 // 循环选择高亮相关
@@ -130,20 +133,97 @@ const notesCache = ref<Note[]>([])
 const isLoadingNotes = ref(false)
 
 // ------------------------- 辅助计算函数 -------------------------
+const PAGE_GAP = 16 // space-y-4 = 16px
+const CONTAINER_PADDING = 16 // p-4 = 16px
+
+function getPageSize(pageNumber: number) {
+  if (pageSizesConstant.value) {
+    return pageSizesConstant.value
+  }
+  if (pageSizesArray.value) {
+    return pageSizesArray.value[pageNumber - 1]
+  }
+  return { width: 612, height: 792 }
+}
+
 // 获取指定页面的缩放后尺寸
 function getScaledPageSize(pageNumber: number) {
-  // 获取页面大小
-  const size = pageSizes.value.get(pageNumber)
+  const size = getPageSize(pageNumber) || { width: 612, height: 792 }
 
-  // 若发生错误，默认 A4 尺寸
-  if (!size) return { width: 612, height: 792 }
-
-  // 缩放大小
   return {
     width: Math.floor(size.width * pdfStore.scale),
     height: Math.floor(size.height * pdfStore.scale)
   }
 }
+
+// 获取页面顶部距离容器顶部的距离 (px)
+function getPageTop(pageNumber: number) {
+  const index = pageNumber - 1
+  if (index < 0) return CONTAINER_PADDING
+  
+  const scale = pdfStore.scale
+  
+  // 常数高度情况 - O(1)
+  if (pageSizesConstant.value) {
+    const h = pageSizesConstant.value.height * scale
+    return CONTAINER_PADDING + index * (h + PAGE_GAP)
+  }
+  
+  // 变长高度情况 - O(1) 查表
+  if (pageHeightAccumulator.value.length > index) {
+    const accH = pageHeightAccumulator.value[index] ?? 0
+    return CONTAINER_PADDING + accH * scale + index * PAGE_GAP
+  }
+  
+  return CONTAINER_PADDING
+}
+
+// 根据垂直滚动位置查找页码
+function getPageAtY(y: number): number {
+  const count = pageNumbers.value.length
+  if (count === 0) return 1
+  
+  const scale = pdfStore.scale
+  const yAdjusted = y - CONTAINER_PADDING // Adjust for container padding
+  
+  if (yAdjusted < 0) return 1
+
+  // 常数高度情况 - 直接计算 O(1)
+  if (pageSizesConstant.value) {
+    const itemHeight = pageSizesConstant.value.height * scale + PAGE_GAP
+    const index = Math.floor(yAdjusted / itemHeight)
+    return Math.max(1, Math.min(count, index + 1))
+  }
+  
+  // 变长高度情况 - 二分查找 O(log N)
+  let low = 1, high = count
+  
+  // We want to find largest i such that getPageTop(i) <= y
+  // The 'getPageAtY' semantics: if y is within page 1, return 1.
+  // getPageTop(page) gives the top edge. 
+  // If y >= top(page), it could be in that page or after.
+  
+  let result = 1
+  
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const top = getPageTop(mid)
+    
+    if (y >= top) {
+      result = mid
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  
+  // result is the page whose top is <= y.
+  // Check if y is within this page or the gap following it?
+  // Actually usually we just want the page at that Y.
+  return result
+}
+
+// 页面是否已渲染
 
 // 页面是否已渲染
 function isPageRendered(pageNumber: number) {
@@ -161,10 +241,9 @@ function captureCenterAnchor(mousePos?: { x: number; y: number }): ZoomAnchor | 
   // 返回该容器相对于视口（viewport）的矩形（DOMRect）
   const rect = container.getBoundingClientRect()
   
-  // 目标内容坐标（相对于容器内容左上角）
-  // 如果有 mousePos，则是鼠标下面的点，否则是视口中心点
+  // 目标内容坐标（相对于容器内容左上角 - 包含滚动距离）
   const targetX = mousePos 
-    ? (mousePos.x - rect.left + container.scrollLeft) // 鼠标相对屏幕距离 - 容器相对屏幕距离 + PDF相对容器距离
+    ? (mousePos.x - rect.left + container.scrollLeft) 
     : (container.scrollLeft + container.clientWidth / 2)
     
   const targetY = mousePos 
@@ -173,47 +252,39 @@ function captureCenterAnchor(mousePos?: { x: number; y: number }): ZoomAnchor | 
 
   let anchor: ZoomAnchor | null = null // 初始化锚点变量
 
-  // 这里的查找逻辑可以优化，但保持简单遍历
-  // TODO: 要通过 targetY 查找目前鼠标在一页，应该可以用二分法更快定位
-  for (const page of pageNumbers.value) {
-    const refs = pageRefs.get(page)
-    if (!refs) continue
-    
-    // 获取页面真实布局位置
-    // 注意：如果使用了 mx-auto, offsetLeft 会变化
-    const pageTop = refs.container.offsetTop
-    const pageLeft = refs.container.offsetLeft
-    const height = refs.container.offsetHeight || refs.container.clientHeight
-    const width = refs.container.offsetWidth || refs.container.clientWidth
-    
-    if (!height || !width) continue
-
-    // 宽松判断：只要 targetY 在页面垂直范围内（或者非常接近），
-    // 并且我们还没找到 anchor，或者这个页面更“中心”
-    // 这里简单使用第一个命中的页面
-    if (targetY >= pageTop && targetY <= pageTop + height) {
-      anchor = { 
-        page, 
-        ratioY: (targetY - pageTop) / height,
-        ratioX: (targetX - pageLeft) / width, // x 比例可以大于 1 或小于 0，这没关系
-        destX: mousePos ? mousePos.x - rect.left : undefined,
-        destY: mousePos ? mousePos.y - rect.top : undefined
-      }
-      break
-    }
-  }
+  // 使用计算/二分法快速定位页面
+  const page = getPageAtY(targetY)
   
-  // 兜底：如果遍历完没找到（比如在页面间隙，或者上方空白），取最近的一个页面
-  // TODO: 这里可以改进为取离 targetY 最近的页面的顶部或底部
-  if (!anchor && pageNumbers.value.length > 0) {
-      const firstPage = pageNumbers.value[0]
-      if (firstPage !== undefined) {
-        const refs = pageRefs.get(firstPage)
-        if (refs) {
-            // 默认锚定到第一页顶部
-            anchor = { page: firstPage, ratioY: 0, ratioX: 0.5 }
+  if (page) {
+    const refs = pageRefs.get(page)
+    const size = getScaledPageSize(page)
+    
+    if (refs) {
+        // 使用实际 DOM 位置（最准确）
+        const pageTop = refs.container.offsetTop
+        const pageLeft = refs.container.offsetLeft
+        const height = refs.container.offsetHeight || size.height
+        const width = refs.container.offsetWidth || size.width
+        
+        anchor = { 
+          page, 
+          ratioY: (targetY - pageTop) / height,
+          ratioX: (targetX - pageLeft) / width,
+          destX: mousePos ? mousePos.x - rect.left : undefined,
+          destY: mousePos ? mousePos.y - rect.top : undefined
         }
-      }
+    } else {
+        // 如果页面未渲染（例如在虚拟列表中），使用计算位置作为兜底
+        const calculatedTop = getPageTop(page)
+        
+        anchor = {
+           page,
+           ratioY: (targetY - calculatedTop) / size.height,
+           ratioX: 0.5, // 默认水平居中
+           destX: mousePos ? mousePos.x - rect.left : undefined,
+           destY: mousePos ? mousePos.y - rect.top : undefined
+        }
+    }
   }
 
   return anchor
@@ -307,28 +378,37 @@ const updateVisiblePages = useDebounceFn(() => {
   if (!containerRef.value || !pdfDoc.value) return
 
   const container = containerRef.value
-  const { top: containerTop, bottom: containerBottom } = container.getBoundingClientRect()
-  const buffer = 200 // 视口上下预加载缓冲区
+  // 使用 scrollTop 而不是 getBoundingClientRect 以避免重排
+  const scrollTop = container.scrollTop
+  const clientHeight = container.clientHeight
+  const buffer = 500 // 视口上下预加载缓冲区 (加大缓冲区以提升流畅度)
 
-  // 再次遍历所有页面，检查哪些在视口内（包含缓冲区）
-  // TODO: 可以改进为二分法快速定位，或者每一页如果大小一样可以直接计算，而且由于是顺序的，可以从上次检测的位置开始
+  // 计算可见范围内的起始和结束页码
+  const startY = Math.max(0, scrollTop - buffer)
+  const endY = scrollTop + clientHeight + buffer
+  
+  const startPage = getPageAtY(startY)
+  const endPage = getPageAtY(endY)
+
   const newVisiblePages = new Set<number>()
-  pageRefs.forEach((refs, pageNumber) => {
-    const { top, bottom } = refs.container.getBoundingClientRect()
-    // 检查页面是否在视口范围内（包含缓冲区）
-    if (top < containerBottom + buffer && bottom > containerTop - buffer) {
-      newVisiblePages.add(pageNumber)
-      const alreadyRendered = renderedPages.value.has(pageNumber)
-      const needsRefresh = pagesNeedingRefresh.has(pageNumber)
-      const shouldRenderNow = !alreadyRendered || (!isZooming.value && needsRefresh)
+  
+  // 仅遍历需要在视口内的页面
+  for (let p = startPage; p <= endPage; p++) {
+    if (p > pdfStore.totalPages) break
+    newVisiblePages.add(p)
+    
+    const alreadyRendered = renderedPages.value.has(p)
+    const needsRefresh = pagesNeedingRefresh.has(p)
+    const shouldRenderNow = !alreadyRendered || (!isZooming.value && needsRefresh)
 
-      // 如果之前未渲染或（缩放后）需要重绘且已结束缩放，则触发渲染
-      if (shouldRenderNow && !renderTasks.has(pageNumber)) {
-        renderPage(pageNumber, { preserveContent: alreadyRendered })
-        pagesNeedingRefresh.delete(pageNumber)
-      }
+    // 如果之前未渲染或（缩放后）需要重绘且已结束缩放，则触发渲染
+    // 注意：如果是虚拟列表，这里还需要确保 DOM 元素已挂载
+    // 当前实现默认挂载所有空 div，所以没问题
+    if (shouldRenderNow && !renderTasks.has(p)) {
+      renderPage(p, { preserveContent: alreadyRendered })
+      pagesNeedingRefresh.delete(p)
     }
-  })
+  }
 
   visiblePages.clear()
   newVisiblePages.forEach(p => visiblePages.add(p))
@@ -738,14 +818,46 @@ async function loadPdf(url: string) {
     libraryStore.updateDocumentPageCount(libraryStore.currentDocumentId, pdf.numPages) // 同步更新文库记录页数
   }
 
-  // 预加载所有页面的尺寸信息（用于快速滚动时的占位）
-  const sizes = new Map<number, { width: number; height: number }>()
+  // 预加载所有页面的尺寸信息
+  const tempSizes: { width: number; height: number }[] = []
+  const tempAccumulator: number[] = [0]
+  let currentAccHeight = 0
+  let allSameSize = true
+  let firstSize: { width: number; height: number } | null = null
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
-    const viewport = page.getViewport({ scale: 1 }) // 使用 scale=1 获取原始尺寸
-    sizes.set(i, { width: viewport.width, height: viewport.height })
+    const viewport = page.getViewport({ scale: 1 })
+    const size = { width: viewport.width, height: viewport.height }
+    
+    if (i === 1) {
+      firstSize = size
+    } else if (firstSize) {
+      if (Math.abs(size.width - firstSize.width) > 1 || Math.abs(size.height - firstSize.height) > 1) {
+        allSameSize = false
+      }
+    }
+    
+    tempSizes.push(size)
+    
+    // Calculate accumulator for the NEXT page
+    currentAccHeight += size.height
+    if (i < pdf.numPages) {
+       tempAccumulator.push(currentAccHeight)
+    }
   }
-  pageSizes.value = sizes
+
+  if (allSameSize && firstSize) {
+    pageSizesConstant.value = firstSize
+    pageSizesArray.value = null
+    // Constant mode implicitly calculates positions, so accumulator might not be strictly needed,
+    // but the helper uses direct calculation.
+    pageHeightAccumulator.value = []
+  } else {
+    pageSizesConstant.value = null
+    pageSizesArray.value = tempSizes
+    pageHeightAccumulator.value = tempAccumulator
+  }
 
   pageNumbers.value = Array.from({ length: pdf.numPages }, (_, index) => index + 1) // 构造页码数组
 
@@ -837,7 +949,9 @@ function cleanup() {
   renderTasks.clear() // 清空任务缓存
   pageRefs.clear() // 清空页面引用缓存
   pageNumbers.value = [] // 清空页码列表
-  pageSizes.value = new Map() // 清空页面尺寸缓存
+  pageSizesConstant.value = null
+  pageSizesArray.value = null
+  pageHeightAccumulator.value = []
   renderedPages.value = new Set() // 清空已渲染页面集合
   pagesNeedingRefresh.clear()
   lastRenderedScale.clear()
@@ -850,26 +964,41 @@ function cleanup() {
 // TODO: 目前 textlayer 缩放还是不对
 function applyInterimScale() {
   pageRefs.forEach((refs, pageNumber) => {
-    const size = pageSizes.value.get(pageNumber)
+    const size = getPageSize(pageNumber)
     if (!size) return
 
-    const targetWidth = Math.floor(size.width * pdfStore.scale)
-    const targetHeight = Math.floor(size.height * pdfStore.scale)
     const renderedScale = lastRenderedScale.get(pageNumber) ?? pdfStore.scale
-    const ratio = renderedScale ? pdfStore.scale / renderedScale : 1
+    const targetScale = pdfStore.scale
+    const ratio = renderedScale ? targetScale / renderedScale : 1
 
+    // 基准尺寸：最后一次真实渲染时的尺寸（与文本层布局一致）
+    const baseWidth = Math.floor(size.width * renderedScale)
+    const baseHeight = Math.floor(size.height * renderedScale)
+    // 目标尺寸：当前缩放下容器所需的可视尺寸
+    const targetWidth = Math.floor(size.width * targetScale)
+    const targetHeight = Math.floor(size.height * targetScale)
+
+    // Canvas 直接用目标尺寸拉伸即可
     refs.canvas.style.width = `${targetWidth}px`
     refs.canvas.style.height = `${targetHeight}px`
 
-    refs.textLayer.style.width = `${targetWidth}px`
-    refs.textLayer.style.height = `${targetHeight}px`
+    // 文本层保持“旧尺度”尺寸，通过 transform 过渡到新尺度，避免跟随过慢
+    refs.textLayer.style.width = `${baseWidth}px`
+    refs.textLayer.style.height = `${baseHeight}px`
     refs.textLayer.style.transformOrigin = 'top left'
     refs.textLayer.style.transform = `scale(${ratio})`
 
-    refs.linkLayer.style.width = `${targetWidth}px`
-    refs.linkLayer.style.height = `${targetHeight}px`
+    // 链接层同样按旧尺寸 + 缩放，保证点击区域同步
+    refs.linkLayer.style.width = `${baseWidth}px`
+    refs.linkLayer.style.height = `${baseHeight}px`
     refs.linkLayer.style.transformOrigin = 'top left'
     refs.linkLayer.style.transform = `scale(${ratio})`
+
+    // 高亮层同步缩放，避免在缩放过渡时错位
+    refs.highlightLayer.style.width = `${baseWidth}px`
+    refs.highlightLayer.style.height = `${baseHeight}px`
+    refs.highlightLayer.style.transformOrigin = 'top left'
+    refs.highlightLayer.style.transform = `scale(${ratio})`
   })
 }
 
@@ -916,9 +1045,9 @@ function handleWheel(event: WheelEvent) {
     // 读取缩放大小（由于是ctrl+滚轮，所以不是上下左右滚动，而是缩放手势）
     const delta = event.deltaY
 
-    // 根据滚动距离计算缩放步长（控制缩放速度）
-    // TODO: 可以加快放缩速度
-    const step = Math.min(0.25, Math.max(0.05, Math.abs(delta) / 500))
+    // 根据滚动距离计算缩放步长
+    const step = Math.min(0.25, Math.max(0.05, // 步长在 0.05 到 0.25 之间
+      Math.abs(delta) / 100)) // 缩放速度（数值越小，缩放越快）
 
     // 计算新的缩放比例
     const nextScale = delta < 0
@@ -966,21 +1095,23 @@ const handleScroll = useDebounceFn(() => { // useDebounceFn 是防抖函数，�
 
   updateVisiblePages() // 滚动时触发可见检测
 
-  // 计算当前可见的页面
-  const pages = Array.from(containerRef.value.querySelectorAll('.pdf-page')) as HTMLElement[]
-  if (!pages.length) return
-
-  const containerTop = containerRef.value.getBoundingClientRect().top
-  let nearestPage = pdfStore.currentPage
-  let minDistance = Number.POSITIVE_INFINITY
-
-  pages.forEach((pageEl, index) => {
-    const distance = Math.abs(pageEl.getBoundingClientRect().top - containerTop)
-    if (distance < minDistance) {
-      minDistance = distance
-      nearestPage = index + 1
-    }
-  })
+  // 优化：使用计算而不是 DOM 查询来确定当前页面
+  const scrollTop = containerRef.value.scrollTop
+  
+  // 查找位于视口顶部的页面
+  const p = getPageAtY(scrollTop)
+  
+  // 比较该页面顶部和下一页顶部，看谁离视口顶部更近
+  let nearestPage = p
+  let minDistance = Math.abs(getPageTop(p) - scrollTop)
+  
+  if (p < pdfStore.totalPages) {
+      const nextP = p + 1
+      const distNext = Math.abs(getPageTop(nextP) - scrollTop)
+      if (distNext < minDistance) {
+          nearestPage = nextP
+      }
+  }
 
   // 仅更新页码显示，不触发滚动（通过更新 lastUserTriggeredPage 防止 watch 触发滚动）
   if (nearestPage !== pdfStore.currentPage && nearestPage <= pdfStore.totalPages) {
@@ -990,15 +1121,20 @@ const handleScroll = useDebounceFn(() => { // useDebounceFn 是防抖函数，�
 }, 50)
 
 // 鼠标移动：按下超过阈值时间视为拖动，期间关闭链接点击，避免 selection 终点落在 linkLayer
-function handleMouseMove(_event: MouseEvent) {
+function handleMouseMove(event: MouseEvent) {
   const down = mouseDownInfo.value
   if (!down || linksDisabled.value) return
 
   const elapsed = Date.now() - down.time
-  if (elapsed >= CLICK_TIME_THRESHOLD) {
+  const dx = event.clientX - down.x
+  const dy = event.clientY - down.y
+  const dist = Math.hypot(dx, dy)
+
+  // 当按下时间超过阈值或者移动距离超过阈值时视为拖动（立刻关闭链接点击）
+  if (elapsed >= CLICK_TIME_THRESHOLD || dist >= DRAG_DISTANCE_THRESHOLD) {
     linksDisabled.value = true
   }
-}
+} 
 
 // ------------------------- 点击与选择处理 -------------------------
 // 鼠标点击
@@ -1017,8 +1153,11 @@ function handleMouseUp(event: MouseEvent) {
   const downInfo = mouseDownInfo.value
   mouseDownInfo.value = null
 
-  // 如果时间超过阈值则判定为拖动
-  const isDrag = !!downInfo && (Date.now() - downInfo.time >= CLICK_TIME_THRESHOLD)
+  // 如果时间超过阈值或鼠标移动距离超过阈值则判定为拖动
+  const isDrag = !!downInfo && (
+    (Date.now() - downInfo.time >= CLICK_TIME_THRESHOLD) ||
+    (Math.hypot(event.clientX - downInfo.x, event.clientY - downInfo.y) >= DRAG_DISTANCE_THRESHOLD)
+  )
 
   if (isDrag) {
     // 判定为拖动：全部当作文本选择处理
@@ -1052,7 +1191,7 @@ function handleClick(event: MouseEvent) {
   const pageEl = findPageElement(event.target as Node)
   if (!pageEl || !pageEl.dataset.page) {
     // 点击在页面外部，清除选择
-    handleClickOutside()
+    handleClickOutside(true)
     return
   }
 
@@ -1072,7 +1211,7 @@ function handleClick(event: MouseEvent) {
 
   if (highlightsAtPoint.length === 0) {
     // 点击的是未高亮区域，清除选择
-    handleClickOutside()
+    handleClickOutside(true)
     return
   }
 
@@ -1126,12 +1265,10 @@ function IoU(rectA: { left: number; top: number; width: number; height: number }
 // ------------------------- 高亮与文本选择处理 -------------------------
 
 // 手动文本选择的处理逻辑（逐行中文注释）
-// TODO: 目前选框的时候，如果鼠标移动到了两行中间，那么此时就会将整个页面下面全部选中，所以如果我不断往下拉就会出现 选一行->全部选中->选两行->全部选中 这样一闪一闪的情况，体验感会变差
 function handleTextSelection() {
   const selection = window.getSelection() // 获取当前窗口选择
   
   // 如果没有选择或仅包含空白字符，直接退出
-  // TODO: 是否支持划空白？
   if (!selection || !selection.toString().trim()) {
     return
   }
@@ -1210,10 +1347,12 @@ function handleTextSelection() {
   showTooltip.value = true // 打开提示
 }
 
-function handleClickOutside() {
+function handleClickOutside(forceClose: boolean = false) {
   const selection = window.getSelection()
-  // Keep the action menu open when there is still a text selection
-  if (selection && selection.toString().trim()) return
+  // 如果不是强制关闭，且有选中文本，则不关闭
+  if (!forceClose && selection && selection.toString().trim()) return
+
+  selection?.removeAllRanges()
 
   showTooltip.value = false // 隐藏提示
   pdfStore.clearSelection() // 清空选中文本
@@ -1377,7 +1516,7 @@ function handleParagraphMarkerClick(event: MouseEvent, paragraphId: string, orig
 
 // 计算段落光标在页面中的位置（考虑缩放）
 function getParagraphMarkerStyle(paragraph: { bbox: { x0: number; y0: number } }, pageNumber: number) {
-  const size = pageSizes.value.get(pageNumber)
+  const size = getPageSize(pageNumber)
   if (!size) return { display: 'none' }
   
   // 光标显示在段落左上角
@@ -1641,10 +1780,6 @@ onBeforeUnmount(() => {
   border-radius: 0.75rem; /* 单页容器圆角 */
 }
 
-.textLayer {
-  pointer-events: auto; /* 允许 Text Layer 响应鼠标事件 */
-}
-
 .highlightLayer {
   z-index: 4; /* ensure highlight stays above link overlays */
   pointer-events: none;
@@ -1671,10 +1806,6 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 4px rgba(0,0,0,0.1);
   background-color: transparent;
   z-index: 2; /* 确保在普通高亮之上 */
-}
-
-:deep(.textLayer span) {
-  cursor: text; /*  Text Layer 中文字光标样式 */
 }
 
 :deep(.linkLayer a),
@@ -1746,7 +1877,6 @@ onBeforeUnmount(() => {
 }
 
 .zooming-layer {
-  opacity: 0.35;
   pointer-events: none;
   transition: opacity 0.15s ease;
 }
@@ -1769,11 +1899,7 @@ onBeforeUnmount(() => {
   filter: invert(0.92) hue-rotate(180deg) brightness(1.05);
 }
 
-:global(.dark .textLayer),
-:global(.dark .textLayer span) {
-  color: transparent !important;
-  mix-blend-mode: normal;
-}
+
 
 :global(.dark .highlight-selected-box) {
   border-color: #cbd5ff;
@@ -1802,19 +1928,32 @@ onBeforeUnmount(() => {
   background: #6b7280;
 }
 
+.textLayer {
+  pointer-events: auto; /* 允许 Text Layer 响应鼠标事件 */
+}
+
 /* Fix for PDF text layer alignment and font matching (ICML / Times New Roman) */
 :deep(.textLayer) {
   opacity: 1;
 }
 
-:deep(.textLayer span) {
+:global(.dark .textLayer),
+:global(.dark .textLayer span) {
   color: transparent !important;
+  mix-blend-mode: normal;
+}
+
+:deep(.textLayer span) {
+  display: inline-block;
+  padding: 5px 0;
+  margin: -5px 0;
   line-height: 1.0 !important;
   letter-spacing: 0.2px !important;
   transform-origin: 0 0;
   font-family: "Times New Roman", "Nimbus Roman No9 L", "FreeSerif", "Liberation Serif", serif !important;
   white-space: pre;
   cursor: text;
+  color: transparent !important;
 }
 
 :deep(.textLayer ::selection) {
