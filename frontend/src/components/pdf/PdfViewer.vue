@@ -1277,7 +1277,6 @@ function handleTextSelection() {
 
   // 获取选中的纯文本（去除首尾空白）
   const text = selection.toString().trim()
-  console.log('Selected text:', text)
   // 获取选区的第一个 Range（代表一段连续的文本范围）
   const range = selection.getRangeAt(0)
   // 从 Range 的 commonAncestorContainer 向上查找所属的页面元素（.pdf-page）
@@ -1289,7 +1288,7 @@ function handleTextSelection() {
   }
 
   // 解析页面的页码（dataset 存储的是字符串）
-  // TODO: 以后要支持跨页的高亮
+  // TODO: 以后要支持跨页的高亮吗？
   const pageNumber = Number(pageEl.dataset.page)
 
   // 找到当前页面上的文本层（textLayer），用于计算坐标和尺寸
