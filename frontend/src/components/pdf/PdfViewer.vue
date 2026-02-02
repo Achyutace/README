@@ -188,23 +188,16 @@ function getPageAtY(y: number): number {
   
   if (yAdjusted < 0) return 1
 
-  // 常数高度情况 - 直接计算 O(1)
+  // 常数PDF高度情况 - 直接计算 O(1)
   if (pageSizesConstant.value) {
     const itemHeight = pageSizesConstant.value.height * scale + PAGE_GAP
     const index = Math.floor(yAdjusted / itemHeight)
     return Math.max(1, Math.min(count, index + 1))
   }
   
-  // 变长高度情况 - 二分查找 O(log N)
+  // 变长PDF高度情况 - 二分查找 O(log N)
   let low = 1, high = count
-  
-  // We want to find largest i such that getPageTop(i) <= y
-  // The 'getPageAtY' semantics: if y is within page 1, return 1.
-  // getPageTop(page) gives the top edge. 
-  // If y >= top(page), it could be in that page or after.
-  
   let result = 1
-  
   while (low <= high) {
     const mid = Math.floor((low + high) / 2)
     const top = getPageTop(mid)
@@ -216,10 +209,6 @@ function getPageAtY(y: number): number {
       high = mid - 1
     }
   }
-  
-  // result is the page whose top is <= y.
-  // Check if y is within this page or the gap following it?
-  // Actually usually we just want the page at that Y.
   return result
 }
 
@@ -961,7 +950,6 @@ function cleanup() {
 
 // ------------------------- 交互处理 (滚动、缩放、点击) -------------------------
 // 缩放手势进行时，先按目标尺寸拉伸已有渲染
-// TODO: 目前 textlayer 缩放还是不对
 function applyInterimScale() {
   pageRefs.forEach((refs, pageNumber) => {
     const size = getPageSize(pageNumber)
@@ -1392,14 +1380,13 @@ async function loadNotesCache() {
 
 // 获取点击位置的单词
 function getWordAtPoint(x: number, y: number): string | null {
-  // 使用 document.caretPositionFromPoint 或 caretRangeFromPoint 获取点击位置
   let range: Range | null = null
 
-  // caretRangeFromPoint (Chrome, Safari)
+  // 获取点击位置 (Chrome, Edge, Safari 版本)
   if (typeof (document as any).caretRangeFromPoint === 'function') {
     range = (document as any).caretRangeFromPoint(x, y)
   }
-  // caretPositionFromPoint (Firefox)
+  // 获取点击位置 (Firefox 版本)
   else if (typeof (document as any).caretPositionFromPoint === 'function') {
     const pos = (document as any).caretPositionFromPoint(x, y)
     if (pos && pos.offsetNode) {
