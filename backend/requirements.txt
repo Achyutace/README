@@ -41,6 +41,5 @@ alembic==1.13.1
 networkx==3.2.1
 
 # Data Persistence
-sqlalchemy==2.0.28
 qdrant-client>=1.7.0
 pyyaml>=6.0
