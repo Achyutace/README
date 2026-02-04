@@ -18,3 +18,17 @@ translate:
 tavily:
   # Tavily 搜索 API Key (可选，用于联网搜索功能)
   api_key: ""
+
+# 向量数据库配置
+vector_store:
+  # 启用特定的向量存储
+  enable_chroma: true
+  enable_qdrant: true
+
+  chroma:
+    path: "./storage/chroma_db"
+  
+  qdrant:
+    url: "http://localhost:6333"
+    api_key: ""
+    prefer_grpc: true

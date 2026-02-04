@@ -31,3 +31,16 @@ scikit-learn==1.4.0
 
 # Network
 httpx==0.27.0
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.25
+alembic==1.13.1
+
+# Graph Logic
+networkx==3.2.1
+
+# Data Persistence
+sqlalchemy==2.0.28
+qdrant-client>=1.7.0
+pyyaml>=6.0
