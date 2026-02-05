@@ -181,6 +181,16 @@ class SQLRepository:
         stmt = stmt.order_by(PdfParagraph.page_number, PdfParagraph.paragraph_index)
         return self.db.execute(stmt).scalars().all()
 
+    def get_paragraph_translation(self, file_hash: str, page_number: int, paragraph_index: int) -> Optional[str]:
+        stmt = select(PdfParagraph.translation_text).where(
+            and_(
+                PdfParagraph.file_hash == file_hash,
+                PdfParagraph.page_number == page_number,
+                PdfParagraph.paragraph_index == paragraph_index
+            )
+        )
+        return self.db.execute(stmt).scalar_one_or_none()
+
     def update_paragraph_translation(self, file_hash: str, page_number: int, paragraph_index: int, translation: str):
         stmt = update(PdfParagraph).where(
             and_(
@@ -191,6 +201,18 @@ class SQLRepository:
         ).values(translation_text=translation)
         self.db.execute(stmt)
         self.db.commit()
+
+    def get_paragraph_text_by_y(self, file_hash: str, page_number: int, y_coord: float) -> Optional[str]:
+        # Filter in memory for simplicity (bbox is JSONB)
+        paragraphs = self.get_paragraphs(file_hash, page_number)
+        for p in paragraphs:
+            if p.bbox and isinstance(p.bbox, list) and len(p.bbox) >= 4:
+                # bbox is [x, y, w, h]
+                py = p.bbox[1]
+                ph = p.bbox[3]
+                if py <= y_coord <= (py + ph):
+                    return p.original_text
+        return None
 
     def get_images(self, file_hash: str, page_number: Optional[int] = None) -> List[PdfImage]:
         stmt = select(PdfImage).where(PdfImage.file_hash == file_hash)
@@ -273,61 +295,80 @@ class SQLRepository:
 
     # ==================== Chat ====================
 
-    def create_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID, user_paper_id: Optional[uuid.UUID] = None, title: str = "New Chat") -> ChatSession:
+    def create_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat") -> ChatSession:
         session = ChatSession(
             id=session_id,
             user_id=user_id,
-            user_paper_id=user_paper_id,
+            user_paper_id=file_hash,
             title=title
         )
         self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
         return session
-
-    def get_chat_session(self, session_id: uuid.UUID) -> Optional[ChatSession]:
-        stmt = select(ChatSession).where(ChatSession.id == session_id)
+    
+    def get_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID) -> Optional[ChatSession]:
+        stmt = select(ChatSession).where(
+            and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        )
         return self.db.execute(stmt).scalar_one_or_none()
         
-    def list_chat_sessions(self, user_id: uuid.UUID, limit: int = 50) -> List[ChatSession]:
-        stmt = select(ChatSession).where(ChatSession.user_id == user_id).order_by(desc(ChatSession.updated_at)).limit(limit)
+    def list_chat_sessions(self, user_id: uuid.UUID, file_hash: Optional[str] = None, limit: int = 50) -> List[ChatSession]:
+        stmt = select(ChatSession).where(ChatSession.user_id == user_id)
+        if file_hash:
+            stmt = stmt.where(ChatSession.file_hash == file_hash)
+        stmt = stmt.order_by(desc(ChatSession.updated_at)).limit(limit)
         return self.db.execute(stmt).scalars().all()
-
-    def update_chat_session_title(self, session_id: uuid.UUID, title: str):
-        stmt = update(ChatSession).where(ChatSession.id == session_id).values(title=title)
-        self.db.execute(stmt)
+    
+    def update_chat_session_title(self, session_id: uuid.UUID, user_id: uuid.UUID, title: str) -> bool:
+        stmt = update(ChatSession).where(
+            and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        ).values(title=title)
+        result = self.db.execute(stmt)
         self.db.commit()
+        return result.rowcount > 0
         
-    def delete_chat_session(self, session_id: uuid.UUID):
-        stmt = delete(ChatSession).where(ChatSession.id == session_id)
-        self.db.execute(stmt)
+    def delete_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        session = self.get_chat_session(session_id, user_id)
+        if not session:
+            return 0
+        
+        # 删除消息 
+        del_msgs_stmt = delete(ChatMessage).where(ChatMessage.session_id == session_id)
+        self.db.execute(del_msgs_stmt)
+        # 删除会话
+        stmt = delete(ChatSession).where(
+            and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        )
+        result = self.db.execute(stmt)
         self.db.commit()
+        return result.rowcount
+    
+    def add_chat_message(self, session_id: uuid.UUID, user_id: uuid.UUID, role: str, content: str, citations: List[Dict] = None) -> ChatMessage:
+        stmt = select(ChatSession.id).where(and_(ChatSession.id == session_id, ChatSession.user_id == user_id))
+        exists = self.db.execute(stmt).scalar_one_or_none()
+        if not exists:
+             raise ValueError(f"Session {session_id} not found for user {user_id}")
 
-    def add_chat_message(self, session_id: uuid.UUID, role: str, content: str, citations: List[Dict] = None) -> ChatMessage:
         msg = ChatMessage(
             session_id=session_id,
             role=role,
             content=content,
-            citations=citations
+            citations=citations or []
         )
         self.db.add(msg)
         self.db.commit()
         self.db.refresh(msg)
         return msg
-
-    def get_chat_history(self, session_id: uuid.UUID, limit: int = 20) -> List[ChatMessage]:
-        stmt = select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(asc(ChatMessage.created_at))
-        # Logic to limit? Usually chat history is fine to fetch all or paginate. 
-        # If limiting, we usually want the *latest* N messages.
-        if limit:
-            # Efficient pagination for chat history usually involves getting last N.
-            # But order_by asc means we get first N. 
-            # To get last N: order by desc, limit, then reverse.
-            # For simplicity, if limit is small, fetch all is okay-ish or subquery.
-            pass
-            
+    def get_chat_history(self, session_id: uuid.UUID, user_id: uuid.UUID) -> List[ChatMessage]:
+        stmt = select(ChatMessage).join(ChatSession).where(
+            and_(
+                ChatMessage.session_id == session_id,
+                ChatSession.user_id == user_id
+            )
+        ).order_by(asc(ChatMessage.created_at))
         return self.db.execute(stmt).scalars().all()
-
+    
     # ==================== Graph Knowledge Base ====================
 
     # --- Project ---

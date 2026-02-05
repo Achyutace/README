@@ -22,8 +22,8 @@ from langgraph.graph import StateGraph, END  # 状态图和结束节点
 # 本地服务和工具
 from services.rag_service import RAGService  # RAG服务
 from services.storage_service import StorageService
-from tools.web_search_tool import WebSearchTool  # 网络搜索工具
-from tools.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
+from utils.web_search_tool import WebSearchTool  # 网络搜索工具
+from utils.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
 class AgentState(TypedDict):
     """ Agent 状态定义 """
     user_query: str  

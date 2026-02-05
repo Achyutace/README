@@ -1,7 +1,7 @@
 """
 PDF服务
-1. PDF upload
-2. PDF delete
+1. PDF管理（上传：解析+存储 删除：数据库删除）
+2. PDF资源获取 (根据pdf_id获取pdf资源)
 
 """
 import os
@@ -9,9 +9,8 @@ import uuid
 import json
 import hashlib
 from pathlib import Path
-import fitz  # PyMuPDF
 from werkzeug.utils import secure_filename
-import base64
+from utils import pdf_engine
 
 class PdfService:
     def __init__(self, upload_folder: str, cache_folder: str = None):
@@ -37,6 +36,11 @@ class PdfService:
         # 设置段落缓存子目录
         self.paragraphs_cache = os.path.join(self.cache_folder, 'paragraphs')
         os.makedirs(self.paragraphs_cache, exist_ok=True)
+
+        # 设置图片缓存子目录
+        self.images_cache = os.path.join(self.cache_folder, 'images')
+        os.makedirs(self.images_cache, exist_ok=True)
+
 
     def _find_filepath_by_id(self, pdf_id: str) -> str:
         """
@@ -74,9 +78,7 @@ class PdfService:
         
         if existing_filepath:
             # 文件已存在，不再重复写入磁盘
-            doc = fitz.open(existing_filepath)
-            page_count = len(doc)
-            doc.close()
+            page_count = pdf_engine.get_page_count(existing_filepath)
             
             # 确保注册表中有它
             self.pdf_registry[pdf_id] = {
@@ -101,9 +103,7 @@ class PdfService:
         file.save(filepath)
 
         # Open PDF to get page count
-        doc = fitz.open(filepath)
-        page_count = len(doc)
-        doc.close()
+        page_count = pdf_engine.get_page_count(filepath)
 
         # Store in registry
         self.pdf_registry[pdf_id] = {
@@ -132,89 +132,17 @@ class PdfService:
     def get_info(self, pdf_id: str) -> dict:
         """Get PDF info by ID."""
         filepath = self.get_filepath(pdf_id)
-        doc = fitz.open(filepath)
-
-        info = {
-            'id': pdf_id,
-            'pageCount': len(doc),
-            'metadata': doc.metadata
-        }
-
-        doc.close()
-        return info
+        return pdf_engine.get_pdf_info(pdf_id, filepath)
 
     def get_page_dimensions(self, pdf_id: str, page_number: int) -> dict:
         """获取特定页面的尺寸，用于坐标转换"""
         filepath = self.get_filepath(pdf_id)
-        doc = fitz.open(filepath)
-        
-        try:
-            if page_number < 1 or page_number > len(doc):
-                raise ValueError(f"Invalid page number: {page_number}")
-            
-            page = doc[page_number - 1]
-            rect = page.rect
-            return {
-                "width": rect.width,
-                "height": rect.height
-            }
-        finally:
-            doc.close()
+        return pdf_engine.get_page_dimensions(filepath, page_number)
             
     def extract_text(self, pdf_id: str, page_number: int = None) -> dict:
         """Extract text from PDF, optionally from specific page."""
         filepath = self.get_filepath(pdf_id)
-        doc = fitz.open(filepath)
-
-        blocks = []
-        full_text = []
-
-        if page_number is not None:
-            # Extract from specific page (1-indexed)
-            if page_number < 1 or page_number > len(doc):
-                doc.close()
-                raise ValueError(f"Invalid page number: {page_number}")
-
-            page = doc[page_number - 1]
-            page_blocks = self._extract_page_blocks(page, page_number)
-            blocks.extend(page_blocks)
-            full_text.append(page.get_text())
-        else:
-            # Extract from all pages
-            for i, page in enumerate(doc):
-                page_blocks = self._extract_page_blocks(page, i + 1)
-                blocks.extend(page_blocks)
-                full_text.append(page.get_text())
-
-        doc.close()
-
-        return {
-            'text': '\n\n'.join(full_text),
-            'blocks': blocks
-        }
-
-    def _extract_page_blocks(self, page, page_number: int) -> list:
-        """Extract text blocks with bounding boxes from a page."""
-        blocks = []
-        dict_blocks = page.get_text("dict")["blocks"]
-
-        for block in dict_blocks:
-            if block.get("type") == 0:  # Text block
-                text = ""
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        text += span.get("text", "")
-                    text += "\n"
-
-                text = text.strip()
-                if text:
-                    blocks.append({
-                        'text': text,
-                        'pageNumber': page_number,
-                        'bbox': list(block['bbox'])  # [x0, y0, x1, y1]
-                    })
-
-        return blocks
+        return pdf_engine.extract_text(filepath, page_number)
 
     def parse_paragraphs(self, pdf_id: str) -> list[dict]:
         """
@@ -231,57 +159,7 @@ class PdfService:
         
         # 缓存未命中，开始解析
         filepath = self.get_filepath(pdf_id)
-        doc = fitz.open(filepath)
-        paragraphs = []
-        
-        for page_num, page in enumerate(doc):
-            # 获取页面尺寸，用于简单的页眉页脚过滤判断
-            page_height = page.rect.height
-            header_threshold = 50
-            footer_threshold = page_height - 50
-
-            # 尝试按照阅读顺序排序文本块
-            blocks = page.get_text("blocks", sort=True)
-            
-            for block in blocks:
-                # block 结构: (x0, y0, x1, y1, text, block_no, block_type)
-                x0, y0, x1, y1, text, block_no, block_type = block
-                
-                # 只处理文本。
-                if block_type != 0:
-                    continue
-
-                # 如果文本块完全位于顶部或底部区域，视为噪音
-                if y1 < header_threshold or y0 > footer_threshold:
-                    continue
-                
-                # 文本清洗
-                clean_text = text.replace('-\n', '').replace('\n', ' ').strip()
-                
-                # 忽略过短的非实质性文本碎片
-                if len(clean_text.split()) < 10:
-                    continue
-
-                # 生成确定性的段落ID，方便前端定位
-                # 格式: pdf_chk_{pdf_id前8位}_{页码}_{块号}
-                para_id = f"pdf_chk_{pdf_id[:8]}_{page_num + 1}_{block_no}"
-
-                paragraphs.append({
-                    "id": para_id,
-                    "page": page_num + 1,
-                    "bbox": {
-                        "x0": x0,
-                        "y0": y0,
-                        "x1": x1,
-                        "y1": y1,
-                        "width": x1 - x0,
-                        "height": y1 - y0
-                    },
-                    "content": clean_text,
-                    "wordCount": len(clean_text.split())
-                })
-
-        doc.close()
+        paragraphs = pdf_engine.parse_paragraphs(filepath, pdf_id)
         
         # 写入缓存
         with open(cache_file, 'w', encoding='utf-8') as f:
@@ -294,36 +172,7 @@ class PdfService:
         预处理：获取PDF所有图片的元数据列表（ID、页码、坐标），不包含Base64内容。
         """
         filepath = self.get_filepath(pdf_id)
-        doc = fitz.open(filepath)
-        images_meta = []
-        
-        for page_num, page in enumerate(doc):
-            # get_image_info(xrefs=True) 返回页面图片信息
-            page_images = page.get_image_info(xrefs=True)
-            
-            for img in page_images:
-                xref = img['xref']
-                bbox = img['bbox']
-                
-                # 构造唯一图片ID，方便直接提取
-                # 格式: {pdf_id}__xref__{xref} (使用复杂的连接符避免混淆)
-                image_id = f"{pdf_id}__xref__{xref}"
-                
-                images_meta.append({
-                    "id": image_id,
-                    "page": page_num + 1,
-                    "bbox": {
-                        "x0": bbox[0],
-                        "y0": bbox[1],
-                        "x1": bbox[2],
-                        "y1": bbox[3],
-                        "width": bbox[2] - bbox[0],
-                        "height": bbox[3] - bbox[1]
-                    }
-                })
-
-        doc.close()
-        return images_meta
+        return pdf_engine.get_images_list(filepath, pdf_id)
 
     def get_image_data(self, image_id: str) -> dict:
         """
@@ -347,24 +196,9 @@ class PdfService:
             xref = int(xref_str)
             
             filepath = self.get_filepath(pdf_id)
-            doc = fitz.open(filepath)
             
-            # 使用 xref 直接提取图片
-            base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
-            image_ext = base_image["ext"]
-            
-            doc.close()
-            
-            # 转为 Base64
-            base64_str = base64.b64encode(image_bytes).decode('utf-8')
-            mime_type = f"image/{image_ext}"
-            
-            result = {
-                "id": image_id,
-                "mimeType": mime_type,
-                "base64": f"data:{mime_type};base64,{base64_str}"
-            }
+            result = pdf_engine.get_image_data(filepath, xref)
+            result['id'] = image_id
             
             # 写入缓存
             with open(cache_file, 'w', encoding='utf-8') as f:

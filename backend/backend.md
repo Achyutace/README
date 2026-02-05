@@ -44,7 +44,7 @@ readme/
     │   │   └── ...                 # LangGraph节点
     |   └── main_graph.py           # 构建 Workflow, 编译 StateGraph
     ├── utils/                      # 纯工具箱： 无业务状态、纯函数，从原来的service模块中提取
-    │   ├── pdf_parser.py           # PDF 解析 (PyPDF), 文本清洗
+    │   ├── pdf_engine.py           # PDF 解析 (PyPDF), 文本清洗
     │   ├── image_processor.py      # 图片处理 (OCR等)
     │   ├── embedding_utils.py      # 向量化封装 (OpenAI 等 API 调用)
     │   ├── search_utils.py         # 联网搜索封装 (搜索 API 请求与清洗)
