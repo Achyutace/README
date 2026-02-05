@@ -23,6 +23,9 @@ try:
 except ImportError:
     HAS_CHROMA = False
 
+from ..repository.vector_repo import vector_repo
+
+
 try:
     import fitz  # PyMuPDF
     HAS_FITZ = True
@@ -274,20 +277,10 @@ class RAGService:
         
         Args:
             file_hash: PDF 文件哈希值
-            chunks: 文本块列表，每个元素格式：
-                {
-                    'content': str,      # 文本内容（必需）
-                    'page': int,         # 页码（必需）
-                    'section': str,      # 章节类型（可选，默认 'content'）
-                    'metadata': Dict     # 其他元数据（可选）
-                }
+            chunks: 文本块列表
         
         Returns:
-            {
-                'success': bool,
-                'message': str,
-                'chunks_count': int
-            }
+            Dict: 结果
         """
         try:
             if not chunks:
@@ -296,8 +289,8 @@ class RAGService:
                     'message': 'No chunks provided'
                 }
             
-            # 如果没有 embeddings，使用 demo 模式
-            if not self.has_embeddings or not HAS_CHROMA:
+            # 如果没有 embeddings 或 vector_repo 不可用，使用 demo 模式
+            if not self.has_embeddings or not vector_repo.is_available():
                 return {
                     'success': True,
                     'message': f'Demo mode: {len(chunks)} chunks cached (not persisted)',
@@ -317,7 +310,8 @@ class RAGService:
                     'file_hash': file_hash,  # 使用 file_hash 
                     'page': chunk.get('page', 0),
                     'section': chunk.get('section', 'content'),
-                    'chunk_index': i
+                    'chunk_index': i,
+                    'page_content': chunk['content'] # 存入 payload 以便检索时获取
                 }
                 # 合并额外的元数据
                 if 'metadata' in chunk:
@@ -326,19 +320,22 @@ class RAGService:
                 metadatas.append(meta)
                 ids.append(f"{file_hash}_chunk_{i}")
             
-            # 先删除旧数据
-            self._delete_from_chroma(file_hash)
+            collection_name = f"paper_{file_hash[:16]}"
             
-            # 存储到 Chroma
-            vectorstore = Chroma(
-                collection_name=f"paper_{file_hash[:16]}",  # 使用前16位避免名称过长
-                embedding_function=self.embeddings,
-                persist_directory=self.chroma_dir
-            )
+            # 1. 重新创建集合 (清理旧数据)
+            if vector_repo.check_collection_exists(collection_name):
+                vector_repo.delete_collection(collection_name)
             
-            vectorstore.add_texts(
-                texts=texts,
-                metadatas=metadatas,
+            vector_repo.create_collection(collection_name)
+            
+            # 2. 生成 Embeddings
+            embeddings = self.embeddings.embed_documents(texts)
+            
+            # 3. 存储到 Qdrant
+            vector_repo.upsert_vectors(
+                collection_name=collection_name,
+                vectors=embeddings,
+                payloads=metadatas,
                 ids=ids
             )
             
@@ -373,21 +370,10 @@ class RAGService:
             filters: 过滤条件，例如 {'section': 'method', 'page': 5}
             
         Returns:
-            [
-                {
-                    'content': '检索到的文本块',
-                    'parent_content': '父级内容（完整块）',
-                    'page': 页码,
-                    'section': 章节类型,
-                    'chunk_index': 块索引,
-                    'score': 相似度分数 (0-1),
-                    'metadata': {...}
-                },
-                ...
-            ]
+            List[Dict]: 检索结果
         """
-        # 如果没有 embeddings，使用 demo 模式
-        if not self.has_embeddings or not HAS_CHROMA:
+        # 如果没有 embeddings 或 Repo 不可用，使用 demo 模式
+        if not self.has_embeddings or not vector_repo.is_available():
             return self._demo_retrieve(query, user_id, top_k)
         
         # 确定要检索的文件哈希列表
@@ -404,36 +390,47 @@ class RAGService:
         
         all_results = []
         
+        # 生成查询向量
+        try:
+            query_vector = self.embeddings.embed_query(query)
+        except Exception as e:
+            print(f"Embedding error: {e}")
+            return []
+        
         for fh in file_hashes:
             try:
-                vectorstore = Chroma(
-                    collection_name=f"paper_{fh[:16]}",
-                    embedding_function=self.embeddings,
-                    persist_directory=self.chroma_dir
-                )
+                collection_name = f"paper_{fh[:16]}"
                 
-                # 构建过滤条件
-                where_filter = {'file_hash': fh}
+                # Check exist
+                if not vector_repo.check_collection_exists(collection_name):
+                    continue
+
+                # 构建筛选条件
+                search_filters = {}
                 if filters:
-                    where_filter.update(filters)
+                    search_filters.update(filters)
                 
                 # 检索
-                results = vectorstore.similarity_search_with_score(
-                    query=query,
-                    k=top_k,
-                    filter=where_filter if len(where_filter) > 1 else None
+                results = vector_repo.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    filter_conditions=search_filters if search_filters else None
                 )
                 
                 # 格式化结果
-                for doc, score in results:
+                for point in results:
+                    payload = point.payload or {}
+                    content = payload.get('page_content', '')
+                    
                     all_results.append({
-                        'content': doc.page_content,
-                        'parent_content': doc.page_content,  # 兼容 agent_service
-                        'page': doc.metadata.get('page', 0),
-                        'section': doc.metadata.get('section', 'content'),
-                        'chunk_index': doc.metadata.get('chunk_index', 0),
-                        'score': float(1 - score),
-                        'metadata': doc.metadata
+                        'content': content,
+                        'parent_content': content, 
+                        'page': payload.get('page', 0),
+                        'section': payload.get('section', 'content'),
+                        'chunk_index': payload.get('chunk_index', 0),
+                        'score': point.score,
+                        'metadata': payload
                     })
                 
             except Exception as e:
@@ -479,7 +476,8 @@ class RAGService:
                 # 从缓存中删除
                 del self._paper_cache[paper_id_or_hash]
             
-            self._delete_from_chroma(file_hash)
+            collection_name = f"paper_{file_hash[:16]}"
+            vector_repo.delete_collection(collection_name)
             return True
         except Exception as e:
             print(f"Error deleting paper: {e}")
@@ -496,36 +494,10 @@ class RAGService:
         Returns:
             True if exists, False otherwise
         """
-        if not self.has_embeddings or not HAS_CHROMA:
+        if not vector_repo.is_available():
             return False
             
-        try:
-            vectorstore = Chroma(
-                collection_name=f"paper_{file_hash[:16]}",
-                embedding_function=self.embeddings,
-                persist_directory=self.chroma_dir
-            )
-            collection = vectorstore._collection
-            return collection.count() > 0
-        except:
-            return False
+        collection_name = f"paper_{file_hash[:16]}"
+        return vector_repo.check_collection_exists(collection_name)
     
     
-    def _delete_from_chroma(self, file_hash: str):
-        """从 Chroma 删除指定论文的所有数据"""
-        if not self.has_embeddings or not HAS_CHROMA:
-            return
-            
-        try:
-            vectorstore = Chroma(
-                collection_name=f"paper_{file_hash[:16]}",
-                embedding_function=self.embeddings,
-                persist_directory=self.chroma_dir
-            )
-            
-            # 删除集合
-            vectorstore.delete_collection()
-            
-        except Exception as e:
-            # 如果集合不存在，忽略错误
-            pass

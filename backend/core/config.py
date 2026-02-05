@@ -21,10 +21,7 @@ class OpenAIConfig(BaseModel):
     model: str = "gpt-4o"
 
 class VectorStoreConfig(BaseModel):
-    enable_chroma: bool = True
-    enable_qdrant: bool = False
-    
-    chroma_path: str = "./storage/chroma_db"
+    enable_qdrant: bool = True
     
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: Optional[str] = None
@@ -41,9 +38,7 @@ class AppConfig:
         # Vector Store
         vs_conf = raw.get("vector_store", {})
         self.vector_store = VectorStoreConfig(
-            enable_chroma=vs_conf.get("enable_chroma", True),
-            enable_qdrant=vs_conf.get("enable_qdrant", False),
-            chroma_path=vs_conf.get("chroma", {}).get("path", "./storage/chroma_db"),
+            enable_qdrant=vs_conf.get("enable_qdrant", True),
             qdrant_url=vs_conf.get("qdrant", {}).get("url", "http://localhost:6333"),
             qdrant_api_key=vs_conf.get("qdrant", {}).get("api_key"),
             qdrant_prefer_grpc=vs_conf.get("qdrant", {}).get("prefer_grpc", True),

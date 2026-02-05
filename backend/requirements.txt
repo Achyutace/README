@@ -16,7 +16,7 @@ langchain-community==0.3.0
 langgraph==0.3.0
 
 # Vector Database
-chromadb==0.4.22
+qdrant-client>=1.7.0
 
 # Tools & Agents
 tavily-python==0.3.3
@@ -40,6 +40,4 @@ alembic==1.13.1
 # Graph Logic
 networkx==3.2.1
 
-# Data Persistence
-qdrant-client>=1.7.0
 pyyaml>=6.0

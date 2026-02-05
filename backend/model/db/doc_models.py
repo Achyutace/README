@@ -35,6 +35,7 @@ class GlobalFile(Base):
     metadata_info = Column(JSONB, default={}, comment="PDF原生元数据: author, publish_date, doi")
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_accessed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="最后被访问/引用的时间 (用于GC)")
     
     # 关系
     paragraphs = relationship("PdfParagraph", back_populates="file", cascade="all, delete-orphan")
@@ -107,6 +108,10 @@ class UserPaper(Base):
     
     added_at = Column(DateTime(timezone=True), server_default=func.now())
     last_read_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # 软删除 
+    is_deleted = Column(Boolean, default=False, comment="逻辑删除标记")
+    deleted_at = Column(DateTime(timezone=True), nullable=True, comment="逻辑删除时间")
 
     # 关系
     user = relationship("User", back_populates="papers")

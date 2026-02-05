@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import logging
 from typing import Optional
@@ -11,11 +12,6 @@ try:
 except ImportError:
     QdrantClient = None
 
-try:
-    import chromadb
-except ImportError:
-    chromadb = None
-
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -23,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # 1. PostgreSQL (SQLAlchemy)
 # ==========================================
-# 从环境变量获取数据库连接，生产环境必须这样做
+# 从环境变量获取数据库连接
 DATABASE_URL = settings.DATABASE_URL
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -36,27 +32,14 @@ def get_db():
         db.close()
 
 # ==========================================
-# 2. Vector Databases (Qdrant & Chroma)
+# 2. Vector Databases (Qdrant)
 # ==========================================
-
 class VectorDBClient:
     def __init__(self):
-        self.qdrant: Optional[QdrantClient] = None
-        self.chroma: Optional[chromadb.ClientAPI] = None
+        self.qdrant: Optional["QdrantClient"] = None
         self._init_clients()
 
     def _init_clients(self):
-        # Init Chroma
-        if settings.vector_store.enable_chroma:
-            if chromadb:
-                try:
-                    self.chroma = chromadb.PersistentClient(path=settings.vector_store.chroma_path)
-                    logger.info(f"ChromaDB initialized at {settings.vector_store.chroma_path}")
-                except Exception as e:
-                    logger.error(f"Failed to initialize ChromaDB: {e}")
-            else:
-                logger.warning("ChromaDB library not installed but enabled in config.")
-
         # Init Qdrant
         if settings.vector_store.enable_qdrant:
             if QdrantClient:
