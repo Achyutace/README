@@ -166,13 +166,15 @@ function getPageTop(pageNumber: number) {
   // 常数高度情况 - O(1)
   if (pageSizesConstant.value) {
     const h = pageSizesConstant.value.height * scale
-    return CONTAINER_PADDING + index * (h + PAGE_GAP)
+    // 保证计算出来的 top 为整数像素，避免缩放后累积的浮点误差
+    return Math.round(CONTAINER_PADDING + index * (h + PAGE_GAP))
   }
   
   // 变长高度情况 - O(1) 查表
   if (pageHeightAccumulator.value.length > index) {
     const accH = pageHeightAccumulator.value[index] ?? 0
-    return CONTAINER_PADDING + accH * scale + index * PAGE_GAP
+    // 同样对变长高度情况取整，保证逻辑上的页 top 与 DOM 中的 offsetTop 对齐
+    return Math.round(CONTAINER_PADDING + accH * scale + index * PAGE_GAP)
   }
   
   return CONTAINER_PADDING
@@ -211,8 +213,6 @@ function getPageAtY(y: number): number {
   }
   return result
 }
-
-// 页面是否已渲染
 
 // 页面是否已渲染
 function isPageRendered(pageNumber: number) {
@@ -315,9 +315,10 @@ function restoreAnchor(anchor: ZoomAnchor) {
       left = currentContentX - container.clientWidth / 2
   }
 
+  // 吸附到整数像素，避免亚像素渲染导致模糊
   container.scrollTo({
-    top,
-    left,
+    top: Math.round(top),
+    left: Math.round(left),
     behavior: 'instant' as ScrollBehavior
   })
 }
@@ -364,6 +365,7 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
 // ------------------------- 渲染核心与监听调度 -------------------------
 // 核心渲染逻辑：仅渲染可见区域页面，大幅提升长文档性能
 const updateVisiblePages = useDebounceFn(() => {
+  // 如果容器或 PDF 文档不存在，则返回
   if (!containerRef.value || !pdfDoc.value) return
 
   const container = containerRef.value
@@ -597,60 +599,70 @@ async function renderPage(pageNumber: number, options?: { preserveContent?: bool
   // 获取页面对象
   const page = await pdf.getPage(pageNumber) 
 
-  // 获取PDF视口（把 PDF 的内部坐标系映射到页面/画布坐标）
-  const viewport = page.getViewport({ scale: pdfStore.scale })
-
+  
   // 准备目标 Canvas
   const targetCanvas = preserveContent ? // 是否保留已有内容
     document.createElement('canvas') : // 如是：新建临时 Canvas 用于保留内容
     refs.canvas // 如不是：直接使用页面的 Canvas
   
   // 获取画布 2D 上下文
-  const context = targetCanvas.getContext('2d') 
+  const context = targetCanvas.getContext('2d', {
+    alpha: false,
+    willReadFrequently: false // 如果不需要频繁读取像素，建议设为 false 以优化性能
+  })
   if (!context) return // 无上下文则终止
 
   // 1. 高清屏优化：获取设备像素比
   const outputScale = window.devicePixelRatio || 1
+  // const outputScale = Math.max(window.devicePixelRatio || 1, 1.125);
 
-  // 2. 布局优化：设置容器与 Canvas 的逻辑尺寸和物理尺寸
-  // 容器本身不需要设大，但内部 Canvas 需要根据 dpr 放大
-  refs.container.style.width = `${Math.floor(viewport.width)}px`
-  refs.container.style.height = `${Math.floor(viewport.height)}px`
+  // 获取PDF视口（把 PDF 的内部坐标系映射到页面/画布坐标）
+  // 为什么要renderViewport？在 PDF.js 内部，Font Hinting（字体微调） 和 路径计算 是基于 viewport 的原始比例计算的。 当你生成一个 scale: 1.0 的 viewport，PDF.js 可能会认为“这里的字很小，不需要太多细节”或者应用针对低分辨率的抗锯齿策略。
+  // 为了解决高分屏下字体渲染模糊的问题，使用[Render Viewport] 用于 Canvas 实际绘制，直接包含 outputScale
+  // 这样 PDF.js 会知道它是为高分屏渲染，从而使用更精细的字体渲染策略
+  const cssViewport = page.getViewport({ scale: pdfStore.scale })
+  const renderViewport = page.getViewport({ scale: pdfStore.scale * outputScale });
 
-  targetCanvas.width = Math.floor(viewport.width * outputScale)
-  targetCanvas.height = Math.floor(viewport.height * outputScale)
-  targetCanvas.style.width = `${Math.floor(viewport.width)}px`
-  targetCanvas.style.height = `${Math.floor(viewport.height)}px`
+  // 2. 布局优化：统一使用 getScaledPageSize 作为显示尺寸的唯一来源，
+  //    避免与 Vue 模板 :style 的 getScaledPageSize 产生浮点精度差异（可能差 1px）
+  const scaledSize = getScaledPageSize(pageNumber)
+  const displayWidth = scaledSize.width
+  const displayHeight = scaledSize.height
 
-  // Text Layer 和 Link Layer 使用逻辑尺寸
-  refs.textLayer.style.width = `${Math.floor(viewport.width)}px`
-  refs.textLayer.style.height = `${Math.floor(viewport.height)}px`
-  refs.textLayer.style.setProperty('--scale-factor', `${viewport.scale}`)
+  refs.container.style.width = `${displayWidth}px`
+  refs.container.style.height = `${displayHeight}px`
+
+  // Canvas 内部像素缓冲区直接使用 renderViewport 尺寸（已包含 outputScale）
+  targetCanvas.width = Math.floor(renderViewport.width)
+  targetCanvas.height = Math.floor(renderViewport.height)
+  targetCanvas.style.width = `${displayWidth}px`
+  targetCanvas.style.height = `${displayHeight}px`
+
+  // Text Layer 和 Link Layer 使用统一的显示尺寸
+  refs.textLayer.style.width = `${displayWidth}px`
+  refs.textLayer.style.height = `${displayHeight}px`
+  refs.textLayer.style.setProperty('--scale-factor', `${cssViewport.scale}`)
   refs.textLayer.style.transform = 'scale(1)'
   refs.textLayer.style.transformOrigin = 'top left'
-  refs.textLayer.innerHTML = '' // 重绘前清空 Text Layer 
-  
-  // Link Layer 同样使用逻辑尺寸（复用 renderLinkLayer 内部逻辑，也可以在此显式重置防止闪烁）
-  refs.linkLayer.style.width = `${Math.floor(viewport.width)}px`
-  refs.linkLayer.style.height = `${Math.floor(viewport.height)}px`
+  refs.textLayer.innerHTML = '' // 重绘前清空 Text Layer
+
+  // Link Layer 同样使用统一的显示尺寸
+  refs.linkLayer.style.width = `${displayWidth}px`
+  refs.linkLayer.style.height = `${displayHeight}px`
   refs.linkLayer.style.transform = 'scale(1)'
   refs.linkLayer.style.transformOrigin = 'top left'
 
   // 高亮层尺寸与缩放复位
-  refs.highlightLayer.style.width = `${Math.floor(viewport.width)}px`
-  refs.highlightLayer.style.height = `${Math.floor(viewport.height)}px`
+  refs.highlightLayer.style.width = `${displayWidth}px`
+  refs.highlightLayer.style.height = `${displayHeight}px`
   refs.highlightLayer.style.transform = 'scale(1)'
   refs.highlightLayer.style.transformOrigin = 'top left'
 
-  // 3. 渲染优化：应用缩放变换
-  const transform = outputScale !== 1 
-    ? [outputScale, 0, 0, outputScale, 0, 0] 
-    : undefined
-
-  const renderTask = page.render({ 
-    canvasContext: context, 
-    viewport, 
-    transform 
+  // 3. 使用 renderViewport 直接渲染，不再需要 transform
+  //    renderViewport 的 scale 已包含 outputScale，PDF.js 会使用高分辨率的字体微调策略
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport: renderViewport
   }) // 创建页面渲染任务
   renderTasks.set(pageNumber, renderTask) // 缓存任务便于取消
   
@@ -670,7 +682,7 @@ async function renderPage(pageNumber: number, options?: { preserveContent?: bool
   await renderTextLayer({
     textContentSource: textContent, // 提供文字内容
     container: refs.textLayer, // 指定 Text Layer 容器
-    viewport, // 提供视口信息
+    viewport: cssViewport, // 使用 CSS 尺度的视口，文字层对应屏幕像素
     textDivs // Capture created divs
   }).promise // 等待 Text Layer 绘制完成
 
@@ -685,8 +697,8 @@ async function renderPage(pageNumber: number, options?: { preserveContent?: bool
       if (!item.str || !item.width || !div) continue
 
       // item.width 是 PDF 坐标系下的宽度
-      // viewport.scale 是当前的缩放倍率
-      const targetWidth = item.width * viewport.scale
+      // cssViewport.scale 是当前的 CSS 缩放倍率
+      const targetWidth = item.width * cssViewport.scale
       
       // 获取当前 DOM 元素的实际渲染尺寸（包括 transform）
       const rect = div.getBoundingClientRect()
@@ -725,13 +737,16 @@ async function renderPage(pageNumber: number, options?: { preserveContent?: bool
 
   try {
     const annotations = await page.getAnnotations()
-    renderLinkLayer(annotations, viewport, refs.linkLayer)
+    renderLinkLayer(annotations, cssViewport, refs.linkLayer)
   } catch (err) {
     console.error('Error rendering Link Layer :', err)
   }
 
   if (preserveContent) {
-    const destContext = refs.canvas.getContext('2d')
+    const destContext = refs.canvas.getContext('2d', {
+      alpha: false,
+      willReadFrequently: false // 如果不需要频繁读取像素，建议设为 false 以优化性能
+    })
     if (destContext) {
       refs.canvas.width = targetCanvas.width
       refs.canvas.height = targetCanvas.height
@@ -750,9 +765,7 @@ async function renderPage(pageNumber: number, options?: { preserveContent?: bool
 
 // 渲染 Link Layer 
 async function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement) {
-  container.innerHTML = '' // 清空 Link Layer 
-  container.style.width = `${viewport.width}px` // 设置宽度
-  container.style.height = `${viewport.height}px` // 设置高度
+  container.innerHTML = '' // 清空 Link Layer（宽高已在 renderPage 中统一设置）
 
   // 遍历所有PDF注释，找到是链接的注释
   for (const annotation of annotations) {
@@ -1069,7 +1082,7 @@ function handleWheel(event: WheelEvent) {
 
     // 如果能滚动且有水平滚动
     if ((deltaX > 0 && canScrollRight) || (deltaX < 0 && canScrollLeft)) {
-      container.scrollLeft += deltaX // 执行水平滚动
+      container.scrollLeft = Math.round(container.scrollLeft + deltaX) // 执行水平滚动，吸附整数像素
       event.preventDefault() // 阻止默认行为（防止前进后退）
     }
     // 否则让浏览器处理（可能是到达边界后的前进后退）
@@ -1583,7 +1596,7 @@ function scrollToPage(page: number, instant: boolean = false) {
 
   if (refs) {
     containerRef.value.scrollTo({
-      top: refs.container.offsetTop - 12,
+      top: Math.round(refs.container.offsetTop - 12),
       behavior: behavior as ScrollBehavior
     })
     return
@@ -1594,7 +1607,7 @@ function scrollToPage(page: number, instant: boolean = false) {
     const retryRefs = pageRefs.get(page)
     if (retryRefs) {
       containerRef.value?.scrollTo({
-        top: retryRefs.container.offsetTop - 12,
+        top: Math.round(retryRefs.container.offsetTop - 12),
         behavior: behavior as ScrollBehavior
       })
     }
@@ -1668,7 +1681,7 @@ onBeforeUnmount(() => {
         <div
           v-for="page in pageNumbers"
           :key="page"
-          class="pdf-page relative bg-white dark:bg-[#111827] shadow-lg dark:shadow-[0_10px_30px_rgba(0,0,0,0.45)] border border-gray-200 dark:border-[#1f2937] overflow-hidden shrink-0"
+          class="pdf-page relative bg-white dark:bg-[#111827] shadow-lg dark:shadow-[0_10px_30px_rgba(0,0,0,0.45)] outline outline-1 outline-gray-200 dark:outline-[#1f2937] overflow-hidden shrink-0"
           :ref="(el, refs) => handlePageContainerRef(page, el, refs)"
           :data-page="page"
           :style="{
@@ -1684,7 +1697,7 @@ onBeforeUnmount(() => {
             <div class="loading-spinner mb-3"></div>
             <span class="text-gray-400 text-sm">{{ page }}</span>
           </div>
-          <canvas class="block mx-auto" />
+          <canvas class="absolute top-0 left-0" />
           <div class="highlightLayer absolute inset-0 pointer-events-none" :class="{ 'zooming-layer': isZooming }">
             <template v-for="hl in pdfStore.getHighlightsByPage(page)" :key="hl.id">
               <div
