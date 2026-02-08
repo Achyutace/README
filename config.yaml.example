@@ -1,20 +1,40 @@
-# README PDF Reader 配置文件示例
-# 复制此文件为 config.yaml 并填入你的 API Key
+# README PDF Reader Configuration
+# Fill in your API keys below
 
+# OpenAI / LLM Configuration
 openai:
-  # OpenRouter API Key (以 sk-or- 开头)
-  api_key: "sk-or-v1-xxxxxxxxxxxxxxxx"
-  # OpenRouter 的 API 地址
-  api_base: "https://openrouter.ai/api/v1"
-  # 选择模型 (OpenRouter 支持的模型列表: https://openrouter.ai/models)
-  # 例如: openai/gpt-4o, anthropic/claude-3.5-sonnet, google/gemini-pro
-  model: "openai/gpt-4o"
+  api_key: "your_api_key"
+  api_base: "https://yunwu.ai/v1"
 
+# Translation Service
 translate:
-  # 翻译服务的 API Key (可选，如果用同一个服务可以填相同的)
-  api_key: "sk-or-v1-xxxxxxxxxxxxxxxx"
-  api_base: "https://openrouter.ai/api/v1"
+  api_key: "your_api_key"
+  api_base: "https://yunwu.ai/v1"
 
+# Tavily Search API
 tavily:
-  # Tavily 搜索 API Key (可选，用于联网搜索功能)
-  api_key: ""
+  api_key: "your_api_key"
+
+# Model Configuration (模型配置)
+# Different services can use different models
+# 不同服务可以使用不同的模型
+models:
+  # Chat/Agent model - for academic assistant conversations
+  # 聊天/代理模型 - 用于学术助手对话
+  chat: "qwen-plus"
+
+  # Translation model - for paragraph translation
+  # 翻译模型 - 用于段落翻译
+  translate: "qwen-plus"
+
+  # Vision model - for image analysis (requires vision capability)
+  # 视觉模型 - 用于图片分析（需要支持视觉功能）
+  vision: "gpt-4o-mini"
+
+  # Embedding model - for RAG vector embeddings
+  # 嵌入模型 - 用于RAG向量嵌入
+  embedding: "text-embedding-3-small"
+
+  # Roadmap model - for generating concept roadmaps
+  # 路线图模型 - 用于生成概念路线图
+  roadmap: "qwen-plus"
