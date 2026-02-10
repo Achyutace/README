@@ -4,6 +4,8 @@
 import { ref, watch } from 'vue'
 // 引入 PDF store，用于管理 PDF 相关的状态和操作
 import { usePdfStore } from '../../stores/pdf'
+// 引入 Theme store，用于管理主题状态
+import { useThemeStore } from '../../stores/theme'
 // 引入 RoadmapTab 组件，用于显示思维导图功能（确保 RoadmapTab.vue 文件存在于同级目录）
 import RoadmapTab from '../roadmap/RoadmapTab.vue'
 
@@ -17,10 +19,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'toggle-notes-visibility'): void  // 切换笔记可见性的事件
   (e: 'toggle-chat-visibility'): void   // 切换聊天可见性的事件
+  (e: 'toggle-theme'): void             // 切换主题的事件
 }>()
 
 // 获取 PDF store 的实例，用于访问和修改 PDF 相关状态
 const pdfStore = usePdfStore()
+// 获取 Theme store 的实例，用于访问主题状态
+const themeStore = useThemeStore()
 
 // 定义页面输入框的响应式变量，用于跳转到指定页面
 const pageInput = ref('')  // 存储用户输入的页面号
@@ -121,6 +126,22 @@ watch(
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
             Roadmap
           </span>
+        </button>
+
+        <!-- Theme Toggle Button -->
+        <button
+          @click="emit('toggle-theme')"
+          class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          :title="themeStore.isDarkMode ? '切换到浅色模式' : '切换到深色模式'"
+        >
+          <!-- Sun icon (show in dark mode) -->
+          <svg v-if="themeStore.isDarkMode" class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          <!-- Moon icon (show in light mode) -->
+          <svg v-else class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
         </button>
 
         <!-- 分割线 -->
