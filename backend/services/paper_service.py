@@ -352,34 +352,7 @@ class PdfService:
         """
         filepath = self.get_filepath(pdf_id)
         return open(filepath, 'rb')
-
-    # ================= 翻译接口 =========================
-
-    def get_paragraph_translation(self, pdf_id: str, page_number: int, paragraph_index: int) -> str:
-        """获取段落翻译"""
-        db, repo = self._get_repo()
-        try:
-            translations = repo.get_paragraph_translations(pdf_id, page_number, paragraph_index)
-            if translations and translations[0]:
-                return translations[0]
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get translation for {pdf_id} p{page_number}#{paragraph_index}: {e}")
-            return None
-        finally:
-            db.close()
-
-    def update_paragraph_translation(self, pdf_id: str, page_number: int, paragraph_index: int, translation: str) -> bool:
-        """更新段落翻译"""
-        db, repo = self._get_repo()
-        try:
-            repo.update_paragraph_translation(pdf_id, page_number, paragraph_index, translation)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to update translation for {pdf_id} p{page_number}#{paragraph_index}: {e}")
-            return False
-        finally:
-            db.close()
+    
 
     # ================= 图片 ========================
 

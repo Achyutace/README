@@ -322,6 +322,11 @@ class SQLRepository:
         self.db.execute(stmt)
         self.db.commit()
 
+    def get_note_by_id(self, note_id: int) -> Optional[UserNote]:
+        """根据ID获取单个笔记"""
+        stmt = select(UserNote).where(UserNote.id == note_id)
+        return self.db.execute(stmt).scalar_one_or_none()
+
     # ==================== 高亮 ====================
 
     def add_highlight(self, user_paper_id: uuid.UUID, page_number: int, rects: List[Dict], selected_text: str = None, color: str = "#FFFF00") -> UserHighlight:

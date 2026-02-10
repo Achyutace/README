@@ -32,13 +32,14 @@ readme/
 │   │   ├── sql_repo.py             # PostgreSQL 操作封装 
 │   │   └── vector_repo.py          # Qdrant 操作封装
 │   │   └── object_repo.py          # 对象数据库存储
-│   ├── service/                   # 业务层
-│   │   ├── paper_service.py        # 启动异步处理新的论文；对接数据库，返回段落和图表信息
+│   ├── service/                    # 业务层
+│   │   ├── paper_service.py        # 启动异步处理新的论文；对接数据库，返回段落和图表信息；增删段落翻译信息
 │   │   ├── library_service.py      # 文献库管理：上传，删除，分组，获取论文条目和笔记
 │   │   ├── rag_service.py          # 用户全文献库rag服务   
 │   │   ├── chat_service.py         # 聊天框管理服务：获取、增删聊天记录
-│   │   ├── roadmap_service.py      # roadmap服务：增删结点、关系；获取结点及相应数据
-│   │   ├── translate_service.py    # 翻译服务：段落翻译(llm请求，连接数据库)
+│   │   ├── roadmap_service.py      # 知识图谱服务：增删结点、关系；获取结点及相应数据
+│   │   ├── note_service.py         # 笔记服务：添加笔记，删除笔记，修改笔记
+│   │   ├── translate_service.py    # 翻译服务：llm请求
 │   │   └── user_service.py         # 用户管理服务：登录，注册等
 │   ├── tasks/                      # 异步任务
 │   │   ├── pdf_tasks.py            # pdf段落+图片解析+向量化的异步处理

@@ -9,6 +9,8 @@ from pathlib import Path
 
 from config import settings
 from backend.utils.llm_simple import translate_text
+from core.database import SessionLocal
+from repository.sql_repo import SQLRepository
 
 try:
     from openai import OpenAI
@@ -50,7 +52,7 @@ class TranslateService:
 
     def translate(self, text: str, context: str = None) -> str:
         """
-        统一翻译接口
+        翻译接口
         
         Args:
             text: 待翻译文本
@@ -77,3 +79,63 @@ class TranslateService:
             print(f"Translation error: {e}")
             return self._demo_translate(text)
 
+    def translate_paragraph(self, file_hash: str, page_number: int, paragraph_index: int, original_text: str, force: bool = False) -> Dict:
+        """
+        翻译段落并存储到数据库
+        
+        Args:
+            file_hash: 文件哈希
+            page_number: 页码
+            paragraph_index: 段落索引
+            original_text: 原文
+            force: 是否强制重译
+            
+        Returns:
+            result (dict): {translation: str, cached: bool}
+        """
+        db = SessionLocal()
+        try:
+            repo = SQLRepository(db)
+            
+            # 1. 检查缓存
+            if not force:
+                translations = repo.get_paragraph_translations(file_hash, page_number, paragraph_index)
+                if translations and translations[0]:
+                    return {
+                        'translation': translations[0],
+                        'cached': True
+                    }
+
+            # 2. 调用翻译
+            translated_text = self.translate(original_text)
+            
+            # 3. 存储结果
+            repo.update_paragraph_translation(file_hash, page_number, paragraph_index, translated_text)
+            
+            return {
+                'translation': translated_text,
+                'cached': False
+            }
+            
+        finally:
+            db.close()
+
+    def translate_text(self, text: str, context: str = None) -> Dict:
+        """
+        翻译选中文本（带上下文处理）
+        
+        Args:
+            text: 待翻译文本
+            context: 上下文
+            
+        Returns:
+            result (dict): 包含原文、译文和上下文信息的字典
+        """
+        translated = self.translate(text, context)
+        
+        return {
+            'originalText': text,
+            'translatedText': translated,
+            'hasContext': bool(context),
+            'contextLength': len(context) if context else 0
+        }
