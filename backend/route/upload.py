@@ -11,21 +11,12 @@
 
 状态定义: pending | processing | completed | failed
 """
-import hashlib
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, jsonify, current_app, g, send_file
 from services.paper_service import PdfService
+from utils.hashing import calculate_stream_hash
 
 # 定义蓝图
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
-
-
-def _calculate_stream_hash(stream) -> str:
-    """计算文件流的 SHA256 Hash"""
-    sha256 = hashlib.sha256()
-    for chunk in iter(lambda: stream.read(8192), b""):
-        sha256.update(chunk)
-    stream.seek(0)
-    return sha256.hexdigest()
 
 
 # ==========================================
@@ -63,7 +54,7 @@ def upload_pdf():
         user_id = g.user_id  # uuid.UUID, 已在 before_request 中解析并确保存在于 DB
 
         # 2. 计算文件 Hash
-        file_hash = _calculate_stream_hash(file.stream)
+        file_hash = calculate_stream_hash(file.stream)
         file.stream.seek(0)  
 
         # 3. 上传 + 派发异步任务
@@ -161,4 +152,23 @@ def get_pdf_paragraphs(pdf_id):
         paragraphs = g.pdf_service.parse_paragraphs(pdf_id)
         return jsonify({'paragraphs': paragraphs})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@upload_bp.route('/<pdf_id>/source', methods=['GET'])
+def get_pdf_source(pdf_id):
+    """
+    获取 PDF 源文件流 (支持浏览器直接预览/渲染)
+    """
+    try:
+        file_obj = g.pdf_service.get_file_obj(pdf_id)
+        return send_file(
+            file_obj,
+            mimetype='application/pdf',
+            as_attachment=False,  # False=浏览器预览, True=触发下载
+            download_name=f"{pdf_id}.pdf"
+        )
+    except FileNotFoundError:
+        return jsonify({'error': 'PDF file not found'}), 404
+    except Exception as e:
+        current_app.logger.error(f"Failed to retrieve PDF source for {pdf_id}: {e}")
         return jsonify({'error': str(e)}), 500

@@ -11,17 +11,20 @@ PDF 服务  —— 异步处理
     2. 获取pdf元数据
     3. 获取pdf图片(支持指定页面指定图片(id))
     4. 获取pdf源文件
+
 """
 import os
 import uuid
-import hashlib
 import logging
 from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
+import shutil
 
 from core.database import SessionLocal
 from repository.sql_repo import SQLRepository
 from repository.object_repo import object_storage
 from utils import pdf_engine
+from utils.hashing import calculate_stream_hash
 
 logger = logging.getLogger(__name__)
 
@@ -80,176 +83,160 @@ class PdfService:
             return filepath
         raise FileNotFoundError(f"PDF file not found locally or in storage: {pdf_id}")
 
-    @staticmethod
-    def calculate_stream_hash(stream) -> str:
-        """计算文件流的 SHA256 Hash"""
-        sha256 = hashlib.sha256()
-        for chunk in iter(lambda: stream.read(8192), b""):
-            sha256.update(chunk)
-        stream.seek(0)
-        return sha256.hexdigest()
-
-    # ===================== 上传逻辑核心: 上传 + 触发异步 =====================
-
-    def upload_and_dispatch(self, file, file_hash: str, user_id, filename: str) -> dict:
+    # ===================== 文件处理异步 =====================
+    def ingest_file(self, file_obj, filename: str) -> dict:
         """
-        上传 PDF 并触发异步处理任务。
-
-        Args:
-            file:      上传的文件对象
-            file_hash: SHA256 哈希
-            user_id:   用户 ID (uuid.UUID 类型)
-            filename:  原始文件名
-
+        摄入文件：负责查重、存储、更新GlobalFile、触发Celery。
+        
         Returns:
-            dict: 包含 pdf_id, task_id, status, pageCount, exists 等信息
+            dict: { 
+                "pdf_id": str, 
+                "task_id": str, 
+                "status": str, 
+                "pageCount": int, 
+                "is_new": bool 
+            }
         """
-        from tasks.pdf_tasks import process_pdf  
-
+        from tasks.pdf_tasks import process_pdf
+        
+        STUCK_TIMEOUT_MINUTES = 120  
+        
+        # 1. 计算文件基础属性
+        if hasattr(file_obj, 'seek'):
+            file_obj.seek(0)
+        file_hash = calculate_stream_hash(file_obj)
+        
         pdf_id = file_hash
         safe_filename = secure_filename(filename)
-
-        if isinstance(user_id, str):
-            user_id = uuid.UUID(user_id)
-
-        # 数据库查重
+        
+        # 2. 检查 GlobalFile 状态 (查重)
         db, repo = self._get_repo()
         try:
             gf = repo.get_global_file(pdf_id)
             if gf:
-                # 文件已存在于系统中，添加UserPaper 关联
-                repo.create_user_paper(
-                    user_id=user_id,
-                    file_hash=pdf_id,
-                    title=safe_filename,
-                )
+                # 判定当前任务状态
+                is_completed = gf.process_status == "completed"
+                is_processing = gf.process_status == "processing"
+                
+                # 检查是否卡死 (Processing 但很久没更新)
+                is_stuck = False
+                if is_processing and gf.updated_at:
+                    if datetime.now() - gf.updated_at > timedelta(minutes=STUCK_TIMEOUT_MINUTES):
+                        is_stuck = True
+                        logger.warning(f"[Ingest] Task {gf.task_id} for {pdf_id} stuck > {STUCK_TIMEOUT_MINUTES}m. Restarting.")
 
-                if gf.process_status == "completed":
-                    # 已完成解析 → 秒传
-                    logger.info(f"[Upload] File {pdf_id} already completed, instant return")
+                # 任务已完成，或者正在处理且未卡死：直接返回
+                if is_completed or (is_processing and not is_stuck):
+                    logger.info(f"[Ingest] File {pdf_id} exists (status={gf.process_status}). Instant return.")
                     return {
                         "pdf_id": pdf_id,
                         "task_id": gf.task_id,
-                        "status": "completed",
+                        "status": gf.process_status,
                         "pageCount": gf.total_pages or 0,
-                        "filename": safe_filename,
-                        "exists": True,
+                        "is_new": False
                     }
-
-                if gf.process_status == "processing":
-                    # 正在处理中 → 返回当前任务信息，前端继续轮询
-                    logger.info(f"[Upload] File {pdf_id} still processing, task_id={gf.task_id}")
-                    return {
-                        "pdf_id": pdf_id,
-                        "task_id": gf.task_id,
-                        "status": "processing",
-                        "pageCount": gf.total_pages or 0,
-                        "filename": safe_filename,
-                        "exists": True,
-                    }
-
-                # pending / failed → 重新触发任务
-                logger.info(f"[Upload] File {pdf_id} status={gf.process_status}, will re-dispatch")
-        except Exception as e:
-            logger.error(f"[Upload] DB check failed: {e}")
+                
+                logger.info(f"[Ingest] File {pdf_id} status={gf.process_status} (stuck/failed), re-dispatching...")
         finally:
             db.close()
 
-        # 保存文件到本地
+        # 3. 物理保存到本地
         filepath = os.path.join(self.upload_folder, pdf_id)
         if not os.path.exists(filepath):
-            file.save(filepath)
-            logger.info(f"[Upload] Saved file to {filepath}")
-        else:
-            logger.info(f"[Upload] File already on disk: {filepath}")
-
-        # 上传到 COS
+            try:
+                if hasattr(file_obj, 'seek'):
+                    file_obj.seek(0)
+                with open(filepath, "wb") as f:
+                    shutil.copyfileobj(file_obj, f)
+                logger.info(f"[Ingest] Saved file to {filepath}")
+            except Exception as e:
+                logger.error(f"[Ingest] Failed to save local file {filepath}: {e}")
+                raise e
+        
+        # Get file size for DB record
+        file_size = os.path.getsize(filepath)
+        
+        # 4. 上传到 COS
         if object_storage.config.enabled:
             try:
+                # 注意：这里需要重新打开文件流或使用 bytes
                 with open(filepath, 'rb') as f:
                     object_storage.upload_file(f, pdf_id)
-                logger.info(f"[Upload] Uploaded {pdf_id} to COS")
             except Exception as e:
-                logger.error(f"[Upload] COS upload failed: {e}")
+                logger.error(f"[Ingest] COS upload failed (continuing): {e}")
 
-        # 获取页数
+        # 5. 获取页数 
+        page_count = 0
         try:
             page_count = pdf_engine.get_page_count(filepath)
-        except Exception as e:
-            logger.error(f"[Upload] Failed to get page count: {e}")
-            page_count = 0
-
-        # 写入 / 更新 GlobalFile (pending)
+        except Exception:
+            pass
+            
+        # 准备新的 Task ID
+        new_task_id = str(uuid.uuid4())
+        
+        # 6. 更新 GlobalFile (Pending)
         db, repo = self._get_repo()
         try:
-            file_size = os.path.getsize(filepath)
             gf = repo.get_global_file(pdf_id)
             if gf:
-                # 更新已有记录
+                # 重置旧任务状态
                 gf.process_status = "pending"
                 gf.error_message = None
                 gf.total_pages = page_count
                 gf.current_page = 0
-                db.commit()
+                gf.updated_at = datetime.now()
+                gf.task_id = new_task_id
             else:
-                repo.create_global_file(
+                # 创建新任务
+                gf = repo.create_global_file(
                     file_hash=pdf_id,
-                    file_path=pdf_id,  # COS key = pdf_id
+                    file_path=pdf_id,
                     file_size=file_size,
                     total_pages=page_count,
                 )
-
-            # 创建 UserPaper 关联
-            try:
-                repo.create_user_paper(
-                    user_id=user_id,
-                    file_hash=pdf_id,
-                    title=safe_filename,
-                )
-            except Exception:
-                pass  
+                gf.task_id = new_task_id
+            db.commit()
         except Exception as e:
-            logger.error(f"[Upload] DB write failed: {e}")
             db.rollback()
+            logger.error(f"[Ingest] DB transaction failed: {e}")
+            raise e
         finally:
             db.close()
-
-        # 派发 Celery 异步任务
-        new_task_id = str(uuid.uuid4())
-        task = process_pdf.apply_async(
-            args=[pdf_id, self.upload_folder, safe_filename, page_count, str(user_id)],
-            task_id=new_task_id, 
-        )
-        task_id = task.id
-
-        # 回写 task_id 到 DB
-        db, repo = self._get_repo()
+            
+        # 7. 启动 Celery 异步处理
         try:
-            repo.update_pdf_task(pdf_id, task_id)
+            process_pdf.apply_async(
+                args=[pdf_id, self.upload_folder, safe_filename, page_count],
+                task_id=new_task_id,
+            )
+            logger.info(f"[Ingest] Dispatched Celery task {new_task_id} for {pdf_id}")
         except Exception as e:
-            logger.warning(f"[Upload] Failed to save task_id: {e}")
-        finally:
-            db.close()
+            logger.error(f"[Ingest] Failed to dispatch Celery task for {pdf_id}: {e}")
+            # 如果分发失败，更新状态为 failed
+            db, repo = self._get_repo()
+            try:
+                gf = repo.get_global_file(pdf_id)
+                if gf:
+                    gf.process_status = "failed"
+                    gf.error_message = f"Task dispatch failed: {str(e)}"
+                    db.commit()
+            finally:
+                db.close()
+            raise e
 
-        # 更新内存注册表
+        # 更新内存缓存
         self.pdf_registry[pdf_id] = {
             'id': pdf_id,
-            'filename': safe_filename,
-            'filepath': filepath,
-            'pageCount': page_count,
+            'filepath': filepath
         }
-
-        logger.info(f"[Upload] Dispatched task {task_id} for {pdf_id}")
-
         return {
             "pdf_id": pdf_id,
-            "task_id": task_id,
-            "status": "processing",
+            "task_id": new_task_id,
+            "status": "pending",
             "pageCount": page_count,
-            "filename": safe_filename,
-            "exists": False,
+            "is_new": True
         }
-
     # ==================== 进度查询 ======================
 
     def get_process_status(self, pdf_id: str, from_page: int = 1) -> dict:
@@ -360,6 +347,15 @@ class PdfService:
             'text': full_text,
             'blocks': blocks
         }
+
+    def get_file_obj(self, pdf_id: str):
+        """
+        根据 pdf_id 获取文件对象 (二进制流)
+        Returns:
+            file_object: 打开的文件对象 (rb模式)，调用者需负责关闭
+        """
+        filepath = self.get_filepath(pdf_id)
+        return open(filepath, 'rb')
 
 # ============== 图片 ========================
 

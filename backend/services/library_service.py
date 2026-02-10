@@ -1,17 +1,17 @@
 """
-文献管理服务
+文献管理服务：维护 User 与 Paper 的关系
 1. 根据user_id获取用户文献+分组
 2. 根据user_id获取用户笔记
 3. 删除用户文献库中文献
 """
 import logging
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from sqlalchemy import select, desc, and_
 
 from core.database import SessionLocal
 from repository.sql_repo import SQLRepository
-from model.db.doc_models import UserPaper, UserNote
+from model.db.doc_models import UserPaper
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,38 @@ class LibraryService:
         db = SessionLocal()
         return db, SQLRepository(db)
 
+    def bind_paper(self, user_id: str, pdf_id: str, title: str) -> bool:
+        """
+        将GlobalFile中注册好的PDF绑定到用户库中。
+        """
+        db, repo = self._get_repo()
+        try:
+            if isinstance(user_id, str):
+                user_id = uuid.UUID(user_id)
+
+            # 1. 检查是否已存在 (幂等性)
+            existing = repo.get_user_paper(user_id, pdf_id)
+            if existing:
+                logger.info(f"Paper {pdf_id} already in user {user_id} library.")
+                return True
+
+            # 2. 创建关联
+            repo.create_user_paper(
+                user_id=user_id,
+                file_hash=pdf_id,
+                title=title
+            )
+            db.commit()
+            logger.info(f"Bound PDF {pdf_id} to User {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error binding PDF {pdf_id} to user {user_id}: {e}")
+            return False
+        finally:
+            db.close()
+
     def delete_pdf(self, pdf_id: str, user_id) -> bool:
-        """删除 PDF (数据库层面解除用户关联)"""
+        """删除 PDF (仅解除用户关联，不删除物理文件)"""
         db, repo = self._get_repo()
         try:
             if isinstance(user_id, str):
@@ -37,9 +67,7 @@ class LibraryService:
             db.close()
 
     def set_paper_group(self, pdf_id: str, user_id, group_name: str) -> bool:
-        """
-        设置论文分组 (Tags)
-        """
+        """设置论文分组 (Tags)"""
         db, repo = self._get_repo()
         try:
             if isinstance(user_id, str):
@@ -49,13 +77,11 @@ class LibraryService:
             if not user_paper:
                 return False
             
-            # 简单实现：将 group_name 添加到 tags
             current_tags = list(user_paper.tags) if user_paper.tags else []
             if group_name and group_name not in current_tags:
                 current_tags.append(group_name)
                 user_paper.tags = current_tags
                 db.commit()
-            
             return True
         except Exception as e:
             logger.error(f"Error setting group for PDF {pdf_id}: {e}")
@@ -64,9 +90,7 @@ class LibraryService:
             db.close()
 
     def remove_paper_group(self, pdf_id: str, user_id, group_name: str) -> bool:
-        """
-        移除论文分组 (Tags)
-        """
+        """移除论文分组 (Tags)"""
         db, repo = self._get_repo()
         try:
             if isinstance(user_id, str):
@@ -81,7 +105,6 @@ class LibraryService:
                 current_tags.remove(group_name)
                 user_paper.tags = current_tags
                 db.commit()
-            
             return True
         except Exception as e:
             logger.error(f"Error removing group for PDF {pdf_id}: {e}")
@@ -92,9 +115,7 @@ class LibraryService:
     def get_user_papers(self, user_id, page: int = 1, page_size: int = 20, 
                         group_filter: str = None, 
                         keyword: str = None) -> Dict[str, Any]:
-        """
-        获取论文列表（含分页、分组筛选、搜索）
-        """
+        """获取论文列表（含分页、分组筛选、搜索）"""
         db, repo = self._get_repo()
         try:
             if isinstance(user_id, str):
@@ -105,24 +126,18 @@ class LibraryService:
             )
             
             if group_filter:
-                # PG array contains
                 stmt = stmt.where(UserPaper.tags.contains([group_filter]))
             
             if keyword:
                 stmt = stmt.where(UserPaper.title.ilike(f"%{keyword}%"))
             
-            # 排序
             stmt = stmt.order_by(desc(UserPaper.added_at))
             
-            # 翻页
             offset = (page - 1) * page_size
             items = db.execute(stmt.offset(offset).limit(page_size)).scalars().all()
             
-            # 结果转换
             data = []
             for p in items:
-                # 访问关联属性需要在 session 上下文中进行，或者 eager load
-                # 这里 session 还未 close，安全
                 gf = p.global_file
                 data.append({
                     "pdfId": p.file_hash,

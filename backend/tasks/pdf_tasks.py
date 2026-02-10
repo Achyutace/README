@@ -1,14 +1,8 @@
 """
 PDF 异步处理任务
-职责:
-    1. 逐页解析 PDF 段落 —— 每解析一页就写入 DB，前端可按页轮询
-    2. 解析图片元数据
-    3. RAG 向量化
-    4. 标记完成 (completed)
-
+逐页解析 PDF 段落 + 解析图片元数据 + 逐页向量化：每解析一页就写入 DB，前端可按页轮询
 状态机:
-    pending → processing → completed
-                        → failed
+    pending → processing → completed / failed
 """
 import os
 import logging
