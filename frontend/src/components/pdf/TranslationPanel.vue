@@ -1,194 +1,153 @@
 <script setup lang="ts">
-// ------------------------- 导入依赖与 store -------------------------
-// 引入 Vue 响应式 API、PDF store、AI API 及文库 store
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue' // 导入Vue的响应式API、计算属性和生命周期钩子
-import { usePdfStore } from '../../stores/pdf' // 导入PDF store，用于管理PDF相关状态
-import { aiApi } from '../../api' // 导入AI API，用于调用翻译服务
-import { useLibraryStore } from '../../stores/library' // 导入文库 store，用于管理文档库状态
+// =============================================================================
+// TranslationPanel.vue
+//
+// 功能概述：单例段落翻译面板（用于显示并管理单个段落的翻译结果）。
+// - 与 `translationStore.translationPanel` 交互：读取/更新面板的可见性、位置、加载状态和翻译内容。
+// - 支持拖拽并可“吸附”到某个段落（释放时对齐并调整宽度），吸附后会随 PDF 滚动跟随段落。
+// - 支持调整大小、自动在打开时请求翻译，以及手动触发重新翻译。
+// 设计原则：保持面板轻量且专注于单段落场景（与多面板实现分离），便于用户单点查看与临时注释。
+// 交互要点：
+// - 拖动过程中会计算是否接近段落吸附目标并显示提示，释放后完成吸附逻辑。
+// - 面板位置/尺寸的变更会同步回 store，以便全局状态一致。
+// - 监听 PDF 容器滚动以便在已吸附时持续更新位置，防止错位。
+// =============================================================================
+/* 导入：Vue 响应式 API、PDF store、可复用的拖拽/缩放 hook、翻译 composable */
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { usePdfStore } from '../../stores/pdf'
+import { useTranslationStore } from '../../stores/translation'
+import DraggablePanel from '../common/DraggablePanel.vue'
+import { clip } from '../../utils/CommonFunction'
 
-const pdfStore = usePdfStore() // 获取PDF store实例
-const libraryStore = useLibraryStore() // 获取文库 store实例
-
-// 拖动相关状态
-const isDragging = ref(false) // 是否正在拖动面板
-const dragOffset = ref({ x: 0, y: 0 }) // 拖动时的偏移量
-const panelRef = ref<HTMLElement | null>(null) // 面板DOM元素引用
+const pdfStore = usePdfStore()
+const translationStore = useTranslationStore()
 
 // 面板位置
-const position = computed(() => pdfStore.translationPanel.position) // 计算属性，获取面板当前位置
+const position = computed(() => translationStore.translationPanel.position)
 
-// 面板尺寸（可调整）
-const panelWidth = ref(320) // 面板宽度
-const panelHeight = ref(280) // 面板高度
-const minWidth = 200 // 最小宽度
-const maxWidth = 600 // 最大宽度
-const minHeight = 150 // 最小高度
-const maxHeight = 500 // 最大高度
+// 面板尺寸（可调整），默认320x280
+const panelWidth = ref(320)
+const panelHeight = ref(280)
 
-// 调整大小相关状态
-const isResizing = ref(false) // 是否正在调整大小
-const resizeDirection = ref<string>('') // 调整大小的方向
-const resizeStart = ref({ x: 0, y: 0, width: 0, height: 0 }) // 调整大小开始时的状态
+// 面板大小限制
+const minWidth = 200
+const maxWidth = 600
+const minHeight = 150
+const maxHeight = 500
 
 // 吸附相关状态
-const isNearSnapTarget = ref(false) // 是否接近吸附目标
-const snappedToParagraph = ref(false) // 是否已吸附到段落
-const snapTargetRect = ref<{ left: number; top: number; width: number; height: number } | null>(null) // 吸附目标的矩形区域
+const isNearSnapTarget = ref(false)
+const snappedToParagraph = ref(false)
+const snapTargetRect = ref<{ left: number; top: number; width: number; height: number } | null>(null)
 
-// 计算吸附目标位置
-function calculateSnapPosition() { // 计算段落的吸附位置
-  const paragraphId = pdfStore.translationPanel.paragraphId // 获取面板关联的段落ID
-  if (!paragraphId) return null // 如果没有段落ID，返回null
-  
-  const paragraphs = pdfStore.paragraphs // 获取所有段落数据
-  const paragraph = paragraphs.find(p => p.id === paragraphId) // 查找指定段落
-  if (!paragraph) return null // 如果没找到段落，返回null
-  
-  // 找到段落所在页面的容器
-  const pageElement = document.querySelector(`.pdf-page[data-page="${paragraph.page}"]`) as HTMLElement // 查找页面元素
-  if (!pageElement) return null // 如果页面元素不存在，返回null
+// 使用通用的 DraggablePanel 组件来处理拖拽与缩放，父组件通过事件处理吸附逻辑
+const isDragging = ref(false)
+const isResizing = ref(false)
 
-  const pageRect = pageElement.getBoundingClientRect() // 获取页面边界矩形
-  const canvas = pageElement.querySelector('canvas') // 查找页面中的canvas元素
-  if (!canvas) return null // 如果canvas不存在，返回null
-  
-  // 计算段落在视口中的实际位置
-  const scaleX = canvas.offsetWidth / canvas.width // 计算X方向缩放因子
-  const scaleY = canvas.offsetHeight / canvas.height // 计算Y方向缩放因子
-  
-  return { // 返回段落在屏幕上的位置信息
-    left: pageRect.left + paragraph.bbox.x0 * scaleX, // 左边距
-    top: pageRect.top + paragraph.bbox.y0 * scaleY, // 上边距
-    width: paragraph.bbox.width * scaleX, // 宽度
-    height: paragraph.bbox.height * scaleY, // 高度
-    pageElement // 页面元素引用
-  }
+// 本地定时器（用于在收到 size 更新后短暂标记 isResizing）
+let updateSizeTimer: number | null = null
+
+function onDragStart() {
+  isDragging.value = true
+  snappedToParagraph.value = false
 }
 
-// 开始拖动（只在标题栏）
-function startDrag(e: MouseEvent) { // 鼠标按下开始拖动
-  // 只允许从标题栏拖动
-  if (!(e.target as HTMLElement).closest('.panel-header')) return // 检查是否在标题栏点击
-  
-  isDragging.value = true // 设置拖动状态
-  snappedToParagraph.value = false // 开始拖动时取消吸附
-  dragOffset.value = { // 计算拖动偏移量
-    x: e.clientX - position.value.x,
-    y: e.clientY - position.value.y
+function onDragEnd() {
+  isDragging.value = false
+  if (isNearSnapTarget.value && snapTargetRect.value) {
+    snappedToParagraph.value = true
+    translationStore.updateTranslationPanelPosition({
+      x: snapTargetRect.value.left + 4,
+      y: snapTargetRect.value.top + 4
+    })
+    panelWidth.value = clip(snapTargetRect.value.width - 8, minWidth, maxWidth)
   }
-  e.preventDefault() // 阻止默认事件
+  isNearSnapTarget.value = false
 }
 
-// 拖动中
-function onDrag(e: MouseEvent) { // 鼠标移动时的拖动处理
-  if (isResizing.value) { // 如果正在调整大小
-    onResize(e) // 调用调整大小函数
-    return
+function onUpdatePosition(newPos: { x: number; y: number }) {
+  // 如果在缩放中，略过吸附判断
+  if (isResizing.value) return
+
+  // 拖动期间检测是否靠近吸附目标
+  if (isDragging.value) {
+    const snapPos = calculateSnapPosition()
+    if (snapPos) {
+      snapTargetRect.value = snapPos
+      const distance = Math.hypot(newPos.x - snapPos.left, newPos.y - snapPos.top)
+      isNearSnapTarget.value = distance < 120
+    } else {
+      isNearSnapTarget.value = false
+    }
+  } else {
+    isNearSnapTarget.value = false
   }
-  
-  if (!isDragging.value) return // 如果没有拖动，返回
-  
-  const newX = e.clientX - dragOffset.value.x // 计算新的X位置
-  const newY = e.clientY - dragOffset.value.y // 计算新的Y位置
-  
-  // 计算吸附目标
-  const snapPos = calculateSnapPosition() // 获取吸附位置
-  if (snapPos) { // 如果有吸附位置
-    snapTargetRect.value = snapPos // 设置吸附目标矩形
-    // 检查是否接近吸附区域（增大吸附范围到120px）
-    const distance = Math.sqrt( // 计算距离
-      Math.pow(newX - snapPos.left, 2) +
-      Math.pow(newY - snapPos.top, 2)
-    )
-    isNearSnapTarget.value = distance < 120 // 判断是否接近吸附区域
-  }
-  
-  // 限制在视口内
-  const maxX = window.innerWidth - panelWidth.value // 计算最大X位置
-  const maxY = window.innerHeight - panelHeight.value // 计算最大Y位置
-  
-  pdfStore.updateTranslationPanelPosition({ // 更新面板位置
-    x: Math.max(0, Math.min(maxX, newX)), // 限制X在0到maxX之间
-    y: Math.max(0, Math.min(maxY, newY)) // 限制Y在0到maxY之间
+
+  // 限制在视口内并同步到 store
+  const maxX = window.innerWidth - panelWidth.value
+  const maxY = window.innerHeight - panelHeight.value
+  translationStore.updateTranslationPanelPosition({
+    x: clip(newPos.x, 0, maxX),
+    y: clip(newPos.y, 0, maxY)
   })
 }
 
-// 停止拖动
-function stopDrag() { // 鼠标释放停止拖动
-  if (isDragging.value && isNearSnapTarget.value && snapTargetRect.value) { // 如果拖动中且接近吸附目标
-    // 执行吸附（稍微偏移，避免完全覆盖原文）
-    snappedToParagraph.value = true // 设置吸附状态
-    pdfStore.updateTranslationPanelPosition({ // 更新位置到吸附点
-      x: snapTargetRect.value.left + 4, // 稍微偏移4px
-      y: snapTargetRect.value.top + 4
-    })
-    // 调整面板大小匹配段落（稍微缩小，让原文边缘可见）
-    panelWidth.value = Math.max(minWidth, Math.min(maxWidth, snapTargetRect.value.width - 8)) // 宽度减8px
-  }
+function onUpdateSize(size: { width: number; height: number }) {
+  // 标记为正在缩放，使用短延时模拟 resize-end 事件
+  isResizing.value = true
+  panelWidth.value = size.width
+  panelHeight.value = size.height
 
-  isDragging.value = false // 重置拖动状态
-  isNearSnapTarget.value = false // 重置吸附状态
-  isResizing.value = false // 重置调整大小状态
-  resizeDirection.value = '' // 重置调整方向
+  // 清理并重建局部定时器，避免在函数上挂属性并解决 TS 的调用解析问题
+  if (updateSizeTimer) window.clearTimeout(updateSizeTimer)
+  updateSizeTimer = window.setTimeout(() => {
+    isResizing.value = false
+    updateSizeTimer = null
+  }, 120)
 }
 
-// 开始调整大小
-function startResize(e: MouseEvent, direction: string) { // 开始调整面板大小
-  e.stopPropagation() // 阻止事件冒泡
-  e.preventDefault() // 阻止默认事件
-  isResizing.value = true // 设置调整大小状态
-  resizeDirection.value = direction // 设置调整方向
-  resizeStart.value = { // 记录开始时的状态
-    x: e.clientX,
-    y: e.clientY,
-    width: panelWidth.value,
-    height: panelHeight.value
-  }
-}
 
-// 调整大小中
-function onResize(e: MouseEvent) { // 鼠标移动时的调整大小处理
-  if (!isResizing.value) return // 如果没有调整大小，返回
+
+// 计算吸附目标位置（将段落 bbox 从 PDF 原始坐标映射到当前渲染坐标）
+// 说明：translationStore.translationPanel.paragraphId 指向要吸附的段落。
+// - 读取段落的 bbox（x0,y0,width,height），结合页面 canvas 的实际渲染尺寸，
+//   计算出在屏幕上的精确像素位置用于吸附显示。
+// - 返回 left/top/width/height 以及 pageElement（用于后续滚动定位）。
+function calculateSnapPosition() {
+  const paragraphId = translationStore.translationPanel.paragraphId
+  if (!paragraphId) return null
   
-  const deltaX = e.clientX - resizeStart.value.x // 计算X变化量
-  const deltaY = e.clientY - resizeStart.value.y // 计算Y变化量
+  const paragraphs = pdfStore.paragraphs
+  const paragraph = paragraphs.find(p => p.id === paragraphId)
+  if (!paragraph) return null
   
-  // 根据拖动方向调整
-  if (resizeDirection.value.includes('e')) { // 东向调整（右边框）
-    panelWidth.value = Math.max(minWidth, Math.min(maxWidth, resizeStart.value.width + deltaX)) // 更新宽度
-  }
-  if (resizeDirection.value.includes('w')) { // 西向调整（左边框）
-    const newWidth = resizeStart.value.width - deltaX // 计算新宽度
-    if (newWidth >= minWidth && newWidth <= maxWidth) { // 检查范围
-      panelWidth.value = newWidth // 设置新宽度
-      pdfStore.updateTranslationPanelPosition({ // 更新位置
-        x: position.value.x + deltaX,
-        y: position.value.y
-      })
-    }
-  }
-  if (resizeDirection.value.includes('s')) { // 南向调整（下边框）
-    panelHeight.value = Math.max(minHeight, Math.min(maxHeight, resizeStart.value.height + deltaY)) // 更新高度
-  }
-  if (resizeDirection.value.includes('n')) { // 北向调整（上边框）
-    const newHeight = resizeStart.value.height - deltaY // 计算新高度
-    if (newHeight >= minHeight && newHeight <= maxHeight) { // 检查范围
-      panelHeight.value = newHeight // 设置新高度
-      pdfStore.updateTranslationPanelPosition({ // 更新位置
-        x: position.value.x,
-        y: position.value.y + deltaY
-      })
-    }
+  const pageElement = document.querySelector(`.pdf-page[data-page="${paragraph.page}"]`) as HTMLElement
+  if (!pageElement) return null
+
+  const pageRect = pageElement.getBoundingClientRect()
+  const canvas = pageElement.querySelector('canvas')
+  if (!canvas) return null
+  
+  const scaleX = canvas.offsetWidth / canvas.width
+  const scaleY = canvas.offsetHeight / canvas.height
+  
+  return {
+    left: pageRect.left + paragraph.bbox.x0 * scaleX,
+    top: pageRect.top + paragraph.bbox.y0 * scaleY,
+    width: paragraph.bbox.width * scaleX,
+    height: paragraph.bbox.height * scaleY,
+    pageElement
   }
 }
 
-// 监听PDF滚动，更新吸附位置
+
+// 监听PDF滚动，更新吸附位置（当面板已吸附时，使面板随页面滚动而移动以保持对齐）
 function onPdfScroll() { // PDF滚动事件处理
   if (!snappedToParagraph.value) return // 如果没有吸附到段落，返回
 
   const snapPos = calculateSnapPosition() // 重新计算吸附位置
   if (snapPos) { // 如果计算成功
-    pdfStore.updateTranslationPanelPosition({ // 更新面板位置
+    translationStore.updateTranslationPanelPosition({ // 更新面板位置
       x: snapPos.left + 4, // 保持偏移
       y: snapPos.top + 4
     })
@@ -197,73 +156,62 @@ function onPdfScroll() { // PDF滚动事件处理
 
 // 关闭面板
 function closePanel() { // 关闭翻译面板
-  pdfStore.closeTranslationPanel() // 调用store关闭面板
+  translationStore.closeTranslationPanel() // 调用store关闭面板
 }
 
 // 监听面板打开，自动请求翻译
-watch(() => pdfStore.translationPanel.isVisible, async (visible) => { // 监听面板可见性变化
-  if (visible && !pdfStore.translationPanel.translation && pdfStore.translationPanel.paragraphId) { // 如果面板打开且没有翻译
-    await fetchTranslation() // 获取翻译
+watch(() => translationStore.translationPanel.isVisible, async (visible) => {
+  if (visible && !translationStore.translationPanel.translation && translationStore.translationPanel.paragraphId) {
+    await fetchTranslation()
   }
 })
 
-// 获取翻译
-async function fetchTranslation() { // 异步获取翻译内容
-  const { paragraphId } = pdfStore.translationPanel // 获取段落ID
-  const pdfId = libraryStore.currentDocumentId // 获取文档ID
+// 获取翻译（向后端请求指定段落翻译，并把结果写回 store，处理加载状态与错误提示）
+async function fetchTranslation() {
+  const { paragraphId } = translationStore.translationPanel
   
-  if (!pdfId || !paragraphId) return // 如果缺少必要信息，返回
+  if (!paragraphId) return
   
-  pdfStore.setTranslationLoading(true) // 设置加载状态
+  translationStore.setTranslationLoading(true)
   
-  try {
-    const result = await aiApi.translateParagraph(pdfId, paragraphId) // 调用API翻译段落
-    if (result.success) { // 如果翻译成功
-      pdfStore.setTranslation(paragraphId, result.translation) // 更新翻译内容
-    }
-  } catch (error) {
-    console.error('Translation failed:', error) // 记录错误
-    pdfStore.setTranslation(paragraphId, '翻译失败，请重试') // 设置错误消息
+  const translation = await translationStore.translateParagraph(paragraphId)
+  if (translation) {
+    translationStore.setTranslation(paragraphId, translation)
+  } else {
+    translationStore.setTranslation(paragraphId, '翻译失败，请重试')
   }
 }
 
 // 重新翻译
-async function retranslate() { // 异步重新翻译
-  const { paragraphId } = pdfStore.translationPanel // 获取段落ID
-  const pdfId = libraryStore.currentDocumentId // 获取文档ID
+async function retranslate() {
+  const { paragraphId } = translationStore.translationPanel
   
-  if (!pdfId || !paragraphId) return // 如果缺少必要信息，返回
+  if (!paragraphId) return
   
-  pdfStore.setTranslationLoading(true) // 设置加载状态
+  translationStore.setTranslationLoading(true)
   
-  try {
-    const result = await aiApi.translateParagraph(pdfId, paragraphId, true) // 调用API重新翻译（强制刷新）
-    if (result.success) { // 如果翻译成功
-      pdfStore.setTranslation(paragraphId, result.translation) // 更新翻译内容
-    }
-  } catch (error) {
-    console.error('Translation failed:', error) // 记录错误
+  const translation = await translationStore.translateParagraph(paragraphId, true)
+  if (translation) {
+    translationStore.setTranslation(paragraphId, translation)
   }
 }
 
-onMounted(() => { // 组件挂载时
-  document.addEventListener('mousemove', onDrag) // 添加鼠标移动监听
-  document.addEventListener('mouseup', stopDrag) // 添加鼠标释放监听
-  
+onMounted(() => {
   // 监听PDF容器的滚动事件
-  const pdfContainer = document.querySelector('.pdf-container') // 查找PDF容器
-  if (pdfContainer) { // 如果找到
-    pdfContainer.addEventListener('scroll', onPdfScroll) // 添加滚动监听
+  const pdfContainer = document.querySelector('.pdf-container')
+  if (pdfContainer) {
+    pdfContainer.addEventListener('scroll', onPdfScroll)
   }
 })
 
-onBeforeUnmount(() => { // 组件卸载前
-  document.removeEventListener('mousemove', onDrag) // 移除鼠标移动监听
-  document.removeEventListener('mouseup', stopDrag) // 移除鼠标释放监听
-  
-  const pdfContainer = document.querySelector('.pdf-container') // 查找PDF容器
-  if (pdfContainer) { // 如果找到
-    pdfContainer.removeEventListener('scroll', onPdfScroll) // 移除滚动监听
+onBeforeUnmount(() => {
+  const pdfContainer = document.querySelector('.pdf-container')
+  if (pdfContainer) {
+    pdfContainer.removeEventListener('scroll', onPdfScroll)
+  }
+})
+
+</script>
 
 <template>
   <!-- 拖动时显示的吸附提示框 -->
@@ -281,88 +229,64 @@ onBeforeUnmount(() => { // 组件卸载前
     <div class="snap-hint-text">释放以吸附到原文位置</div>
   </div>
 
-  <div
-    v-if="pdfStore.translationPanel.isVisible"
-    ref="panelRef"
+  <DraggablePanel
+    v-if="translationStore.translationPanel.isVisible"
+    :initialPosition="position"
+    :initialSize="{ width: panelWidth, height: panelHeight }"
+    :minWidth="minWidth"
+    :maxWidth="maxWidth"
+    :minHeight="minHeight"
+    :maxHeight="maxHeight"
     class="translation-panel fixed z-[1000] bg-white dark:bg-[#2d2d30] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden select-none"
-    :style="{
-      left: position.x + 'px',
-      top: position.y + 'px',
-      width: panelWidth + 'px',
-      height: panelHeight + 'px',
-    }"
     :class="{ 'is-snapped': snappedToParagraph }"
+    @update:position="onUpdatePosition"
+    @update:size="onUpdateSize"
+    @drag-start="onDragStart"
+    @drag-end="onDragEnd"
+    @close="closePanel"
   >
-    <!-- 头部 - 可拖动区域 -->
-    <div 
-      class="panel-header flex items-center justify-between px-3 py-2 bg-gradient-to-r from-blue-500 to-blue-600 dark:from-blue-600 dark:to-blue-700 text-white cursor-move"
-      @mousedown="startDrag"
-    >
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+    <template #header-actions>
+      <button
+        @click.stop="retranslate"
+        class="p-1 hover:bg-white/20 rounded transition-colors"
+        title="重新翻译"
+        :disabled="translationStore.translationPanel.isLoading"
+      >
+        <svg class="w-4 h-4" :class="{ 'animate-spin': translationStore.translationPanel.isLoading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
-        <span class="text-sm font-medium">段落翻译</span>
-      </div>
-      <div class="flex items-center gap-1">
-        <!-- 重新翻译按钮 -->
-        <button
-          @click.stop="retranslate"
-          class="p-1 hover:bg-white/20 rounded transition-colors"
-          title="重新翻译"
-          :disabled="pdfStore.translationPanel.isLoading"
-        >
-          <svg class="w-4 h-4" :class="{ 'animate-spin': pdfStore.translationPanel.isLoading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
-        <!-- 关闭按钮 -->
-        <button
-          @click.stop="closePanel"
-          class="p-1 hover:bg-white/20 rounded transition-colors"
-          title="关闭"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    </div>
-    
-    <!-- 内容区域 - 可滚动 -->
+      </button>
+      <button
+        @click.stop="closePanel"
+        class="p-1 hover:bg-white/20 rounded transition-colors"
+        title="关闭"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </template>
+
     <div class="panel-content flex-1 overflow-y-auto p-3 cursor-auto" @mousedown.stop>
-      <!-- 加载中状态 -->
-      <div v-if="pdfStore.translationPanel.isLoading" class="flex flex-col items-center justify-center py-8">
+      <div v-if="translationStore.translationPanel.isLoading" class="flex flex-col items-center justify-center py-8">
         <div class="loading-spinner mb-3"></div>
         <span class="text-gray-500 dark:text-gray-400 text-sm">正在翻译...</span>
       </div>
-      
-      <!-- 翻译内容 -->
       <div v-else class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
-        {{ pdfStore.translationPanel.translation || '暂无翻译' }}
+        {{ translationStore.translationPanel.translation || '暂无翻译' }}
       </div>
     </div>
-    
-    <!-- 底部状态提示 -->
-    <div class="px-3 py-1.5 bg-gray-50 dark:bg-[#252526] border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
-      <span class="text-xs text-gray-400 dark:text-gray-500">
-        {{ snappedToParagraph ? '已吸附到原文' : '拖动标题栏移动 | 拖动边框调整大小' }}
-      </span>
-      <span v-if="snappedToParagraph" class="text-xs text-blue-500">跟随滚动</span>
-    </div>
-    
-    <!-- 调整大小的边框 -->
-    <!-- 左边框 -->
-    <div class="resize-handle resize-w" @mousedown="startResize($event, 'w')"></div>
-    <!-- 右边框 -->
-    <div class="resize-handle resize-e" @mousedown="startResize($event, 'e')"></div>
-    <!-- 下边框 -->
-    <div class="resize-handle resize-s" @mousedown="startResize($event, 's')"></div>
-    <!-- 左下角 -->
-    <div class="resize-handle resize-sw" @mousedown="startResize($event, 'sw')"></div>
-    <!-- 右下角 -->
-    <div class="resize-handle resize-se" @mousedown="startResize($event, 'se')"></div>
-  </div>
+
+    <template #footer>
+      <div class="px-3 py-1.5 bg-gray-50 dark:bg-[#252526] border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+        <span class="text-xs text-gray-400 dark:text-gray-500">
+          {{ snappedToParagraph ? '已吸附到原文' : '拖动标题栏移动 | 拖动边框调整大小' }}
+        </span>
+        <span v-if="snappedToParagraph" class="text-xs text-blue-500">跟随滚动</span>
+      </div>
+    </template>
+
+  </DraggablePanel>
 </template>
 
 <style scoped>

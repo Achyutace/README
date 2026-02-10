@@ -5,7 +5,7 @@
 */ 
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import type { PdfParagraph, TranslationPanelState, TranslationPanelInstance } from '../types'
+import type { PdfParagraph } from '../types'
 
  // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
@@ -81,24 +81,7 @@ export const usePdfStore = defineStore('pdf', () => {
     return allParagraphs.value[currentDocumentId.value] || []
   })
 
-  // 兼容旧版的单一翻译面板状态（为向后兼容保留）
-  const translationPanel = ref<TranslationPanelState>({
-    isVisible: false,
-    paragraphId: '',
-    position: { x: 0, y: 0 },
-    translation: '',
-    isLoading: false,
-    originalText: ''
-  })
 
-  // 翻译面板
-  const translationPanels = ref<TranslationPanelInstance[]>([])
-
-  // 侧边栏停靠的翻译面板 ID 列表
-  const sidebarDockedPanels = ref<string[]>([])
-
-  // 翻译缓存：paragraphId -> translation
-  const translationCache = ref<Record<string, string>>({})
 
   // UI 显示的缩放百分比
   const scalePercent = computed(() => Math.round((scale.value / DEFAULT_SCALE) * 100))
@@ -192,6 +175,11 @@ export const usePdfStore = defineStore('pdf', () => {
   // 缩放最大最小限制在 0.5（约 33%） 到 4.5（约 300%） 之间
   function setScale(value: number) {
     scale.value = Math.max(0.5, Math.min(4.5, value))
+  }
+
+  function setScalePercent(percent: number) {
+    const newScale = (percent / 100) * DEFAULT_SCALE
+    setScale(newScale)
   }
 
   // ---------------------- 文本选择与高亮功能 ----------------------
@@ -323,148 +311,6 @@ export const usePdfStore = defineStore('pdf', () => {
     return paragraphs.value.filter(p => p.page === page)
   }
 
-  // ---------------------- 翻译面板（单窗口兼容 + 多窗口） ----------------------
-  // 打开翻译面板（支持多窗口），会检查缓存并将已存在的面板聚焦
-  function openTranslationPanel(paragraphId: string, position: { x: number; y: number }, originalText: string) {
-    // 先尝试从缓存中获取翻译，若存在则直接使用
-    const cached = translationCache.value[paragraphId]
-    
-    // 若已存在同一段落的翻译面板，则把它移到数组末尾以实现聚焦效果
-    const existingPanel = translationPanels.value.find(p => p.paragraphId === paragraphId)
-    if (existingPanel) {
-      const index = translationPanels.value.indexOf(existingPanel)
-      translationPanels.value.splice(index, 1)
-      translationPanels.value.push(existingPanel)
-      return
-    }
-    
-    // 创建并初始化一个新的翻译面板实例
-    const newPanel: TranslationPanelInstance = {
-      id: `tp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      paragraphId,
-      position,
-      size: { width: 420, height: 280 },
-      translation: cached || '',
-      isLoading: !cached,
-      originalText,
-      snapMode: 'none',
-      snapTargetParagraphId: null,
-      isSidebarDocked: false
-    }
-    
-    translationPanels.value.push(newPanel)
-    
-    // 同时更新旧版的单一翻译面板状态以保持向后兼容
-    translationPanel.value = {
-      isVisible: true,
-      paragraphId,
-      position,
-      translation: cached || '',
-      isLoading: !cached,
-      originalText
-    }
-  }
-
-  // 关闭旧版的单一翻译面板（仅影响兼容的状态表示）
-  function closeTranslationPanel() {
-    translationPanel.value.isVisible = false
-  }
-  
-  // 关闭指定 ID 的翻译面板，并处理侧边栏停靠列表
-  function closeTranslationPanelById(panelId: string) {
-    const index = translationPanels.value.findIndex(p => p.id === panelId)
-    if (index !== -1) {
-      // 如果该面板在侧边栏停靠列表中，也将其移除
-      const sidebarIndex = sidebarDockedPanels.value.indexOf(panelId)
-      if (sidebarIndex !== -1) {
-        sidebarDockedPanels.value.splice(sidebarIndex, 1)
-      }
-      translationPanels.value.splice(index, 1)
-    }
-  }
-
-  // 更新旧版翻译面板的位置（兼容）
-  function updateTranslationPanelPosition(position: { x: number; y: number }) {
-    translationPanel.value.position = position
-  }
-  
-  // 更新指定面板的位置（多窗口）
-  function updatePanelPosition(panelId: string, position: { x: number; y: number }) {
-    const panel = translationPanels.value.find(p => p.id === panelId)
-    if (panel) {
-      panel.position = position
-    }
-  }
-  
-  // 更新指定面板尺寸
-  function updatePanelSize(panelId: string, size: { width: number; height: number }) {
-    const panel = translationPanels.value.find(p => p.id === panelId)
-    if (panel) {
-      panel.size = size
-    }
-  }
-  
-  // 设置面板的吸附模式（none / paragraph / sidebar），并维护侧边栏停靠列表
-  function setPanelSnapMode(panelId: string, mode: 'none' | 'paragraph' | 'sidebar', targetParagraphId?: string) {
-    const panel = translationPanels.value.find(p => p.id === panelId)
-    if (panel) {
-      panel.snapMode = mode
-      panel.snapTargetParagraphId = targetParagraphId || null
-      panel.isSidebarDocked = mode === 'sidebar'
-      
-      // 管理侧边栏停靠数组，避免重复或残留条目
-      const sidebarIndex = sidebarDockedPanels.value.indexOf(panelId)
-      if (mode === 'sidebar' && sidebarIndex === -1) {
-        sidebarDockedPanels.value.push(panelId)
-      } else if (mode !== 'sidebar' && sidebarIndex !== -1) {
-        sidebarDockedPanels.value.splice(sidebarIndex, 1)
-      }
-    }
-  }
-
-  // 设置翻译结果并更新缓存与所有相关面板状态
-  function setTranslation(paragraphId: string, translation: string) {
-    translationCache.value[paragraphId] = translation
-    
-    // 如果旧版面板正在显示相同段落，则同步更新
-    if (translationPanel.value.paragraphId === paragraphId) {
-      translationPanel.value.translation = translation
-      translationPanel.value.isLoading = false
-    }
-    
-    // 更新所有匹配的多窗口翻译面板
-    translationPanels.value.forEach(panel => {
-      if (panel.paragraphId === paragraphId) {
-        panel.translation = translation
-        panel.isLoading = false
-      }
-    })
-  }
-
-  // 设置旧版翻译面板的加载状态
-  function setTranslationLoading(loading: boolean) {
-    translationPanel.value.isLoading = loading
-  }
-  
-  // 设置指定多窗口面板的加载状态
-  function setPanelLoading(panelId: string, loading: boolean) {
-    const panel = translationPanels.value.find(p => p.id === panelId)
-    if (panel) {
-      panel.isLoading = loading
-    }
-  }
-  
-  // 将指定面板移动到数组末尾，从而在 UI 层表现为置顶/聚焦
-  function bringPanelToFront(panelId: string) {
-    const index = translationPanels.value.findIndex(p => p.id === panelId)
-    if (index !== -1 && index !== translationPanels.value.length - 1) {
-      const panel = translationPanels.value.splice(index, 1)[0]
-      if (panel) {
-        translationPanels.value.push(panel)
-      }
-    }
-  }
-
   // ---------------------- 笔记预览卡片（小悬浮卡片） ----------------------
   const notePreviewCard = ref<{
     isVisible: boolean
@@ -559,6 +405,7 @@ export const usePdfStore = defineStore('pdf', () => {
     zoomIn,
     zoomOut,
     setScale,
+    setScalePercent,
     setSelectedText,
     setSelectionInfo,
     clearSelection,
@@ -578,22 +425,6 @@ export const usePdfStore = defineStore('pdf', () => {
     paragraphs,
     setParagraphs,
     getParagraphsByPage,
-    // 翻译面板
-    translationPanel,
-    openTranslationPanel,
-    closeTranslationPanel,
-    updateTranslationPanelPosition,
-    setTranslation,
-    setTranslationLoading,
-    // 多窗口翻译面板
-    translationPanels,
-    sidebarDockedPanels,
-    closeTranslationPanelById,
-    updatePanelPosition,
-    updatePanelSize,
-    setPanelSnapMode,
-    setPanelLoading,
-    bringPanelToFront,
     // 笔记预览卡片
     notePreviewCard,
     openNotePreviewCard,

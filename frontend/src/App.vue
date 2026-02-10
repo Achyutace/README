@@ -19,6 +19,7 @@ import { useLibraryStore } from './stores/library'
 import { useAiStore } from './stores/ai'
 import { usePdfStore } from './stores/pdf'
 import { useThemeStore } from './stores/theme'
+import { clip } from './utils/CommonFunction'
 
 // ------------------------- 初始化 store 实例 -------------------------
 // Store 本质上保存的是 应用状态 + 相关逻辑
@@ -70,6 +71,11 @@ const isResizingWidth = ref(false) // 是否正在拖动调整宽度
 // 宽度上下限
 const MIN_SIDEBAR_WIDTH = 380
 const MAX_SIDEBAR_WIDTH = 650
+// 分隔条比例上下限
+const MIN_SPLIT_RATIO = 0.1
+const MAX_SPLIT_RATIO = 0.9
+// 默认分隔条位置（Chat 占比）
+const DEFAULT_SPLIT_RATIO = 0.5
 
 // ------------------------- Notes 和 Chat 切换 -------------------------
 // 切换 Notes 面板可见性（工具栏按钮触发）
@@ -136,8 +142,7 @@ const handleWidthResize = (e: MouseEvent) => {
   if (!isResizingWidth.value) return // 如果不在调整状态，直接返回
   const newWidth = window.innerWidth - e.clientX // 计算新宽度
   // 限制宽度在最小值 and 最大值之间
-  sidebarWidth.value = Math.min(MAX_SIDEBAR_WIDTH, 
-    Math.max(MIN_SIDEBAR_WIDTH, newWidth))
+  sidebarWidth.value = clip(newWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
 }
 
 // 停止宽度调整（鼠标抬起时触发）
@@ -173,7 +178,7 @@ const handleSplitResize = (e: MouseEvent) => {
   
   // 限制比例在 0.1 - 0.9 之间，避免过度收缩
   let newRatio = relativeY / totalHeight // 计算新比例
-  newRatio = Math.max(0.1, Math.min(0.9, newRatio)) // 限制在范围内
+  newRatio = clip(newRatio, MIN_SPLIT_RATIO, MAX_SPLIT_RATIO) // 限制在范围内
   
   splitRatio.value = newRatio // 更新比例
 }
@@ -191,10 +196,10 @@ const stopSplitResize = () => {
   // 如果侧边栏高度 > 600，则本条件不会触发，而是会被 0.1 - 0.9 限制覆盖
   if (topHeight < SNAP_THRESHOLD) {
     notesMinimized.value = true
-    splitRatio.value = 0.5
+    splitRatio.value = DEFAULT_SPLIT_RATIO
   } else if (bottomHeight < SNAP_THRESHOLD) {
     chatMinimized.value = true
-    splitRatio.value = 0.5
+    splitRatio.value = DEFAULT_SPLIT_RATIO
   }
   // 停止调整状态
   isResizingSplit.value = false

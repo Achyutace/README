@@ -1,24 +1,33 @@
 <script setup lang="ts">
-// ------------------------- 导入依赖与 store -------------------------
-// 引入 Vue 响应式 API、工具函数以及所需的 store 和 API
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue' // 导入Vue的响应式API和生命周期钩子
-import { useDebounceFn } from '@vueuse/core' // 导入防抖函数
-import { usePdfStore } from '../../stores/pdf' // 导入PDF store
-import { aiApi } from '../../api' // 导入AI API
-import { useLibraryStore } from '../../stores/library' // 导入文库 store
-import type { TranslationPanelInstance } from '../../types' // 导入翻译面板实例类型
+// =============================================================================
+// TranslationPanelMulti.vue
+//
+// 功能概述：多实例翻译面板管理器，允许在 PDF 页面同时打开和管理多个段落翻译窗口。
+// - 每个面板实例存储在 `translationStore.translationPanels` 中（包含 id、position、size、snapMode 等）。
+// - 提供拖拽、吸附到段落、停靠到侧边栏、尺寸调整、复制译文、字体缩放、置顶等交互。
+// - 为了性能与流畅性，使用防抖（useDebounceFn）、requestAnimationFrame、ResizeObserver 等手段优化滚动与重排的更新。
+// 交互要点：
+// - 拖动期间会计算与最近段落或侧边栏的距离以决定是否显示吸附提示，并在释放时切换 snapMode。
+// - 吸附到段落的面板会在缩放或滚动时重新计算位置/尺寸以精确覆盖原文段落。
+// - 目标是让用户可以并行查看多个段落的译文并灵活组织它们的布局。
+// =============================================================================
+/* 导入：Vue 响应式 API、debounce 工具、pdf store、可复用拖拽/缩放 hook、翻译 composable、类型定义 */
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
+import { usePdfStore } from '../../stores/pdf'
+import { useTranslationStore } from '../../stores/translation'
+import { useDraggableWindow } from '../../composables/useDraggableWindow'
+import { useResizableWindow } from '../../composables/useResizableWindow'
+import type { TranslationPanelInstance } from '../../types'
 
-const pdfStore = usePdfStore() // 获取PDF store实例，用于管理PDF相关状态
-const libraryStore = useLibraryStore() // 获取文库 store实例，用于管理文档库状态
+const pdfStore = usePdfStore()
+const translationStore = useTranslationStore()
 
 // 当前拖动的面板
-const draggingPanelId = ref<string | null>(null) // 当前正在拖动的面板ID，null表示没有拖动
-const dragOffset = ref({ x: 0, y: 0 }) // 拖动时的偏移量，用于计算新位置
+const draggingPanelId = ref<string | null>(null)
 
 // 调整大小相关
-const resizingPanelId = ref<string | null>(null) // 当前正在调整大小的面板ID
-const resizeDirection = ref<string>('') // 调整大小的方向，如'e'东向，'w'西向等
-const resizeStart = ref({ x: 0, y: 0, width: 0, height: 0 }) // 调整大小开始时的鼠标位置和面板尺寸
+const resizingPanelId = ref<string | null>(null)
 
 // 吸附相关
 const isNearSnapTarget = ref(false) // 是否接近吸附目标（段落）
@@ -35,7 +44,8 @@ const MAX_FONT_SIZE = 24 // 最大字体大小
 // 复制状态
 const copiedPanelId = ref<string | null>(null) // 最近复制翻译内容的面板ID，用于显示复制成功状态
 
-// 复制翻译内容到剪贴板
+// 复制翻译内容到剪贴板（并显示短暂的复制成功提示）
+// 说明：复制失败会在控制台记录错误，复制成功会把状态写入 `copiedPanelId`，2s 后自动清除以恢复按钮状态。
 async function copyTranslation(panel: TranslationPanelInstance) { // 异步函数，复制指定面板的翻译内容
   if (!panel.translation) return // 如果没有翻译内容，直接返回
 
@@ -97,7 +107,10 @@ function getAllParagraphRects(): Array<{ id: string; rect: DOMRect; page: number
   return results // 返回段落信息数组
 }
 
-// 计算指定段落的吸附位置，实现精准覆盖原文
+// 计算指定段落的吸附位置（将段落 bbox 基于 pdfStore.scale 映射到当前渲染坐标）
+// 说明：
+// - 本函数会查找段落数据并计算其在当前页面与缩放下的屏幕坐标，用于把面板精确放置到原文上方。
+// - 采用 pdfStore.scale 作为缩放因子（与 render pipeline 保持一致），并返回包含 pageElement 的位置信息以便后续使用。
 function calculateParagraphSnapPosition(paragraphId: string) { // 根据段落ID计算吸附位置
   const paragraphs = pdfStore.paragraphs // 获取所有段落数据
   const paragraph = paragraphs.find(p => p.id === paragraphId) // 查找指定段落
@@ -128,236 +141,180 @@ function calculateParagraphSnapPosition(paragraphId: string) { // 根据段落ID
   }
 }
 
-// 开始拖动指定面板
-function startDrag(e: MouseEvent, panelId: string) { // 鼠标按下时开始拖动
-  if (!(e.target as HTMLElement).closest('.panel-header')) return // 只允许从面板头部拖动
-  
-  const panel = pdfStore.translationPanels.find(p => p.id === panelId) // 查找要拖动的面板
-  if (!panel) return // 如果面板不存在，返回
-  
-  draggingPanelId.value = panelId // 设置当前拖动面板ID
-  dragOffset.value = { // 计算拖动偏移量
-    x: e.clientX - panel.position.x,
-    y: e.clientY - panel.position.y
-  }
-  
-  // 取消吸附状态
-  pdfStore.setPanelSnapMode(panelId, 'none') // 设置面板吸附模式为无
-  pdfStore.bringPanelToFront(panelId) // 将面板置于顶层
-  
-  e.preventDefault() // 阻止默认事件
-}
+// 拖动处理：用于处理任意面板的拖拽逻辑
+// 说明：
+// - 在拖动过程中检测是否接近侧边栏或周围段落的吸附目标，并设置相应的提示状态；
+// - onDragEnd 会根据是否接近侧边栏或段落决定面板的 snapMode（sidebar / paragraph / none），并在需要时更新位置与尺寸；
+// - 拖动过程中也会限制面板位置使其保持在视口范围内并同步回 store。
+const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow({
+  onDrag: (newPos) => {
+    if (!draggingPanelId.value) return
+    const panel = translationStore.translationPanels.find(p => p.id === draggingPanelId.value)
+    if (!panel) return
+    
+    // Snapping Logic
+    const distanceToRight = window.innerWidth - (newPos.x + panel.size.width)
+    isNearSidebar.value = distanceToRight < SIDEBAR_SNAP_THRESHOLD
+    
+    if (!isNearSidebar.value) {
+      const allParagraphs = getAllParagraphRects()
+      let nearestParagraph: { id: string; distance: number; rect: DOMRect } | null = null
+      
+      const panelCenterX = newPos.x + panel.size.width / 2
+      const panelCenterY = newPos.y + panel.size.height / 2
 
-// 拖动过程中更新面板位置
-function onDrag(e: MouseEvent) { // 鼠标移动时的拖动处理
-  if (resizingPanelId.value) { // 如果正在调整大小
-    onResize(e) // 调用调整大小函数
-    return
-  }
-  
-  if (!draggingPanelId.value) return // 如果没有拖动中的面板，返回
-  
-  const panel = pdfStore.translationPanels.find(p => p.id === draggingPanelId.value) // 查找拖动中的面板
-  if (!panel) return // 如果面板不存在，返回
-  
-  const newX = e.clientX - dragOffset.value.x // 计算新的X位置
-  const newY = e.clientY - dragOffset.value.y // 计算新的Y位置
-  
-  // 检测是否接近右边缘（侧边栏吸附）
-  const distanceToRight = window.innerWidth - (newX + panel.size.width) // 计算到右边缘的距离
-  isNearSidebar.value = distanceToRight < SIDEBAR_SNAP_THRESHOLD // 判断是否接近侧边栏
-  
-  // 检测是否接近任何段落（段落吸附）
-  if (!isNearSidebar.value) { // 如果不接近侧边栏
-    const allParagraphs = getAllParagraphRects() // 获取所有段落位置
-    let nearestParagraph: { id: string; distance: number; rect: DOMRect } | null = null // 初始化最近段落
+      for (const p of allParagraphs) {
+        const markerCenterX = p.rect.left + p.rect.width / 2
+        const markerCenterY = p.rect.top + p.rect.height / 2
+        const distanceFromCorner = Math.sqrt(Math.pow(newPos.x - markerCenterX, 2) + Math.pow(newPos.y - markerCenterY, 2))
+        const distanceFromCenter = Math.sqrt(Math.pow(panelCenterX - markerCenterX, 2) + Math.pow(panelCenterY - markerCenterY, 2))
+        const distance = Math.min(distanceFromCorner, distanceFromCenter)
 
-    // 使用面板中心点来计算距离
-    const panelCenterX = newX + panel.size.width / 2 // 计算面板中心X坐标
-    const panelCenterY = newY + panel.size.height / 2 // 计算面板中心Y坐标
-
-    for (const p of allParagraphs) { // 遍历所有段落
-      // 计算段落光标的中心点
-      const markerCenterX = p.rect.left + p.rect.width / 2 // 段落中心X
-      const markerCenterY = p.rect.top + p.rect.height / 2 // 段落中心Y
-
-      // 同时检测面板左上角和面板中心到光标的距离
-      const distanceFromCorner = Math.sqrt(Math.pow(newX - markerCenterX, 2) + Math.pow(newY - markerCenterY, 2)) // 从角落到段落的距离
-      const distanceFromCenter = Math.sqrt(Math.pow(panelCenterX - markerCenterX, 2) + Math.pow(panelCenterY - markerCenterY, 2)) // 从中心到段落的距离
-      const distance = Math.min(distanceFromCorner, distanceFromCenter) // 取最小距离
-
-      if (distance < PARAGRAPH_SNAP_THRESHOLD) { // 如果距离小于阈值
-        if (!nearestParagraph || distance < nearestParagraph.distance) { // 如果是最近的段落
-          nearestParagraph = { id: p.id, distance, rect: p.rect } // 更新最近段落
+        if (distance < PARAGRAPH_SNAP_THRESHOLD) {
+          if (!nearestParagraph || distance < nearestParagraph.distance) {
+            nearestParagraph = { id: p.id, distance, rect: p.rect }
+          }
         }
       }
-    }
 
-    if (nearestParagraph) { // 如果找到最近段落
-      isNearSnapTarget.value = true // 设置接近吸附目标
-      snapTargetParagraphId.value = nearestParagraph.id // 设置目标段落ID
-      const snapPos = calculateParagraphSnapPosition(nearestParagraph.id) // 计算吸附位置
-      if (snapPos) { // 如果位置计算成功
-        snapTargetRect.value = snapPos // 设置吸附目标矩形
+      if (nearestParagraph) {
+        isNearSnapTarget.value = true
+        snapTargetParagraphId.value = nearestParagraph.id
+        const snapPos = calculateParagraphSnapPosition(nearestParagraph.id)
+        if (snapPos) snapTargetRect.value = snapPos
+      } else {
+        isNearSnapTarget.value = false
+        snapTargetParagraphId.value = null
+        snapTargetRect.value = null
       }
-    } else { // 如果没有找到
-      isNearSnapTarget.value = false // 重置吸附状态
+    } else {
+      isNearSnapTarget.value = false
       snapTargetParagraphId.value = null
       snapTargetRect.value = null
     }
-  } else { // 如果接近侧边栏
-    isNearSnapTarget.value = false // 重置段落吸附状态
-    snapTargetParagraphId.value = null
-    snapTargetRect.value = null
-  }
-  
-  // 限制在视口内
-  const maxX = window.innerWidth - panel.size.width // 计算最大X位置
-  const maxY = window.innerHeight - panel.size.height // 计算最大Y位置
-  
-  pdfStore.updatePanelPosition(draggingPanelId.value, { // 更新面板位置
-    x: Math.max(0, Math.min(maxX, newX)), // 限制在0到maxX之间
-    y: Math.max(0, Math.min(maxY, newY)) // 限制在0到maxY之间
-  })
-}
 
-// 停止拖动并执行吸附逻辑
-function stopDrag() { // 鼠标释放时停止拖动
-  if (draggingPanelId.value) { // 如果有拖动中的面板
-    const panel = pdfStore.translationPanels.find(p => p.id === draggingPanelId.value) // 查找面板
+    // Constraints
+    const maxX = window.innerWidth - panel.size.width
+    const maxY = window.innerHeight - panel.size.height
     
-    if (panel) { // 如果面板存在
-      if (isNearSidebar.value) { // 如果接近侧边栏
-        // 吸附到侧边栏
-        pdfStore.setPanelSnapMode(draggingPanelId.value, 'sidebar') // 设置吸附模式为侧边栏
-      } else if (isNearSnapTarget.value && snapTargetRect.value && snapTargetParagraphId.value) { // 如果接近段落
-        // 吸附到段落 - 精确覆盖原文位置
-        pdfStore.setPanelSnapMode(draggingPanelId.value, 'paragraph', snapTargetParagraphId.value) // 设置吸附模式为段落
-        pdfStore.updatePanelPosition(draggingPanelId.value, { // 更新面板位置到吸附点
-          x: snapTargetRect.value.left,
-          y: snapTargetRect.value.top
-        })
-        // 调整宽度匹配段落
-        pdfStore.updatePanelSize(draggingPanelId.value, { // 更新面板尺寸
-          width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapTargetRect.value.width)), // 限制宽度在范围内
-          height: panel.size.height // 保持高度不变
-        })
+    translationStore.updatePanelPosition(draggingPanelId.value, {
+      x: Math.max(0, Math.min(maxX, newPos.x)),
+      y: Math.max(0, Math.min(maxY, newPos.y))
+    })
+  },
+  onDragEnd: () => {
+    if (draggingPanelId.value) {
+      const panel = translationStore.translationPanels.find(p => p.id === draggingPanelId.value)
+      if (panel) {
+        if (isNearSidebar.value) {
+          translationStore.setPanelSnapMode(draggingPanelId.value, 'sidebar')
+        } else if (isNearSnapTarget.value && snapTargetRect.value && snapTargetParagraphId.value) {
+          translationStore.setPanelSnapMode(draggingPanelId.value, 'paragraph', snapTargetParagraphId.value)
+          translationStore.updatePanelPosition(draggingPanelId.value, {
+            x: snapTargetRect.value.left,
+            y: snapTargetRect.value.top
+          })
+          translationStore.updatePanelSize(draggingPanelId.value, {
+            width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapTargetRect.value.width)),
+            height: panel.size.height
+          })
+        }
       }
     }
+    draggingPanelId.value = null
+    isNearSnapTarget.value = false
+    isNearSidebar.value = false
+    snapTargetRect.value = null
+    snapTargetParagraphId.value = null
   }
+})
+
+function startDrag(e: MouseEvent, panelId: string) {
+  if (!(e.target as HTMLElement).closest('.panel-header')) return
   
-  draggingPanelId.value = null // 重置拖动面板ID
-  isNearSnapTarget.value = false // 重置吸附状态
-  isNearSidebar.value = false
-  snapTargetRect.value = null
-  snapTargetParagraphId.value = null
-  resizingPanelId.value = null // 重置调整大小ID
-  resizeDirection.value = '' // 重置调整方向
+  const panel = translationStore.translationPanels.find(p => p.id === panelId)
+  if (!panel) return
+  
+  draggingPanelId.value = panelId
+  setDragPosition(panel.position)
+  
+  translationStore.setPanelSnapMode(panelId, 'none')
+  translationStore.bringPanelToFront(panelId)
+  
+  initDrag(e)
 }
 
-// 开始调整指定面板的大小
-function startResize(e: MouseEvent, panelId: string, direction: string) { // 鼠标按下调整大小手柄时
-  e.stopPropagation() // 阻止事件冒泡
-  e.preventDefault() // 阻止默认事件
-  
-  const panel = pdfStore.translationPanels.find(p => p.id === panelId) // 查找要调整的面板
-  if (!panel) return // 如果面板不存在，返回
-  
-  resizingPanelId.value = panelId // 设置调整大小面板ID
-  resizeDirection.value = direction // 设置调整方向
-  resizeStart.value = { // 记录开始时的状态
-    x: e.clientX,
-    y: e.clientY,
-    width: panel.size.width,
-    height: panel.size.height
-  }
-  
-  pdfStore.bringPanelToFront(panelId) // 将面板置于顶层
-}
+// 调整大小处理
+const { startResize: initResize, setSize: setResizeSize } = useResizableWindow({
+  minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH, minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT,
+  onResize: ({ size, delta }) => {
+    if (!resizingPanelId.value) return
+    const panel = translationStore.translationPanels.find(p => p.id === resizingPanelId.value)
+    if (!panel) return
 
-// 调整大小过程中更新面板尺寸
-function onResize(e: MouseEvent) { // 鼠标移动时的调整大小处理
-  if (!resizingPanelId.value) return // 如果没有调整中的面板，返回
-  
-  const panel = pdfStore.translationPanels.find(p => p.id === resizingPanelId.value) // 查找调整中的面板
-  if (!panel) return // 如果面板不存在，返回
-  
-  const deltaX = e.clientX - resizeStart.value.x // 计算X方向的变化量
-  const deltaY = e.clientY - resizeStart.value.y // 计算Y方向的变化量
-  
-  let newWidth = panel.size.width // 初始化新宽度
-  let newHeight = panel.size.height // 初始化新高度
-  let newX = panel.position.x // 初始化新X位置
-  let newY = panel.position.y // 初始化新Y位置
-  
-  if (resizeDirection.value.includes('e')) { // 如果包含东向调整
-    newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, resizeStart.value.width + deltaX)) // 计算新宽度，限制在范围内
-  }
-  if (resizeDirection.value.includes('w')) { // 如果包含西向调整
-    const proposedWidth = resizeStart.value.width - deltaX // 计算提议宽度
-    if (proposedWidth >= MIN_WIDTH && proposedWidth <= MAX_WIDTH) { // 如果在范围内
-      newWidth = proposedWidth // 设置新宽度
-      newX = panel.position.x + deltaX // 更新X位置
+    translationStore.updatePanelSize(resizingPanelId.value, size)
+    
+    if (delta.x !== 0 || delta.y !== 0) {
+      translationStore.updatePanelPosition(resizingPanelId.value, {
+        x: panel.position.x + delta.x,
+        y: panel.position.y + delta.y
+      })
     }
+  },
+  onResizeEnd: () => {
+    resizingPanelId.value = null
   }
-  if (resizeDirection.value.includes('s')) { // 如果包含南向调整
-    newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, resizeStart.value.height + deltaY)) // 计算新高度
-  }
-  if (resizeDirection.value.includes('n')) { // 如果包含北向调整
-    const proposedHeight = resizeStart.value.height - deltaY // 计算提议高度
-    if (proposedHeight >= MIN_HEIGHT && proposedHeight <= MAX_HEIGHT) { // 如果在范围内
-      newHeight = proposedHeight // 设置新高度
-      newY = panel.position.y + deltaY // 更新Y位置
-    }
-  }
+})
+
+function startResize(e: MouseEvent, panelId: string, direction: string) {
+  const panel = translationStore.translationPanels.find(p => p.id === panelId)
+  if (!panel) return
   
-  pdfStore.updatePanelSize(resizingPanelId.value, { width: newWidth, height: newHeight }) // 更新面板尺寸
-  pdfStore.updatePanelPosition(resizingPanelId.value, { x: newX, y: newY }) // 更新面板位置
+  resizingPanelId.value = panelId
+  setResizeSize(panel.size)
+  translationStore.bringPanelToFront(panelId)
+  
+  initResize(e, direction)
 }
 
 // 关闭指定面板
 function closePanel(panelId: string) { // 关闭翻译面板
-  pdfStore.closeTranslationPanelById(panelId) // 调用store关闭面板
+  translationStore.closeTranslationPanelById(panelId) // 调用store关闭面板
 }
 
 // 重新翻译指定面板的内容
-async function retranslate(panel: TranslationPanelInstance) { // 异步重新翻译
-  const pdfId = libraryStore.currentDocumentId // 获取当前文档ID
-  if (!pdfId || !panel.paragraphId) return // 如果缺少必要信息，返回
+async function retranslate(panel: TranslationPanelInstance) {
+  if (!panel.paragraphId) return
   
-  pdfStore.setPanelLoading(panel.id, true) // 设置面板加载状态
+  translationStore.setPanelLoading(panel.id, true)
   
-  try {
-    const result = await aiApi.translateParagraph(pdfId, panel.paragraphId, true) // 调用API重新翻译
-    if (result.success) { // 如果翻译成功
-      pdfStore.setTranslation(panel.paragraphId, result.translation) // 更新翻译内容
-    }
-  } catch (error) {
-    console.error('Translation failed:', error) // 记录翻译失败错误
+  const translation = await translationStore.translateParagraph(panel.paragraphId, true)
+  if (translation) {
+    translationStore.setTranslation(panel.paragraphId, translation)
   }
 }
 
-// 获取指定面板的翻译内容
-async function fetchTranslation(panel: TranslationPanelInstance) { // 异步获取翻译
-  const pdfId = libraryStore.currentDocumentId // 获取当前文档ID
-  if (!pdfId || !panel.paragraphId || panel.translation) return // 如果条件不满足，返回
+// 获取指定面板的翻译内容（向后端请求并把结果写回 store，处理加载状态与错误提示）
+async function fetchTranslation(panel: TranslationPanelInstance) {
+  if (!panel.paragraphId || panel.translation) return
   
-  pdfStore.setPanelLoading(panel.id, true) // 设置面板加载状态
+  // 标记该面板为加载中（UI 将显示 loading 状态）
+  translationStore.setPanelLoading(panel.id, true)
   
-  try {
-    const result = await aiApi.translateParagraph(pdfId, panel.paragraphId) // 调用API翻译段落
-    if (result.success) { // 如果翻译成功
-      pdfStore.setTranslation(panel.paragraphId, result.translation) // 更新翻译内容
-    }
-  } catch (error) {
-    console.error('Translation failed:', error) // 记录翻译失败错误
-    pdfStore.setTranslation(panel.paragraphId, '翻译失败，请重试') // 设置错误消息
+  // 调用翻译 composable 请求翻译结果
+  const translation = await translationStore.translateParagraph(panel.paragraphId)
+  if (translation) {
+    // 成功则将翻译结果写入 store（store 会把结果分配到相关 panel）
+    translationStore.setTranslation(panel.paragraphId, translation)
+  } else {
+    // 失败则写入错误提示，前端可在 UI 中显示
+    translationStore.setTranslation(panel.paragraphId, '翻译失败，请重试')
   }
 }
 
 // 监听面板数量变化，自动请求翻译
-watch(() => pdfStore.translationPanels.length, () => { // 监听翻译面板数组长度变化
-  pdfStore.translationPanels.forEach(panel => { // 遍历所有面板
+watch(() => translationStore.translationPanels.length, () => { // 监听翻译面板数组长度变化
+  translationStore.translationPanels.forEach(panel => { // 遍历所有面板
     if (!panel.translation && panel.isLoading) { // 如果面板没有翻译内容且正在加载
       fetchTranslation(panel) // 获取翻译
     }
@@ -374,16 +331,16 @@ watch(() => pdfStore.scale, () => { // 监听PDF缩放因子变化
 
 // 更新所有吸附到段落的面板位置
 function updateSnappedPanelPositions() { // 更新所有吸附面板的位置
-  pdfStore.translationPanels.forEach(panel => { // 遍历所有面板
+  translationStore.translationPanels.forEach(panel => { // 遍历所有面板
     if (panel.snapMode === 'paragraph' && panel.snapTargetParagraphId) { // 如果面板吸附到段落
       const snapPos = calculateParagraphSnapPosition(panel.snapTargetParagraphId) // 计算吸附位置
       if (snapPos) { // 如果位置计算成功
-        pdfStore.updatePanelPosition(panel.id, { // 更新面板位置
+        translationStore.updatePanelPosition(panel.id, { // 更新面板位置
           x: snapPos.left,
           y: snapPos.top
         })
         // 同时更新宽度以匹配段落
-        pdfStore.updatePanelSize(panel.id, { // 更新面板尺寸
+        translationStore.updatePanelSize(panel.id, { // 更新面板尺寸
           width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapPos.width)), // 限制宽度
           height: panel.size.height // 保持高度
         })
@@ -412,7 +369,7 @@ function onPdfScroll() { // PDF滚动事件处理
 
 // 点击面板时聚焦
 function focusPanel(panelId: string) { // 将指定面板置于顶层
-  pdfStore.bringPanelToFront(panelId) // 调用store置于顶层
+  translationStore.bringPanelToFront(panelId) // 调用store置于顶层
 }
 
 // 存储事件监听器引用
@@ -420,6 +377,9 @@ let pdfContainerRef: Element | null = null // PDF容器元素引用
 let resizeObserver: ResizeObserver | null = null // 调整大小观察器引用
 
 // 绑定滚动监听器（带重试机制）
+// 说明：
+// - 在某些 PDF 渲染实现中，滚动容器可能延迟渲染或切换，故使用重试机制以保证能正确绑定。
+// - 绑定后会监听 scroll（被动监听）并使用 ResizeObserver 监听容器尺寸变化，结合防抖与 RAF 优化吸附面板的更新，减少卡顿。
 let bindRetryCount = 0 // 绑定重试计数
 const MAX_BIND_RETRIES = 10 // 最大重试次数
 
@@ -459,19 +419,13 @@ watch(() => pdfStore.currentPdfUrl, () => { // 监听当前PDF URL变化
   setTimeout(bindScrollListener, 200) // 延迟绑定
 }, { immediate: true }) // 立即执行一次
 
-onMounted(() => { // 组件挂载时
-  document.addEventListener('mousemove', onDrag) // 添加全局鼠标移动监听
-  document.addEventListener('mouseup', stopDrag) // 添加全局鼠标释放监听
-
+onMounted(() => {
   // 延迟绑定，确保 PDF 容器已渲染
-  setTimeout(bindScrollListener, 200) // 延迟200ms绑定滚动监听
+  setTimeout(bindScrollListener, 200)
 })
 
-onBeforeUnmount(() => { // 组件卸载前
-  document.removeEventListener('mousemove', onDrag) // 移除鼠标移动监听
-  document.removeEventListener('mouseup', stopDrag) // 移除鼠标释放监听
-
-  if (pdfContainerRef) { // 如果有容器引用
+onBeforeUnmount(() => {
+  if (pdfContainerRef) {
     pdfContainerRef.removeEventListener('scroll', onPdfScroll) // 移除滚动监听
     pdfContainerRef = null // 重置引用
   }
@@ -512,7 +466,7 @@ onBeforeUnmount(() => { // 组件卸载前
   </div>
 
   <!-- 渲染所有翻译面板（排除已停靠到侧边栏的） -->
-  <template v-for="(panel, index) in pdfStore.translationPanels.filter(p => !p.isSidebarDocked)" :key="panel.id">
+  <template v-for="(panel, index) in translationStore.translationPanels.filter(p => !p.isSidebarDocked)" :key="panel.id">
     <div
       class="translation-panel fixed z-[1000] rounded-lg overflow-hidden select-none"
       :class="{ 

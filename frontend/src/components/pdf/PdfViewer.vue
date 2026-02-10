@@ -21,6 +21,7 @@ import 'pdfjs-dist/web/pdf_viewer.css'
 // 引入 pdf.js worker
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url' 
 import { usePdfStore } from '../../stores/pdf' 
+import { useTranslationStore } from '../../stores/translation'
 import { useLibraryStore } from '../../stores/library' 
 import { notesApi, type Note } from '../../api' 
 import TextSelectionTooltip from './TextSelectionTooltip.vue' 
@@ -43,6 +44,7 @@ type PageRef = {
 // 获取 store 实例
 const pdfStore = usePdfStore() 
 const libraryStore = useLibraryStore() 
+const translationStore = useTranslationStore()
 
 // ------------------------- 初始化 PDF 状态与引用 -------------------------
 // 滚动条
@@ -1510,7 +1512,7 @@ function handleParagraphMarkerClick(event: MouseEvent, paragraphId: string, orig
   const panelWidth = 320
   const finalX = (panelX + panelWidth > window.innerWidth) ? (rect.left - panelWidth - 10) : panelX
   
-  pdfStore.openTranslationPanel(paragraphId, { x: Math.max(0, finalX), y: Math.max(0, panelY) }, originalText)
+  translationStore.openTranslationPanel(paragraphId, { x: Math.max(0, finalX), y: Math.max(0, panelY) }, originalText)
 }
 
 // 计算段落光标在页面中的位置（考虑缩放）

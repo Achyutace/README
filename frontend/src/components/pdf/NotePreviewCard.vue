@@ -125,7 +125,7 @@ watch(isVisible, (visible) => {
   </Teleport>
 </template>
 
-<style scoped>
+<style scoped lang="postcss">
 .note-preview-card {
   animation: slideIn 0.2s ease-out;
 }

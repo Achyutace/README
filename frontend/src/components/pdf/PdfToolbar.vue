@@ -52,8 +52,7 @@ function applyScaleInput() {
     scaleInput.value = String(pdfStore.scalePercent)  // 重置为当前缩放百分比
     return  // 退出函数
   }
-  // 计算新的缩放比例（假设基础缩放为 1.5），并设置到 store
-  pdfStore.setScale((value / 100) * 1.5)
+  pdfStore.setScalePercent(value)  // 调用 store 方法设置新的缩放百分比
   scaleInput.value = String(pdfStore.scalePercent)  // 更新输入框值为新的百分比
 }
 
@@ -198,6 +197,7 @@ watch(
   margin: 0;
 }
 .no-spinner[type='number'] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 </style>
