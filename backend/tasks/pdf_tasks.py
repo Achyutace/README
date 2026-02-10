@@ -1,11 +1,13 @@
 """
 PDF 异步处理任务
-逐页解析 PDF 段落 + 解析图片元数据 + 逐页向量化：每解析一页就写入 DB，前端可按页轮询
+1. 先逐页解析 PDF 段落 + 解析图片元数据：每解析一页就写入 DB，前端可按页轮询
+2. 再逐段落向量化
 状态机:
     pending → processing → completed / failed
 """
 import os
 import logging
+import uuid
 from celery import shared_task
 
 from core.database import SessionLocal
@@ -15,9 +17,7 @@ from utils import pdf_engine
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# 状态常量 (仅 4 种)
-# ==========================================
+# 状态常量 
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
 STATUS_COMPLETED = "completed"
@@ -42,53 +42,56 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 
     # 2. COS 下载
     if object_storage.config.enabled:
+        # 使用临时文件防止并发写冲突
+        tmp_candidate = f"{candidate}.tmp.{uuid.uuid4().hex}"
         try:
-            if object_storage.download_file(file_hash, candidate):
+            if object_storage.download_file(file_hash, tmp_candidate):
+                # 原子替换 
+                os.replace(tmp_candidate, candidate)
                 logger.info(f"Downloaded {file_hash} from COS to {candidate}")
                 return candidate
         except Exception as e:
             logger.warning(f"Failed to download {file_hash} from COS: {e}")
+        finally:
+            # 清理残留临时文件
+            if os.path.exists(tmp_candidate):
+                try:
+                    os.remove(tmp_candidate)
+                except OSError:
+                    pass
 
     raise FileNotFoundError(f"PDF file not found: {file_hash}")
 
-
-# ==========================================
-# Celery Task
-# ==========================================
+# =================== Celery Task =======================
 
 @shared_task(bind=True, name="tasks.pdf_tasks.process_pdf",
              max_retries=3, default_retry_delay=60)
-def process_pdf(self, file_hash: str, upload_folder: str,
-                filename: str, page_count: int, user_id: str):
+
+def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int):
     """
     PDF 全流程异步处理任务。
 
     Args:
-        file_hash:     文件 SHA256 (= pdf_id)
+        file_hash:     pdf_id
         upload_folder: 用户上传目录绝对路径
         filename:      原始文件名
-        page_count:    页数 (上传时已获取)
-        user_id:       用户 ID
+        page_count:    页数 
     """
     task_id = self.request.id
-    logger.info(f"[Task {task_id}] Start processing PDF {file_hash}, pages={page_count}")
+    logger.info(f"[Task {task_id}] Start processing PDF {filename} ({file_hash}), pages={page_count}")
 
     try:
-        # ---------- 0. 定位文件 ----------
         filepath = _resolve_filepath(file_hash, upload_folder)
 
-        # ============================================
-        # 阶段 1: 逐页解析段落
-        # ============================================
+        # ================= 逐页解析段落 + 图片元数据 ===========================
         _update_status(file_hash, STATUS_PROCESSING, task_id=task_id)
 
         for page_num in range(1, page_count + 1):
-            logger.info(f"[Task {task_id}] Parsing page {page_num}/{page_count}")
+            logger.info(f"[Task {task_id}] Processing page {page_num}/{page_count}")
 
-            # 调用引擎解析单页
+            # 解析段落
             paragraphs = pdf_engine.parse_paragraphs(filepath, file_hash, page_numbers=[page_num])
 
-            # 写入数据库
             if paragraphs:
                 db, repo = _get_repo()
                 try:
@@ -106,68 +109,50 @@ def process_pdf(self, file_hash: str, upload_folder: str,
                 finally:
                     db.close()
 
-            # 更新已处理页数
+            # 解析图片元数据
+            try:
+                images_list = pdf_engine.get_images_list(filepath, file_hash, page_numbers=[page_num])
+                if images_list:
+                    db, repo = _get_repo()
+                    try:
+                        images_to_save = []
+                        for img in images_list:
+                            images_to_save.append({
+                                "page_number": img["page"],
+                                "image_index": img["index"],
+                                "bbox": img["bbox"],
+                                "caption": "",
+                            })
+                        repo.save_images(file_hash, images_to_save)
+                        logger.info(f"[Task {task_id}] Saved {len(images_to_save)} images for page {page_num}")
+                    except Exception as e:
+                        logger.error(f"[Task {task_id}] Failed to save images page {page_num}: {e}")
+                    finally:
+                        db.close()
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Image parsing skipped for page {page_num}: {e}")
+
+            # 更新进度
             _update_progress(file_hash, page_num)
 
-            # 更新 Celery 任务元信息 (供 AsyncResult.info 查询)
+            # 更新 Celery 任务元信息
             self.update_state(state="PROGRESS", meta={
                 "current_page": page_num,
                 "total_pages": page_count,
-                "phase": "text_parsing",
+                "phase": "parsing",
             })
 
-        # ============================================
-        # 阶段 2: 解析图片元数据
-        # ============================================
-        # 状态保持 processing，不需要再更新
-
-        try:
-            images_list = pdf_engine.get_images_list(filepath, file_hash)
-            if images_list:
-                db, repo = _get_repo()
-                try:
-                    images_to_save = []
-                    for img in images_list:
-                        images_to_save.append({
-                            "page_number": img["page"],
-                            "image_index": img["index"],
-                            "bbox": img["bbox"],
-                            "caption": "",
-                        })
-                    repo.save_images(file_hash, images_to_save)
-                    logger.info(f"[Task {task_id}] Saved {len(images_to_save)} images meta")
-                except Exception as e:
-                    logger.error(f"[Task {task_id}] Failed to save images: {e}")
-                finally:
-                    db.close()
-        except Exception as e:
-            logger.warning(f"[Task {task_id}] Image parsing skipped: {e}")
-
-        self.update_state(state="PROGRESS", meta={
-            "current_page": page_count,
-            "total_pages": page_count,
-            "phase": "image_parsing",
-        })
-
-        # ============================================
-        # 阶段 3: RAG 向量化
-        # ============================================
-        # 状态保持 processing
-
+        # ===================== 逐段落向量化 =======================
         self.update_state(state="PROGRESS", meta={
             "current_page": page_count,
             "total_pages": page_count,
             "phase": "vectorizing",
         })
+        
+        # TODO
+        pass
 
-        try:
-            _run_rag_indexing(file_hash, filepath, user_id, task_id)
-        except Exception as e:
-            logger.warning(f"[Task {task_id}] RAG indexing failed (non-fatal): {e}")
-
-        # ============================================
-        # 阶段 4: 完成
-        # ============================================
+        # ====================== 完成 ======================
         _update_status(file_hash, STATUS_COMPLETED)
 
         logger.info(f"[Task {task_id}] PDF {file_hash} processing completed")
@@ -184,13 +169,11 @@ def process_pdf(self, file_hash: str, upload_folder: str,
     except Exception as exc:
         _update_status(file_hash, STATUS_FAILED, error=str(exc))
         logger.error(f"[Task {task_id}] Unexpected error: {exc}")
-        # Celery 自动重试
+        # 自动重试
         raise self.retry(exc=exc)
 
 
-# ==========================================
-# 辅助函数
-# ==========================================
+# ================== 辅助函数 ========================
 
 def _update_status(file_hash: str, status: str, task_id: str = None, error: str = None):
     """更新 GlobalFile 的处理状态"""
