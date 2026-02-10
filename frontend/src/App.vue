@@ -71,74 +71,6 @@ const isResizingWidth = ref(false) // 是否正在拖动调整宽度
 const MIN_SIDEBAR_WIDTH = 380
 const MAX_SIDEBAR_WIDTH = 650
 
-// ---------------------------- 初始化主题切换按钮 ----------------------------
-// 记录按钮位置（相对于窗口左上角），初始化放在右上角附近
-const themeButtonPos = ref({ x: window.innerWidth - 60, y: 16 }) 
-
-// 是否正在拖动主题按钮
-const isDraggingThemeButton = ref(false) 
-
-// 标记是否发生过实际拖动（用于区分点击与拖动）
-const hasDragged = ref(false) 
-
-// 鼠标与按钮左上角的偏移
-const dragOffset = ref({ x: 0, y: 0 }) 
-
-// 拖动开始时鼠标的位置
-const dragStartPos = ref({ x: 0, y: 0 }) 
-
-
-// ---------------------------- 主题按钮拖动处理 ----------------------------
-// 开始拖动主题按钮：记录初始位置与偏移（点击时触发）
-const startDragThemeButton = (e: MouseEvent) => {
-  isDraggingThemeButton.value = true  // 标记开始拖动
-  // 判定是否真的拖动了一定距离（初值为 false，因为刚开始还没移动）
-  hasDragged.value = false
-  dragStartPos.value = { x: e.clientX, y: e.clientY }  // 记录鼠标位置
-  // 记录鼠标与按钮左上角的偏移
-  dragOffset.value = {
-    x: e.clientX - themeButtonPos.value.x,
-    y: e.clientY - themeButtonPos.value.y
-  }
-  
-  // 动态注册全局监听，提升性能
-  document.addEventListener('mousemove', onDragThemeButton)
-  document.addEventListener('mouseup', stopDragThemeButton)
-  
-  e.preventDefault()  // 阻止浏览器对默认拖动行为的处理
-}
-
-// 拖动主题按钮过程：更新按钮位置（鼠标移动时触发）
-const onDragThemeButton = (e: MouseEvent) => {
-  if (!isDraggingThemeButton.value) return  // 如果没有在拖动，直接返回
-  // 检查是否真正移动超过阈值（5px），用于区分点击与拖动
-  const dx = Math.abs(e.clientX - dragStartPos.value.x)
-  const dy = Math.abs(e.clientY - dragStartPos.value.y)
-  if (dx > 5 || dy > 5) {
-    hasDragged.value = true
-  }
-  // 计算新的按钮位置
-  const newX = e.clientX - dragOffset.value.x
-  const newY = e.clientY - dragOffset.value.y
-  // 限制按钮在窗口可见范围内（确保不会被拖出屏幕）
-  themeButtonPos.value = {
-    x: Math.max(0, Math.min(window.innerWidth - 44, newX)),
-    y: Math.max(0, Math.min(window.innerHeight - 44, newY))
-  }
-}
-
-// 停止拖动主题按钮（鼠标抬起时触发）
-const stopDragThemeButton = () => {
-  isDraggingThemeButton.value = false // 标记停止拖动
-  document.removeEventListener('mousemove', onDragThemeButton)
-  document.removeEventListener('mouseup', stopDragThemeButton)
-}
-
-// 主题按钮点击处理：切换主题（点击时触发）
-const handleThemeButtonClick = () => {
-  if (!hasDragged.value) themeStore.toggleTheme() // 切换主题
-}
-
 // ------------------------- Notes 和 Chat 切换 -------------------------
 // 切换 Notes 面板可见性（工具栏按钮触发）
 const toggleNotesVisibility = () => {
@@ -314,43 +246,19 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeyboard)
 
   // 防御性移除：防止组件卸载时仍处于拖拽状态
-  document.removeEventListener('mousemove', onDragThemeButton)
   document.removeEventListener('mousemove', handleWidthResize)
   document.removeEventListener('mousemove', handleSplitResize)
   
-  document.removeEventListener('mouseup', stopDragThemeButton)
   document.removeEventListener('mouseup', stopWidthResize)
   document.removeEventListener('mouseup', stopSplitResize)
 })
 
-// ------------------------- 组件脚本结束 -------------------------
-// ---------------------------------------------------------------
-
 
 // ------------------------- 组件模板开始 -------------------------
-// （以下内容可以在 F12 开发者工具中查看）
 </script>
 
 <template>
   <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
-    <!-- Theme Toggle Button - Draggable, top layer -->
-    <button
-      @click="handleThemeButtonClick"
-      @mousedown="startDragThemeButton"
-      class="fixed z-[9999] p-2.5 rounded-lg bg-white/90 dark:bg-[#2d2d30] hover:bg-gray-100 dark:hover:bg-[#3e3e42] border border-gray-200/60 dark:border-gray-700/60 shadow-lg transition-colors duration-200 cursor-move select-none"
-      :style="{ left: themeButtonPos.x + 'px', top: themeButtonPos.y + 'px' }"
-      title="切换主题 (可拖动)"
-    >
-      <!-- Sun icon (show in dark mode) -->
-      <svg v-if="themeStore.isDarkMode" class="w-5 h-5 text-yellow-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-      </svg>
-      <!-- Moon icon (show in light mode) -->
-      <svg v-else class="w-5 h-5 text-gray-700 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-      </svg>
-    </button>
-    
     <!-- Left Sidebar - Library -->
     <LibrarySidebar class="flex-shrink-0" />
 
@@ -368,6 +276,7 @@ onBeforeUnmount(() => {
               :chat-visible="chatVisible"
               @toggle-notes-visibility="toggleNotesVisibility"
               @toggle-chat-visibility="toggleChatVisibility"
+              @toggle-theme="themeStore.toggleTheme"
             />
             <div v-else class="h-[49px]"></div>
           </div>
