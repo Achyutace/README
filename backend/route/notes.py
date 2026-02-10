@@ -60,7 +60,6 @@ def create_note():
         # 获取参数
         title = data.get('title', '')
         content = data.get('content', '')
-        page_number = data.get('pageNumber')
         note_type = data.get('noteType', 'general')
         color = data.get('color', '#FFEB3B')
         position = data.get('position')
@@ -76,7 +75,6 @@ def create_note():
         note_id = current_app.storage_service.add_note(
             file_hash=file_hash,
             note_content=note_content,
-            page_number=page_number,
             note_type=note_type,
             color=color,
             position=position
@@ -106,13 +104,9 @@ def get_notes(pdf_id):
         if not file_hash:
             return jsonify({'error': 'PDF file not found'}), 404
 
-        # 可选：按页筛选
-        page = request.args.get('page', type=int)
-
         # 从数据库获取
         notes = current_app.storage_service.get_notes(
-            file_hash=file_hash,
-            page_number=page
+            file_hash=file_hash
         )
         
         # 解析笔记内容（如果是JSON格式）

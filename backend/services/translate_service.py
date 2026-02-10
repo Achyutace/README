@@ -153,11 +153,11 @@ class TranslateService:
         """
         # 检查缓存
         if not force and self.db:
-            cached = self.db.get_paragraph_translation(file_hash, page_number, paragraph_index)
-            if cached:
+            translations = self.db.get_paragraph_translations(file_hash, page_number, paragraph_index)
+            if translations and translations[0]:
                 return {
                     'success': True,
-                    'translation': cached,
+                    'translation': translations[0],
                     'cached': True
                 }
 

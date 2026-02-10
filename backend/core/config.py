@@ -27,6 +27,18 @@ class VectorStoreConfig(BaseModel):
     qdrant_api_key: Optional[str] = None
     qdrant_prefer_grpc: bool = True
 
+class COSConfig(BaseModel):
+    enabled: bool = False
+    secret_id: str
+    secret_key: str
+    region: str
+    bucket: str
+    scheme: str = "https"
+
+class CeleryConfig(BaseModel):
+    broker_url: str = "redis://localhost:6379/0"
+    result_backend: str = "redis://localhost:6379/1"
+
 class AppConfig:
     def __init__(self, raw: Dict[str, Any]):
         self.DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/paper_agent_db")
@@ -42,6 +54,24 @@ class AppConfig:
             qdrant_url=vs_conf.get("qdrant", {}).get("url", "http://localhost:6333"),
             qdrant_api_key=vs_conf.get("qdrant", {}).get("api_key"),
             qdrant_prefer_grpc=vs_conf.get("qdrant", {}).get("prefer_grpc", True),
+        )
+
+        # COS
+        cos_conf = raw.get("cos", {})
+        self.cos = COSConfig(
+            enabled=cos_conf.get("enabled", False),
+            secret_id=cos_conf.get("secret_id", ""),
+            secret_key=cos_conf.get("secret_key", ""),
+            region=cos_conf.get("region", ""),
+            bucket=cos_conf.get("bucket", ""),
+            scheme=cos_conf.get("scheme", "https"),
+        )
+
+        # Celery
+        celery_conf = raw.get("celery", {})
+        self.celery = CeleryConfig(
+            broker_url=celery_conf.get("broker_url", "redis://localhost:6379/0"),
+            result_backend=celery_conf.get("result_backend", "redis://localhost:6379/1"),
         )
 
 # Global Instance

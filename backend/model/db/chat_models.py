@@ -49,3 +49,27 @@ class ChatMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     session = relationship("ChatSession", back_populates="messages")
+    attachments = relationship("ChatAttachment", back_populates="message", cascade="all, delete-orphan")
+
+
+class ChatAttachment(Base):
+    """
+    聊天附件表：支持图片、文件、引用、笔记
+    """
+    __tablename__ = "chat_attachments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=False, index=True)
+    
+    # 类别：'image', 'file', 'citation', 'note'
+    category = Column(String(50), nullable=False)
+    
+    # 存储路径 (针对 image/file)
+    file_path = Column(String, nullable=True)
+    
+    # 其他数据/内容 (针对 citation/note, 或文件的 metadata)
+    data = Column(JSONB, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    message = relationship("ChatMessage", back_populates="attachments")

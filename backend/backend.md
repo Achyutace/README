@@ -31,12 +31,14 @@ readme/
     ├── repository/                 # 数据层：直接操作数据库，提供接口给上层
     │   ├── sql_repo.py             # PostgreSQL 操作封装 
     │   └── vector_repo.py          # Qdrant 操作封装
+    │   └── object_repo.py          # 对象数据库存储
     ├── service/                   # 业务层
         ├── paper_service.py        # 处理新上传的论文，对接数据库，返回段落和图表信息
         ├── library_service.py      # 文献库管理：删除，分组，获取论文条目和笔记
         ├── rag_service.py          # 用户全文献库rag服务   
         ├── chat_service.py         # 聊天框管理服务：获取、增删聊天记录
         ├── roadmap_service.py      # roadmap服务：增删结点、关系；获取结点及相应数据
+        ├── translate_service.py    # 翻译服务：段落翻译(llm请求，连接数据库)
         └── user_service.py         # 用户管理服务：登录，注册等
     ├── workflows/                  # Agent服务层：过于重了，单独列出来 
     │   ├── state.py                # 定义 AgentState (Messages, Context, Keys)

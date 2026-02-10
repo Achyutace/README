@@ -24,11 +24,12 @@ class GlobalFile(Base):
     # 存储
     file_path = Column(String, nullable=False, comment="OSS/S3上的存储路径 key")
     file_size = Column(Integer, comment="文件字节大小")
-    page_count = Column(Integer, default=0)
+    total_pages = Column(Integer, default=0, comment="PDF 总页数")
     
-    # 异步处理状态
-    # PENDING -> TEXT_PROCESSING -> IMAGE_PROCESSING - > VECTORIZING -> DONE
-    process_status = Column(String(20), default="PENDING")
+    # Celery 任务跟踪
+    task_id = Column(String(64), nullable=True, index=True, comment="Celery 异步任务 ID")
+    current_page = Column(Integer, default=0, comment="当前已解析到的页码 (用于进度追踪)")
+    process_status = Column(String(20), default="pending")  # pending -> processing -> completed / failed
     error_message = Column(Text, nullable=True)
     
     # 元数据
@@ -84,6 +85,9 @@ class PdfImage(Base):
     
     # 坐标
     bbox = Column(JSONB, nullable=False, comment="[x, y, w, h]")
+
+    # 存储路径
+    image_path = Column(String, nullable=True, comment="OSS/S3上的存储路径 key")
     
     # 检索周边文字得到的图片描述，用于搜索
     caption = Column(Text, nullable=True)
@@ -133,7 +137,6 @@ class UserNote(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_paper_id = Column(UUID(as_uuid=True), ForeignKey("user_papers.id"), nullable=False, index=True)
     
-    page_number = Column(Integer, nullable=False)
     content = Column(Text, nullable=False) # 笔记内容(Markdown)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())

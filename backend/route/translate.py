@@ -87,14 +87,14 @@ def translate_paragraph():
 
         # 4. 检查数据库缓存
         storage_service = current_app.storage_service
-        cached_translation = storage_service.get_paragraph_translation(
+        translations = storage_service.get_paragraph_translations(
             file_hash, page, index
         )
         
-        if cached_translation and not force:
+        if translations and translations[0] and not force:
             return jsonify({
                 'success': True,
-                'translation': cached_translation,
+                'translation': translations[0],
                 'cached': True,
                 'paragraphId': paragraph_id
             })
