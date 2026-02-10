@@ -1,16 +1,12 @@
 """
 PDF 服务  —— 异步处理
-上传:
-    1. 计算 Hash → 查重 (秒传)
-    2. 保存文件到本地 + 上传 COS
-    3. 写入 DB (status=pending)
-    4. 派发 Celery 异步任务 (分页解析 + RAG)
-    5. 立即返回 {task_id, status: "processing"}
-查询:
-    1. 获取pdf指定页面的段落数据(支持全文和全页面)
+1. 处理pdf上传：注册文件库，触发异步段落图片解析和向量化
+pdf查询：
+    1. 获取pdf的段落数据(页面+段落)
     2. 获取pdf元数据
-    3. 获取pdf图片(支持指定页面指定图片(id))
+    3. 获取pdf图片(页面+编号)
     4. 获取pdf源文件
+    5. 获取/添加pdf翻译(指定页面指定段落)
 
 """
 import os
@@ -357,7 +353,35 @@ class PdfService:
         filepath = self.get_filepath(pdf_id)
         return open(filepath, 'rb')
 
-# ============== 图片 ========================
+    # ================= 翻译接口 =========================
+
+    def get_paragraph_translation(self, pdf_id: str, page_number: int, paragraph_index: int) -> str:
+        """获取段落翻译"""
+        db, repo = self._get_repo()
+        try:
+            translations = repo.get_paragraph_translations(pdf_id, page_number, paragraph_index)
+            if translations and translations[0]:
+                return translations[0]
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get translation for {pdf_id} p{page_number}#{paragraph_index}: {e}")
+            return None
+        finally:
+            db.close()
+
+    def update_paragraph_translation(self, pdf_id: str, page_number: int, paragraph_index: int, translation: str) -> bool:
+        """更新段落翻译"""
+        db, repo = self._get_repo()
+        try:
+            repo.update_paragraph_translation(pdf_id, page_number, paragraph_index, translation)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update translation for {pdf_id} p{page_number}#{paragraph_index}: {e}")
+            return False
+        finally:
+            db.close()
+
+    # ================= 图片 ========================
 
     def get_images_list(self, pdf_id: str) -> list[dict]:
         """获取图片元数据列表"""
