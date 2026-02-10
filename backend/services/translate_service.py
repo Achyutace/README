@@ -2,15 +2,17 @@
 翻译服务
 1. 文本翻译
 2. 段落翻译并存储到数据库
+3. 获取整页翻译缓存
 """
 
 from typing import Dict, List, Optional
 from pathlib import Path
 
-from config import settings
-from backend.utils.llm_simple import translate_text
+from core.config import settings
+from utils.llm_simple import translate_text
 from core.database import SessionLocal
 from repository.sql_repo import SQLRepository
+from utils.pdf_engine import make_paragraph_id
 
 try:
     from openai import OpenAI
@@ -139,3 +141,32 @@ class TranslateService:
             'hasContext': bool(context),
             'contextLength': len(context) if context else 0
         }
+
+    def get_page_translations(self, file_hash: str, page_number: int) -> Dict[str, str]:
+        """
+        获取某页的所有历史翻译
+
+        Args:
+            file_hash: 文件哈希 (即 pdf_id)
+            page_number: 页码
+
+        Returns:
+            dict: { paragraphId: translationText, ... }
+        """
+        db = SessionLocal()
+        try:
+            repo = SQLRepository(db)
+            paragraphs = repo.get_paragraphs(file_hash, page_number=page_number)
+
+            results = {}
+            for p in paragraphs:
+                if p.translation_text:
+                    p_id = make_paragraph_id(file_hash, p.page_number, p.paragraph_index)
+                    results[p_id] = p.translation_text
+            return results
+        finally:
+            db.close()
+
+    def _demo_translate(self, text: str) -> str:
+        """演示模式翻译 (无 API Key 时的 fallback)"""
+        return f"[Demo Translation] {text}"

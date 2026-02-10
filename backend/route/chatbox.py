@@ -5,76 +5,45 @@ chatbox.py
 
 import json
 import uuid
-import threading
-from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app
+from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app, g
+from route.utils import require_auth
+from tasks.chat_tasks import generate_session_title_task
 
 # 定义 Blueprint
 chatbox_bp = Blueprint('chatbox', __name__, url_prefix='/api/chatbox')
 
 # ==================== 辅助函数 ====================
 
-def get_services():
-    """
-    获取服务实例的辅助函数
-    """
-    if not hasattr(current_app, 'agent_service') or \
-       not hasattr(current_app, 'pdf_service') or \
-       not hasattr(current_app, 'chat_service'):
-        raise RuntimeError("Services are not initialized in the application context.")
-    return current_app.agent_service, current_app.pdf_service, current_app.chat_service
-
-def async_generate_and_update_title(app, agent_service, chat_service, session_id, user_id, user_query):
-    """
-    后台线程任务：调用 Agent 生成标题并更新数据库
-    """
-    with app.app_context():
-        try:
-            # 生成标题
-            new_title = agent_service.generate_session_title(user_query) or user_query[:20]
-            # 更新标题 
-            chat_service.update_title(session_id, user_id, new_title)
-            current_app.logger.info(f"Auto-generated title for session {session_id}: {new_title}")
-        except Exception as e:
-            current_app.logger.error(f"Title generation failed: {e}")
-
-def handle_lazy_session_creation(chat_service, agent_service, session_id, pdf_id, user_query, user_id):
+def handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id):
     """
     处理会话的懒创建：
-    如果数据库中不存在该 session_id，则创建会话并启动标题生成线程
+    如果数据库中不存在该 session_id，则同步创建会话，再通过 Celery 异步生成标题
     """
-    s_uuid = uuid.UUID(session_id)
-    u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
+    existing_session = chat_service.get_session(session_id, user_id)
 
-    existing_session = chat_service.get_session(s_uuid, u_uuid)
-    
     if not existing_session:
         current_app.logger.info(f"Lazy creating session: {session_id}")
-        
-        # 创建会话 (使用默认标题)
+
         chat_service.create_session(
-            session_id=s_uuid,
-            user_id=u_uuid,
+            user_id=user_id,
             file_hash=pdf_id,
-            title="new chat"
+            title="新对话"
         )
-        
-        # 启动异步线程生成标题 
-        real_app = current_app._get_current_object()
-        thread = threading.Thread(
-            target=async_generate_and_update_title,
-            args=(real_app, agent_service, chat_service, session_id, user_id, user_query)
-        )
-        thread.start()
+
+        # 丢给 Celery 异步生成标题（独立 DB 连接，不阻塞请求）
+        generate_session_title_task.delay(session_id, user_id, user_query)
+
 
 # ==================== 路由接口 ====================
 
 @chatbox_bp.route('/new', methods=['POST'])
+@require_auth
 def new_session():
     """
-    接口 A: 处理【新对话】
+    接口 A: 处理【新对话】— 仅生成前端 ID，不写库 (懒创建)
     """
     new_id = str(uuid.uuid4())
-    
+
     return jsonify({
         'sessionId': new_id,
         'title': '新对话',
@@ -82,96 +51,101 @@ def new_session():
         'messageCount': 0
     })
 
+
 @chatbox_bp.route('/message', methods=['POST'])
+@require_auth
 def send_message():
     """
     接口 B: 发送消息（非流式）
     """
     data = request.get_json()
-    
+
     user_query = data.get('message')
-    session_id = data.get('sessionId') 
+    session_id = data.get('sessionId')
     pdf_id = data.get('pdfId')
-    user_id = data.get('userId', 'default')
+    user_id = g.user_id_str          # ← 鉴权：统一从 g 获取
 
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
 
     try:
-        # 1. 获取服务
-        agent_service, _, chat_service = get_services()
+        agent_service = current_app.agent_service
+        chat_service = current_app.chat_service
 
-        # 2. 处理懒创建逻辑
-        handle_lazy_session_creation(chat_service, agent_service, session_id, pdf_id, user_query, user_id)
+        # 1. 懒创建会话
+        handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
 
-        # 3. 存储用户消息
+        # 2. 存储用户消息
         chat_service.add_user_message(session_id, user_id, user_query)
 
-        # 4. 获取并处理历史记录
+        # 3. 获取历史记录
         history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
-        # 5. 调用 Agent
+        # 4. 调用 Agent
         result = agent_service.chat(
             user_query=user_query,
             user_id=user_id,
             paper_id=pdf_id,
             chat_history=history
         )
-        
-        # 6. 存储 AI 回答
+
+        # 5. 存储 AI 回答
         chat_service.add_ai_message(
-            session_id=session_id, 
+            session_id=session_id,
             user_id=user_id,
-            content=result['response'], 
+            content=result['response'],
             citations=result.get('citations')
         )
-        
-        # 7. 构造返回结果
+
         result['sessionId'] = session_id
-      
         return jsonify(result)
 
     except Exception as e:
         current_app.logger.error(f"Chatbox error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
 @chatbox_bp.route('/simple-chat', methods=['POST'])
+@require_auth
 def simple_chat():
     """
     接口 B2: 简单对话模式（基于 PDF 全文，非流式）
     """
     data = request.get_json()
-    
+
     user_query = data.get('message')
     session_id = data.get('sessionId')
     pdf_id = data.get('pdfId')
-    user_id = data.get('userId', 'default')
-    
+    user_id = g.user_id_str
+
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
-    
+
     try:
-        agent_service, pdf_service, chat_service = get_services()
-        
-        # 1. 处理懒创建逻辑
-        handle_lazy_session_creation(chat_service, agent_service, session_id, pdf_id, user_query, user_id)
-        
+        agent_service = current_app.agent_service
+        pdf_service = g.pdf_service
+        chat_service = current_app.chat_service
+
+        # 1. 懒创建
+        handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+
         # 2. 存储用户消息
         chat_service.add_user_message(session_id, user_id, user_query)
-        
-        # 3. 获取并处理历史记录
+
+        # 3. 历史记录
         history = chat_service.get_formatted_history(session_id, user_id, limit=10)
-        
-        # 4. 获取 PDF 全文 
-        context_text = pdf_service.get_full_text(pdf_id=pdf_id) # TODO
-        
-        # 5. 调用 Agent 的 simple_chat 方法
+
+        # 4. 获取 PDF 全文
+        paragraph_data = pdf_service.get_paragraph(pdf_id) if pdf_id else None
+        context_text = paragraph_data.get('text', '') if paragraph_data else ''
+
+        # 5. 调用 Agent simple_chat
         result = agent_service.simple_chat(
             user_query=user_query,
             context_text=context_text,
             chat_history=history
         )
-        
+
         # 6. 存储 AI 回答
         chat_service.add_ai_message(
             session_id=session_id,
@@ -179,48 +153,48 @@ def simple_chat():
             content=result['response'],
             citations=result.get('citations')
         )
-        
-        # 7. 构造返回结果
+
         result['sessionId'] = session_id
-        
         return jsonify(result)
-    
+
     except Exception as e:
         current_app.logger.error(f"Simple chat error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
 @chatbox_bp.route('/stream', methods=['POST'])
+@require_auth
 def stream_message():
     """
     接口 C: 发送消息（流式 SSE）
     """
     data = request.get_json()
-    
+
     user_query = data.get('message')
     session_id = data.get('sessionId')
     pdf_id = data.get('pdfId')
-    user_id = data.get('userId', 'default')
+    user_id = g.user_id_str
 
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
 
     def generate():
-        # 在生成器内部获取服务
-        agent_service, _, chat_service = get_services()
-        
+        agent_service = current_app.agent_service
+        chat_service = current_app.chat_service
+
         try:
-            # 1. 处理懒创建逻辑
-            handle_lazy_session_creation(chat_service, agent_service, session_id, pdf_id, user_query, user_id)
-            
+            # 1. 懒创建
+            handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+
             # 2. 存储用户消息
             chat_service.add_user_message(session_id, user_id, user_query)
-            
-            # 3. 获取并处理历史
+
+            # 3. 历史
             history = chat_service.get_formatted_history(session_id, user_id, limit=10)
-            
-            # 4. 流式调用 Agent
+
+            # 4. 流式调用
             final_response_data = None
-            
+
             for event in agent_service.stream_chat(
                 user_query=user_query,
                 user_id=user_id,
@@ -229,10 +203,9 @@ def stream_message():
             ):
                 if event.get('type') == 'final':
                     final_response_data = event
-                
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            
-            # 5. 流结束后，存储 AI 完整回答
+
+            # 5. 存储 AI 完整回答
             if final_response_data:
                 chat_service.add_ai_message(
                     session_id=session_id,
@@ -240,7 +213,7 @@ def stream_message():
                     content=final_response_data['response'],
                     citations=final_response_data.get('citations')
                 )
-                
+
         except Exception as e:
             current_app.logger.error(f"Stream error: {str(e)}")
             error_event = {'type': 'error', 'error': str(e)}
@@ -256,43 +229,43 @@ def stream_message():
         }
     )
 
+
 @chatbox_bp.route('/session/<session_id>', methods=['DELETE'])
+@require_auth
 def delete_session(session_id):
     """
     接口 D: 删除会话
     """
     try:
-        _, _, chat_service = get_services()
-        
-        # 假设 user_id 是可选的，或者需要从 request context 获取
-        # 这里为了演示简单，如果前端没有传 headers 里的 user_id，则需要从 request logic 获取
-        # 现阶段假设 'default' 或通过 request.args 传递，或者该接口不需要鉴权
-        user_id = request.args.get('userId', 'default')
-        
-        deleted_count = chat_service.delete_session(session_id, user_id)
-        
+        chat_service = current_app.chat_service
+        user_id = g.user_id_str
+
+        chat_service.delete_session(session_id, user_id)
+
         return jsonify({
             'success': True,
             'sessionId': session_id,
             'message': 'Session deleted'
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Delete session error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
 @chatbox_bp.route('/sessions', methods=['GET'])
+@require_auth
 def list_sessions():
     """
     接口 E: 获取会话列表
     """
     try:
-        _, _, chat_service = get_services()
-        
+        chat_service = current_app.chat_service
+        user_id = g.user_id_str
+
         pdf_id = request.args.get('pdfId')
         limit = request.args.get('limit', type=int, default=50)
-        user_id = request.args.get('userId', 'default')
-        
+
         sessions = chat_service.list_user_sessions(user_id, file_hash=pdf_id, limit=limit)
 
         return jsonify({
@@ -300,21 +273,22 @@ def list_sessions():
             'sessions': sessions,
             'total': len(sessions)
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"List sessions error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
 @chatbox_bp.route('/session/<session_id>/messages', methods=['GET'])
+@require_auth
 def get_session_messages(session_id):
     """
     接口 F: 获取会话的所有消息
     """
     try:
-        _, _, chat_service = get_services()
-        user_id = request.args.get('userId', 'default')
+        chat_service = current_app.chat_service
+        user_id = g.user_id_str
 
-        # 使用 chat_service 的封装方法
         messages = chat_service.get_session_messages_for_ui(session_id, user_id)
 
         return jsonify({
@@ -323,12 +297,14 @@ def get_session_messages(session_id):
             'messages': messages,
             'total': len(messages)
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Get messages error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
 @chatbox_bp.route('/session/<session_id>/title', methods=['PUT'])
+@require_auth
 def update_session_title(session_id):
     """
     接口 G: 更新会话标题
@@ -336,25 +312,23 @@ def update_session_title(session_id):
     try:
         data = request.get_json()
         new_title = data.get('title')
-        user_id = data.get('userId', 'default')
-        
+        user_id = g.user_id_str
+
         if not new_title or not new_title.strip():
             return jsonify({'error': 'Title is required'}), 400
 
-        _, _, chat_service = get_services()
-
-        # 使用 chat_service 的封装方法
+        chat_service = current_app.chat_service
         success = chat_service.update_title(session_id, user_id, new_title.strip())
 
         if not success:
             return jsonify({'error': 'Session not found or update failed'}), 404
-        
+
         return jsonify({
             'success': True,
             'sessionId': session_id,
             'title': new_title.strip()
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Update title error: {str(e)}")
         return jsonify({'error': str(e)}), 500

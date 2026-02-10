@@ -1,19 +1,19 @@
 """
-上传论文 & 任务状态查询
+上传论文 & 任务状态查询 & PDF 信息获取
 
 上传接口:
     POST /api/pdf/upload
-    流程: 计算 Hash → 查重(秒传) → 存磁盘 → COS → 写 DB(pending) → 派发 Celery → 返回 task_id + pdfid
+    流程: 接收文件 → PdfService.ingest_file (Hash查重/存盘/COS/Celery)
+          → LibraryService.bind_paper (绑定到用户书架)
+          → 返回 pdf_id + task_id
 
 任务状态轮询接口:
     GET /api/pdf/<pdf_id>/status?from_page=1
-    前端每 2 秒调用一次，获取进度 + 已解析段落(分页增量)
 
 状态定义: pending | processing | completed | failed
 """
 from flask import Blueprint, request, jsonify, current_app, g, send_file
-from services.paper_service import PdfService
-from utils.hashing import calculate_stream_hash
+from route.utils import require_auth
 
 # 定义蓝图
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
@@ -24,64 +24,63 @@ upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
 # ==========================================
 
 @upload_bp.route('/upload', methods=['POST'])
+@require_auth
 def upload_pdf():
     """
-    上传 PDF 文件接口 
-    1. 接收文件流 + 基础校验
-    2. 计算 SHA256 Hash (作为唯一 ID)
-    3. 调用 PdfService.upload_and_dispatch:
-       - Hash 查重 (秒传)
-       - 保存到磁盘 + COS
-       - 写入 DB (status=pending)
-       - 派发 Celery 异步任务
-    4. 立即返回 {pdf_id, task_id, status}
-
-    前端收到 status="processing" 后，每 2 秒轮询 GET /api/pdf/<pdf_id>/status
+    上传 PDF 文件接口
+    1. 基础校验
+    2. 调用 PdfService.ingest_file (内部: Hash查重 → 存盘 → COS → 写DB → Celery)
+    3. 调用 LibraryService.bind_paper (绑定到用户书架)
+    4. 返回 {pdfId, taskId, status}
     """
     # 1. 基础校验
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
-    
+
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-        
+
     if not file.filename.lower().endswith('.pdf'):
         return jsonify({'error': 'Only PDF files are allowed'}), 400
 
     try:
-        pdf_service: PdfService = g.pdf_service
-        user_id = g.user_id  # uuid.UUID, 已在 before_request 中解析并确保存在于 DB
+        pdf_service = g.pdf_service
+        user_id = g.user_id          # uuid.UUID, 已在 before_request 中鉴权
+        user_id_str = g.user_id_str
 
-        # 2. 计算文件 Hash
-        file_hash = calculate_stream_hash(file.stream)
-        file.stream.seek(0)  
-
-        # 3. 上传 + 派发异步任务
-        result = pdf_service.upload_and_dispatch(
-            file=file,
-            file_hash=file_hash,
-            user_id=user_id,      # uuid.UUID 类型
+        # 2. 摄入文件 (Hash + 存盘 + COS + DB + Celery)
+        result = pdf_service.ingest_file(
+            file_obj=file,
             filename=file.filename,
+        )
+
+        pdf_id = result['pdf_id']
+
+        # 3. 绑定到用户书架
+        library_service = current_app.library_service
+        library_service.bind_paper(
+            user_id=user_id_str,
+            pdf_id=pdf_id,
+            title=file.filename
         )
 
         # 4. 立即返回
         response_data = {
-            'pdfId': result['pdf_id'],
-            'taskId': result['task_id'],
-            'status': result['status'],       # "processing" | "completed"
-            'pageCount': result['pageCount'],
-            'filename': result['filename'],
-            'userId': str(user_id),        
-            'fileHash': file_hash,
-            'isNewUpload': not result.get('exists', False),
+            'pdfId': pdf_id,
+            'taskId': result.get('task_id'),
+            'status': result['status'],
+            'pageCount': result.get('pageCount', 0),
+            'filename': file.filename,
+            'userId': user_id_str,
+            'isNewUpload': result.get('is_new', True),
         }
 
         current_app.logger.info(
-            f"[Upload] pdf_id={result['pdf_id']}, "
-            f"task_id={result['task_id']}, "
+            f"[Upload] pdf_id={pdf_id}, "
+            f"task_id={result.get('task_id')}, "
             f"status={result['status']}, "
-            f"user={user_id}"
+            f"user={user_id_str}"
         )
         return jsonify(response_data)
 
@@ -93,6 +92,7 @@ def upload_pdf():
 # ==================== 任务状态轮询接口 ======================
 
 @upload_bp.route('/<pdf_id>/status', methods=['GET'])
+@require_auth
 def get_task_status(pdf_id):
     """
     获取 PDF 处理进度
@@ -112,7 +112,7 @@ def get_task_status(pdf_id):
     from_page = request.args.get('from_page', 1, type=int)
 
     try:
-        pdf_service: PdfService = g.pdf_service
+        pdf_service = g.pdf_service
         result = pdf_service.get_process_status(pdf_id, from_page=from_page)
         return jsonify(result)
 
@@ -121,9 +121,10 @@ def get_task_status(pdf_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ================== pdf信息获取接口 ========================
+# ================== PDF 信息获取接口 ========================
 
 @upload_bp.route('/<pdf_id>/info', methods=['GET'])
+@require_auth
 def get_pdf_info(pdf_id):
     """获取 PDF 元数据"""
     try:
@@ -134,27 +135,21 @@ def get_pdf_info(pdf_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@upload_bp.route('/<pdf_id>/text', methods=['GET'])
-def get_pdf_text(pdf_id):
-    """获取 PDF 文本"""
-    page = request.args.get('page', type=int)
-    try:
-        result = g.pdf_service.extract_text(pdf_id, page)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 
 @upload_bp.route('/<pdf_id>/paragraphs', methods=['GET'])
+@require_auth
 def get_pdf_paragraphs(pdf_id):
     """获取 PDF 已解析的段落 (从 DB 读取)"""
+    page = request.args.get('page', type=int)
     try:
-        paragraphs = g.pdf_service.parse_paragraphs(pdf_id)
-        return jsonify({'paragraphs': paragraphs})
+        result = g.pdf_service.get_paragraph(pdf_id, page_number=page)
+        return jsonify({'paragraphs': result.get('blocks', []) if result else []})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @upload_bp.route('/<pdf_id>/source', methods=['GET'])
+@require_auth
 def get_pdf_source(pdf_id):
     """
     获取 PDF 源文件流 (支持浏览器直接预览/渲染)
@@ -164,7 +159,7 @@ def get_pdf_source(pdf_id):
         return send_file(
             file_obj,
             mimetype='application/pdf',
-            as_attachment=False,  # False=浏览器预览, True=触发下载
+            as_attachment=False,
             download_name=f"{pdf_id}.pdf"
         )
     except FileNotFoundError:

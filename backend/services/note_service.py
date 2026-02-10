@@ -1,12 +1,12 @@
 """
-笔记服务层：处理笔记的增删改查业务逻辑
+笔记 & 高亮 服务层：处理笔记和高亮的增删改查业务逻辑
 """
 import uuid
 import json
 import logging
 from typing import List, Dict, Optional, Any
 from ..repository.sql_repo import SQLRepository
-from ..model.db.doc_models import UserNote
+from ..model.db.doc_models import UserNote, UserHighlight
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +151,91 @@ class NoteService:
             "updated_at": note.updated_at.isoformat() if note.updated_at else None,
             "is_json": is_json
         }
+
+    # ==================== 高亮 ====================
+
+    def _resolve_user_paper_id(self, user_id: str, file_hash: str):
+        """内部辅助：解析 user_id → UUID，查找 UserPaper 关联 ID"""
+        try:
+            if user_id == 'default':
+                u_uuid = uuid.UUID('00000000-0000-0000-0000-000000000000')
+            else:
+                u_uuid = uuid.UUID(user_id)
+        except ValueError:
+            return None
+
+        user_paper = self.repo.get_user_paper(u_uuid, file_hash)
+        if not user_paper:
+            return None
+        return user_paper.id
+
+    def add_highlight(self, user_id: str, file_hash: str,
+                      page_number: int, rects: List[Dict],
+                      selected_text: str = '', color: str = '#FFFF00') -> Optional[int]:
+        """
+        添加高亮
+        :param user_id:   用户 ID (str)
+        :param file_hash: PDF 文件哈希
+        :param page_number: 页码
+        :param rects:     归一化坐标列表 [{x0,y0,x1,y1}, ...]
+        :param selected_text: 选中文本
+        :param color:     高亮颜色
+        :return: 高亮记录 ID (int) 或 None
+        """
+        user_paper_id = self._resolve_user_paper_id(user_id, file_hash)
+        if not user_paper_id:
+            logger.warning(f"UserPaper not found: user={user_id}, file={file_hash}")
+            return None
+
+        highlight = self.repo.add_highlight(
+            user_paper_id=user_paper_id,
+            page_number=page_number,
+            rects=rects,
+            selected_text=selected_text,
+            color=color
+        )
+        logger.info(f"Highlight created: id={highlight.id}")
+        return highlight.id
+
+    def get_highlights(self, user_id: str, file_hash: str,
+                       page_number: Optional[int] = None) -> List[Dict]:
+        """
+        获取高亮列表
+        :return: 高亮字典列表
+        """
+        user_paper_id = self._resolve_user_paper_id(user_id, file_hash)
+        if not user_paper_id:
+            return []
+
+        highlights = self.repo.get_highlights(user_paper_id, page_number=page_number)
+
+        return [
+            {
+                "id": h.id,
+                "page": h.page_number,
+                "rects": h.rects,
+                "text": h.selected_text,
+                "color": h.color,
+                "created_at": h.created_at.isoformat() if h.created_at else None,
+            }
+            for h in highlights
+        ]
+
+    def delete_highlight(self, highlight_id: int) -> bool:
+        """删除高亮"""
+        try:
+            self.repo.delete_highlight(highlight_id)
+            logger.info(f"Highlight deleted: {highlight_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting highlight {highlight_id}: {e}")
+            return False
+
+    def update_highlight(self, highlight_id: int, color: Optional[str] = None) -> bool:
+        """更新高亮颜色"""
+        try:
+            self.repo.update_highlight(highlight_id, color=color)
+            return True
+        except Exception as e:
+            logger.error(f"Error updating highlight {highlight_id}: {e}")
+            return False

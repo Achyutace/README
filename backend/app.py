@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 
 from core.config import settings
+# TODO：自动化测试
 
 # ==================== 1. 导入服务类 ====================
 from services.paper_service import PdfService
@@ -10,6 +11,8 @@ from services.rag_service import RAGService
 from services.translate_service import TranslateService
 from services.agent_service import AcademicAgentService
 from services.chat_service import ChatService
+from services.library_service import LibraryService
+from services.note_service import NoteService
 
 # ==================== 2. 导入路由蓝图 ====================
 from route.upload import upload_bp
@@ -59,12 +62,10 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 限制上传大小为 10
 # ==================== 4. 初始化全局服务 (单例) ====================
 
 # (1) RAG 服务：负责向量检索
-# 路由中通过 current_app.rag_service 访问
 rag_service = RAGService(chroma_dir=str(CHROMA_DIR))
 app.rag_service = rag_service
 
 # (2) 翻译服务：负责调用 LLM 进行翻译
-# 路由中通过 current_app.translate_service 访问
 translate_service = TranslateService(
     model=settings.openai.model,
     temperature=0.3
@@ -72,7 +73,6 @@ translate_service = TranslateService(
 app.translate_service = translate_service
 
 # (3) Agent 服务：负责聊天和智能问答
-# 依赖 rag_service 进行上下文检索
 agent_service = AcademicAgentService(
     rag_service=rag_service,
     openai_api_key=settings.openai.api_key,
@@ -81,9 +81,18 @@ agent_service = AcademicAgentService(
 )
 app.agent_service = agent_service
 
-# (4) Chat 服务：负责会话数据格式化
-chat_service = ChatService()
-app.chat_service = chat_service
+# (4) Chat 服务：负责会话管理
+#     ChatService 需要 SQLRepository, 在 before_request 中按请求创建
+#     这里先挂载一个工厂, 实际实例在钩子中赋值
+app.chat_service = None   # 占位, 由 before_request 初始化
+
+# (5) Library 服务：文献管理 (自管理 DB Session)
+library_service = LibraryService()
+app.library_service = library_service
+
+# (6) Note 服务：笔记管理
+#     NoteService 需要 SQLRepository, 与 ChatService 同理
+app.note_service = None   # 占位, 由 before_request 初始化
 
 # ==================== 5. 请求上下文钩子 ====================
 
@@ -160,6 +169,28 @@ def before_request():
     g.pdf_service = PdfService(
         upload_folder=str(upload_folder),
     )
+
+    # 4. 初始化 per-request 服务 (需要 SQLRepository)
+    from core.database import SessionLocal as _SessionLocal
+    from repository.sql_repo import SQLRepository as _SQLRepo
+
+    req_db = _SessionLocal()
+    req_repo = _SQLRepo(req_db)
+    g._req_db = req_db       # 挂到 g 上，供 teardown 关闭
+
+    # ChatService & NoteService 需要注入 repo (per-request)
+    app.chat_service = ChatService(db_repo=req_repo)
+    app.note_service = NoteService(db_repo=req_repo)
+
+@app.teardown_request
+def teardown_request_db(exc):
+    """请求结束时关闭 per-request 的 DB session"""
+    req_db = getattr(g, '_req_db', None)
+    if req_db is not None:
+        try:
+            req_db.close()
+        except Exception:
+            pass
 
 # ==================== 6. 注册蓝图 ====================
 

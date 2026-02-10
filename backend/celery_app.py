@@ -36,5 +36,5 @@ celery.conf.update(
     task_acks_late=True,
     
     # 自动发现任务模块
-    include=["tasks.pdf_tasks"],
+    include=["tasks.pdf_tasks", "tasks.chat_tasks"],
 )
