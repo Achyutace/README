@@ -25,6 +25,7 @@ import { useTranslationStore } from '../../stores/translation'
 import { useLibraryStore } from '../../stores/library' 
 import { notesApi, type Note } from '../../api' 
 import TextSelectionTooltip from './TextSelectionTooltip.vue' 
+import TranslationPanel from './TranslationPanel.vue'
 import TranslationPanelMulti from './TranslationPanelMulti.vue' 
 import NotePreviewCard from './NotePreviewCard.vue' 
 
@@ -1770,6 +1771,9 @@ onBeforeUnmount(() => {
     
     <!-- 多窗口翻译面板（可拖动，位于最上层） -->
     <TranslationPanelMulti />
+
+    <!-- 划词翻译面板 -->
+    <TranslationPanel />
 
     <!-- 笔记预览卡片（Ctrl+点击触发） -->
     <NotePreviewCard />

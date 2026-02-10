@@ -6,7 +6,7 @@
 import { reactive, onUnmounted } from 'vue'
 
 // 划线状态接口
-export function useDraggable() {
+export function useSelectText() {
   const dragState = reactive({
     isDragging: false, // 是否正在拖动
     startX: 0, // 拖动起始X坐标

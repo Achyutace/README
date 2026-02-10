@@ -40,7 +40,7 @@ const emit = defineEmits<{
 // - initialPosition: 初始位置
 // - boundary: 限制拖拽范围（这里使用 window）
 // - onDragStart/onDragEnd/onDrag: 对外派发相应事件
-const { position, isDragging } = useDraggableWindow({
+const { position, isDragging, startDrag } = useDraggableWindow({
   initialPosition: props.initialPosition,
   boundary: window,
   onDragStart: () => emit('drag-start'),
@@ -96,7 +96,7 @@ watch(() => props.initialSize, (newSize) => {
   <!-- 根节点：通过 inline style 受控 left/top/width/height 来定位与设置大小 -->
   <div
     class="draggable-panel fixed z-[1000] bg-white dark:bg-[#2d2d30] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col"
-    :class="{ 'is-dragging': isDragging, 'is-resizing': isResizing }" <!-- 根据交互状态添加类 -->
+    :class="{ 'is-dragging': isDragging, 'is-resizing': isResizing }"
     :style="{
       left: position.x + 'px',
       top: position.y + 'px',
@@ -107,7 +107,7 @@ watch(() => props.initialSize, (newSize) => {
     <!-- 头部：可拖拽区域，绑定 mousedown 启动拖拽 -->
     <div 
       class="panel-header flex items-center justify-between px-3 py-2 select-none cursor-move"
-      :class="headerClass || 'bg-gradient-to-r from-blue-500 to-blue-600 dark:from-blue-600 dark:to-blue-700 text-white'" <!-- 支持自定义 header 样式 -->
+      :class="headerClass || 'bg-gradient-to-r from-blue-500 to-blue-600 dark:from-blue-600 dark:to-blue-700 text-white'"
       @mousedown="startDrag"
     >
       <div class="flex items-center gap-2 overflow-hidden">

@@ -3,7 +3,7 @@
 import { ref } from 'vue'
 import { usePdfStore, type Highlight } from '../../stores/pdf'
 import { useTranslationStore } from '../../stores/translation'
-import { useDraggable } from '../../composables/useDraggable'
+import { useSelectText } from '../../composables/useSelectText'
 
 
 // 定义组件接收的 props：包括工具提示的位置、选中的文本、模式（选择或高亮）、高亮对象
@@ -23,7 +23,7 @@ const emit = defineEmits<{
 // 初始化各个 store 实例，用于在组件中访问和修改全局状态
 const pdfStore = usePdfStore()
 const translateStore = useTranslationStore()
-const dragStore = useDraggable()
+const dragStore = useSelectText()
 
 // --- 颜色选择器相关状态 ---
 // 颜色选择器是否打开的标志
@@ -59,13 +59,18 @@ function handleCustomColorChange(event: Event) {
 // 处理翻译函数：调用 composable 并重置位置
 async function handleTranslate() {
   dragStore.resetDrag() // 每次点击翻译按钮，重置弹窗位置回到菜单正上方
-  await translateStore.translateText(props.text)
-}
+  
+  // 1. 设置 Panel 的位置（让 Panel 出现在当前鼠标附近，稍微错开一点）
+  translateStore.updateTranslationPanelPosition({
+    x: props.position.x,
+    y: props.position.y + 40
+  })
 
-// 关闭翻译函数：隐藏翻译弹窗并重置位置
-function closeTranslation() {
-  translateStore.closeTextTranslation()
-  dragStore.resetDrag()
+  // 2. 触发文本翻译
+  await translateStore.translateText(props.text)
+  
+  // 3. 关闭当前的 Tooltip 菜单
+  emit('close')
 }
 
 // 处理引用函数：发出引用事件，将选中文本作为引用
@@ -127,43 +132,6 @@ function handleColorSelect(color: string) {
       top: `${position.y}px`
     }"
   >
-    <!-- 翻译结果悬浮框 -->
-    <div 
-      v-if="translateStore.showTextTranslation" 
-      class="absolute bottom-full left-1/2 mb-3 w-64 sm:w-80 bg-gray-800 text-white rounded-lg shadow-xl border border-gray-700 overflow-hidden flex flex-col transition-shadow will-change-transform"
-      :class="{ 'shadow-2xl ring-1 ring-gray-600': dragStore.dragState.isDragging }"
-      :style="{ 
-        transform: `translateX(-50%) translate(${dragStore.dragState.offsetX}px, ${dragStore.dragState.offsetY}px)` 
-      }"
-      @click.stop
-    >
-      <!-- 头部：标题和关闭按钮 -->
-      <div 
-        class="flex justify-between items-center px-3 py-2 bg-gray-900/50 border-b border-gray-700 select-none"
-        :class="dragStore.dragState.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
-        @mousedown="dragStore.startDrag"
-      >
-        <span class="text-xs font-medium text-gray-300">AI 翻译</span>
-        <button @click="closeTranslation" class="text-gray-400 hover:text-white cursor-pointer" @mousedown.stop>
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
-      </div>
-      
-      <!-- 内容区域 -->
-      <div class="p-3 text-sm leading-relaxed max-h-48 overflow-y-auto custom-scrollbar cursor-default" @mousedown.stop>
-        <div v-if="translateStore.isTextTranslating" class="flex items-center justify-center py-2 space-x-2 text-gray-400">
-          <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <span>正在翻译...</span>
-        </div>
-        <div v-else>
-          {{ translateStore.textTranslationResult }}
-        </div>
-      </div>
-    </div>
-
     <!-- 主菜单 (保持不变) -->
     <div class="relative bg-gray-800 text-white rounded-lg shadow-xl py-1">
       <div class="flex items-center divide-x divide-gray-600">

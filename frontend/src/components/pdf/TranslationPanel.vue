@@ -156,6 +156,9 @@ function onPdfScroll() { // PDF滚动事件处理
 
 // 关闭面板
 function closePanel() { // 关闭翻译面板
+  if (translationStore.showTextTranslation) {
+    translationStore.closeTextTranslation()
+  }
   translationStore.closeTranslationPanel() // 调用store关闭面板
 }
 
@@ -230,14 +233,15 @@ onBeforeUnmount(() => {
   </div>
 
   <DraggablePanel
-    v-if="translationStore.translationPanel.isVisible"
+    v-if="translationStore.translationPanel.isVisible || translationStore.showTextTranslation"
+    title="AI 翻译"
     :initialPosition="position"
     :initialSize="{ width: panelWidth, height: panelHeight }"
     :minWidth="minWidth"
     :maxWidth="maxWidth"
     :minHeight="minHeight"
     :maxHeight="maxHeight"
-    class="translation-panel fixed z-[1000] bg-white dark:bg-[#2d2d30] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden select-none"
+    class="translation-panel select-none"
     :class="{ 'is-snapped': snappedToParagraph }"
     @update:position="onUpdatePosition"
     @update:size="onUpdateSize"
@@ -250,30 +254,21 @@ onBeforeUnmount(() => {
         @click.stop="retranslate"
         class="p-1 hover:bg-white/20 rounded transition-colors"
         title="重新翻译"
-        :disabled="translationStore.translationPanel.isLoading"
+        :disabled="translationStore.translationPanel.isLoading || translationStore.isTextTranslating || translationStore.showTextTranslation"
       >
         <svg class="w-4 h-4" :class="{ 'animate-spin': translationStore.translationPanel.isLoading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
       </button>
-      <button
-        @click.stop="closePanel"
-        class="p-1 hover:bg-white/20 rounded transition-colors"
-        title="关闭"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
     </template>
 
-    <div class="panel-content flex-1 overflow-y-auto p-3 cursor-auto" @mousedown.stop>
-      <div v-if="translationStore.translationPanel.isLoading" class="flex flex-col items-center justify-center py-8">
+    <div class="p-3 cursor-auto" @mousedown.stop>
+      <div v-if="translationStore.translationPanel.isLoading || translationStore.isTextTranslating" class="flex flex-col items-center justify-center py-8">
         <div class="loading-spinner mb-3"></div>
         <span class="text-gray-500 dark:text-gray-400 text-sm">正在翻译...</span>
       </div>
       <div v-else class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
-        {{ translationStore.translationPanel.translation || '暂无翻译' }}
+        {{ translationStore.showTextTranslation ? translationStore.textTranslationResult : (translationStore.translationPanel.translation || '暂无翻译') }}
       </div>
     </div>
 
@@ -291,10 +286,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .translation-panel {
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15), 0 8px 16px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(12px);
-  display: flex;
-  flex-direction: column;
   background: rgba(255, 255, 255, 0.92) !important;
 }
 
@@ -324,82 +315,6 @@ onBeforeUnmount(() => {
   to {
     transform: rotate(360deg);
   }
-}
-
-/* 自定义滚动条 */
-.panel-content::-webkit-scrollbar {
-  width: 6px;
-}
-
-.panel-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.panel-content::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 3px;
-}
-
-.panel-content::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
-
-.dark .panel-content::-webkit-scrollbar-thumb {
-  background: #4b5563;
-}
-
-.dark .panel-content::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
-}
-
-/* 调整大小边框 */
-.resize-handle {
-  position: absolute;
-  background: transparent;
-}
-
-.resize-w {
-  left: 0;
-  top: 40px;
-  bottom: 10px;
-  width: 6px;
-  cursor: ew-resize;
-}
-
-.resize-e {
-  right: 0;
-  top: 40px;
-  bottom: 10px;
-  width: 6px;
-  cursor: ew-resize;
-}
-
-.resize-s {
-  bottom: 0;
-  left: 10px;
-  right: 10px;
-  height: 6px;
-  cursor: ns-resize;
-}
-
-.resize-sw {
-  left: 0;
-  bottom: 0;
-  width: 12px;
-  height: 12px;
-  cursor: nesw-resize;
-}
-
-.resize-se {
-  right: 0;
-  bottom: 0;
-  width: 12px;
-  height: 12px;
-  cursor: nwse-resize;
-}
-
-.resize-handle:hover {
-  background: rgba(59, 130, 246, 0.1);
 }
 
 /* 吸附提示框 */
