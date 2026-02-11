@@ -19,7 +19,7 @@ import { useLibraryStore } from './stores/library'
 import { useAiStore } from './stores/ai'
 import { usePdfStore } from './stores/pdf'
 import { useThemeStore } from './stores/theme'
-import { clip } from './utils/CommonFunction'
+import { clamp } from '@vueuse/core'
 
 // ------------------------- 初始化 store 实例 -------------------------
 // Store 本质上保存的是 应用状态 + 相关逻辑
@@ -142,7 +142,7 @@ const handleWidthResize = (e: MouseEvent) => {
   if (!isResizingWidth.value) return // 如果不在调整状态，直接返回
   const newWidth = window.innerWidth - e.clientX // 计算新宽度
   // 限制宽度在最小值 and 最大值之间
-  sidebarWidth.value = clip(newWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
+  sidebarWidth.value = clamp(newWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
 }
 
 // 停止宽度调整（鼠标抬起时触发）
@@ -178,7 +178,7 @@ const handleSplitResize = (e: MouseEvent) => {
   
   // 限制比例在 0.1 - 0.9 之间，避免过度收缩
   let newRatio = relativeY / totalHeight // 计算新比例
-  newRatio = clip(newRatio, MIN_SPLIT_RATIO, MAX_SPLIT_RATIO) // 限制在范围内
+  newRatio = clamp(newRatio, MIN_SPLIT_RATIO, MAX_SPLIT_RATIO) // 限制在范围内
   
   splitRatio.value = newRatio // 更新比例
 }

@@ -4,6 +4,7 @@
 ----------------------------------------------------------------------
 */ 
 import { ref, onUnmounted } from 'vue'
+import { clamp } from '@vueuse/core'
 
 // 定义位置类型
 export interface Position {
@@ -67,8 +68,8 @@ export function useDraggableWindow(options: DragOptions = {}) {
        const maxX = window.innerWidth
        const maxY = window.innerHeight
 
-       newX = Math.max(-100, Math.min(newX, maxX - 50))
-       newY = Math.max(0, Math.min(newY, maxY - 50))
+       newX = clamp(newX, -100, maxX - 50)
+       newY = clamp(newY, 0, maxY - 50)
     }
 
     // 更新位置状态

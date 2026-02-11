@@ -6,6 +6,7 @@ import { ref, computed, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
 // 引入 NoteEditor 组件，用于渲染笔记内容
 import NoteEditor from '../notes/NoteEditor.vue'
+import { clamp } from '@vueuse/core'
 
 // 获取 PDF store 的实例，用于访问和修改 PDF 相关状态
 const pdfStore = usePdfStore()
@@ -40,8 +41,8 @@ function onDrag(e: MouseEvent) {
   const newX = e.clientX - dragOffset.value.x
   const newY = e.clientY - dragOffset.value.y
   // 限制卡片位置在视口内，避免拖出屏幕
-  const clampedX = Math.max(0, Math.min(window.innerWidth - 320, newX))  // 320 是卡片宽度
-  const clampedY = Math.max(0, Math.min(window.innerHeight - 100, newY))  // 100 是底部边距
+  const clampedX = clamp(newX, 0, window.innerWidth - 320)  // 使用 clamp 函数限制 X 坐标
+  const clampedY = clamp(newY, 0, window.innerHeight - 100)  // 使用 clamp 函数限制 Y 坐标
   // 更新 PDF store 中的卡片位置
   pdfStore.updateNotePreviewPosition({ x: clampedX, y: clampedY })
 }

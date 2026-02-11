@@ -1,12 +1,9 @@
 <script setup lang="ts">
-// =============================================================================
-// TranslationPanelMulti.vue
-//
-// 功能概述：统一翻译面板管理器，整合了“划词翻译”与“段落多窗口翻译”功能。
-// - 划词翻译：单例模式，由 translationStore.showTextTranslation 控制，ID 为 text-selection-panel。
-// - 段落翻译：多实例模式，由 translationStore.translationPanels 管理。
-// - 共享相同的 UI 风格、交互逻辑（拖拽、缩放、字体调整等）。
-// =============================================================================
+/*
+----------------------------------------------------------------------
+                            翻译面板
+----------------------------------------------------------------------
+*/ 
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { usePdfStore } from '../../stores/pdf'
@@ -14,6 +11,7 @@ import { useTranslationStore } from '../../stores/translation'
 import { useDraggableWindow } from '../../composables/useDraggableWindow'
 import { useResizableWindow } from '../../composables/useResizableWindow'
 import type { TranslationPanelInstance } from '../../types'
+import { clamp } from '@vueuse/core'
 
 const pdfStore = usePdfStore()
 const translationStore = useTranslationStore()
@@ -211,8 +209,8 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
        const maxX = window.innerWidth - textPanelSize.value.width
        const maxY = window.innerHeight - textPanelSize.value.height
        translationStore.updateTranslationPanelPosition({
-          x: Math.max(0, Math.min(maxX, newPos.x)),
-          y: Math.max(0, Math.min(maxY, newPos.y))
+          x: clamp(newPos.x, 0, maxX),
+          y: clamp(newPos.y, 0, maxY)
        })
        // 划词翻译不支持吸附逻辑
        return
@@ -279,8 +277,8 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
     const maxX = window.innerWidth - panel.size.width
     const maxY = window.innerHeight - panel.size.height
     translationStore.updatePanelPosition(currentId, {
-      x: Math.max(0, Math.min(maxX, newPos.x)),
-      y: Math.max(0, Math.min(maxY, newPos.y))
+      x: clamp(newPos.x, 0, maxX),
+      y: clamp(newPos.y, 0, maxY)
     })
   },
   onDragEnd: () => {
@@ -298,7 +296,7 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
              const panel = translationStore.translationPanels.find(p => p.id === draggingPanelId.value)
              if (panel) {
                 translationStore.updatePanelSize(draggingPanelId.value, {
-                    width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapTargetRect.value.width)),
+                    width: clamp(snapTargetRect.value.width, MIN_WIDTH, MAX_WIDTH),
                     height: panel.size.height
                 })
              }
@@ -421,7 +419,7 @@ function updateSnappedPanelPositions() {
           y: snapPos.top
         })
         translationStore.updatePanelSize(panel.id, {
-          width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapPos.width)),
+          width: clamp(snapPos.width, MIN_WIDTH, MAX_WIDTH),
           height: panel.size.height
         })
       }

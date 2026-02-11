@@ -8,8 +8,8 @@ import { useDebounceFn } from '@vueuse/core'
 import { renderTextLayer, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist'
 import type { Ref } from 'vue'
 import type { PageRef, RenderPageOptions, PageSize } from '../types/pdf'
-import { getPageAtY, getScaledPageSize, getPageSize } from '../utils/pdf-helpers'
-import { renderLinkLayer, fixTextLayerWidth, applyInterimScaleToPage } from '../utils/pdf-render'
+import { getPageAtY, getScaledPageSize, getPageSize } from '../utils/PdfHelper'
+import { renderLinkLayer, fixTextLayerWidth, applyInterimScaleToPage } from '../utils/PdfRender'
 
 export interface UsePageRenderOptions {
   buffer?: number

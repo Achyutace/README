@@ -21,6 +21,7 @@ import { usePdfStore } from '../../stores/pdf'
 import { useTranslationStore } from '../../stores/translation'
 import { useLibraryStore } from '../../stores/library' 
 import { notesApi, type Note } from '../../api' 
+import { clamp } from '@vueuse/core'
 
 // 导入拆分出的模块
 import type { PageRef, PageSize } from '../../types/pdf'
@@ -35,15 +36,15 @@ import {
   getParagraphMarkerStyle,
   CLICK_TIME_THRESHOLD,
   DRAG_DISTANCE_THRESHOLD
-} from '../../utils/pdf-helpers'
-import { applyInterimScaleToPage } from '../../utils/pdf-render'
+} from '../../utils/PdfHelper'
+import { applyInterimScaleToPage } from '../../utils/PdfRender'
 import { useZoomAnchor } from '../../composables/useZoomAnchor'
 import { usePageRender } from '../../composables/usePageRender'
 import { usePdfSelection } from '../../composables/usePdfSelection'
 import { useNotesLookup } from '../../composables/useNotesLookup'
 
 import TextSelectionTooltip from './TextSelectionTooltip.vue' 
-import TranslationPanelMulti from './TranslationPanelMulti.vue' 
+import TranslationPanel from './TranslationPanel.vue' 
 import NotePreviewCard from './NotePreviewCard.vue' 
 
 GlobalWorkerOptions.workerSrc = pdfWorker
@@ -422,7 +423,7 @@ function handleWheel(event: WheelEvent) {
     }
 
     const delta = event.deltaY
-    const step = Math.min(0.25, Math.max(0.05, Math.abs(delta) / 100))
+    const step = clamp(Math.abs(delta) / 100, 0.05, 0.25)
     const nextScale = delta < 0 ? pdfStore.scale + step : pdfStore.scale - step
     pdfStore.setScale(nextScale)
     return
@@ -795,7 +796,7 @@ onBeforeUnmount(() => {
       @close="closeTooltip"
     />
     
-    <TranslationPanelMulti />
+    <TranslationPanel />
     <NotePreviewCard />
   </div>
 </template>

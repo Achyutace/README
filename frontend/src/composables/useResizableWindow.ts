@@ -4,7 +4,7 @@
 ----------------------------------------------------------------------
 */ 
 import { ref, onUnmounted } from 'vue'
-import { clip } from '../utils/CommonFunction'
+import { clamp } from '@vueuse/core'
 
 // 默认窗口尺寸限制
 export const RESIZE_DEFAULTS = {
@@ -94,21 +94,21 @@ export function useResizableWindow(options: ResizeOptions = {}) {
     // 水平方向
     if (dir.includes('e')) {
       // 向右放缩，增加宽度，不改变左边界
-      newWidth = clip(startSize.value.width + mouseDeltaX, minW, maxW)
+      newWidth = clamp(startSize.value.width + mouseDeltaX, minW, maxW)
     } 
     else if (dir.includes('w')) {
       // 向右放缩，增加宽度（此时 mouseDeltaX 为负），改变左边界
-      newWidth = clip(startSize.value.width - mouseDeltaX, minW, maxW)
+      newWidth = clamp(startSize.value.width - mouseDeltaX, minW, maxW)
       shiftX = -(newWidth - startSize.value.width)
     }
 
     // 垂直方向
     if (dir.includes('s')) {
       // 向下放缩，增加高度，不改变上边界
-      newHeight = clip(startSize.value.height + mouseDeltaY, minH, maxH)
+      newHeight = clamp(startSize.value.height + mouseDeltaY, minH, maxH)
     } else if (dir.includes('n')) {
       // 向下放缩，增加高度（此时 mouseDeltaY 为负），改变上边界
-      newHeight = clip(startSize.value.height - mouseDeltaY, minH, maxH)
+      newHeight = clamp(startSize.value.height - mouseDeltaY, minH, maxH)
       shiftY = -(newHeight - startSize.value.height)
     }
 

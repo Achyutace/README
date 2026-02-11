@@ -6,7 +6,7 @@
 import { ref, type Ref } from 'vue'
 import { nextTick } from 'vue'
 import type { ZoomAnchor, PageRef } from '../types/pdf'
-import { getPageTop, getScaledPageSize, getPageAtY } from '../utils/pdf-helpers'
+import { getPageTop, getScaledPageSize, getPageAtY } from '../utils/PdfHelper'
 import type { PageSize } from '../types/pdf'
 
 export function useZoomAnchor(

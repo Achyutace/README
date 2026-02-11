@@ -5,7 +5,6 @@
 
 import { ref } from 'vue'
 import { getDocument, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist'
-import type { Ref } from 'vue'
 import type { PageSize, PageRef } from '../types/pdf'
 
 export interface UsePdfLoaderOptions {
@@ -14,7 +13,6 @@ export interface UsePdfLoaderOptions {
 }
 
 export function usePdfLoader(
-  containerRef: Ref<HTMLElement | null>,
   options: UsePdfLoaderOptions = {}
 ) {
   // PDF 文档实例

@@ -4,7 +4,7 @@
  */
 
 import { ref } from 'vue'
-import { findPageElement, calculateIoU, CLICK_TIME_THRESHOLD, DRAG_DISTANCE_THRESHOLD } from '../utils/pdf-helpers'
+import { findPageElement, calculateIoU, CLICK_TIME_THRESHOLD, DRAG_DISTANCE_THRESHOLD } from '../utils/PdfHelper'
 import type { HighlightItem } from '../types/pdf'
 
 export interface SelectionPosition {

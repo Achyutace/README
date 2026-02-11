@@ -4,6 +4,7 @@
 import { ref, computed, watch } from 'vue'
 // 引入 PDF store，用于管理 PDF 相关的全局状态
 import { usePdfStore } from '../../stores/pdf'
+import { clamp } from '@vueuse/core'
 
 // 初始化 PDF store 实例，获取 store 的方法和状态
 const pdfStore = usePdfStore()
@@ -96,9 +97,10 @@ function onDrag(e: MouseEvent) {
   const newX = e.clientX - dragOffset.value.x
   const newY = e.clientY - dragOffset.value.y
   // 保持卡片在视口内：X 坐标限制在 0 到 窗口宽度-400 之间
-  const clampedX = Math.max(0, Math.min(window.innerWidth - 400, newX))
+  const clampedX = clamp(newX, 0, window.innerWidth - 400)
+  
   // Y 坐标限制在 0 到 窗口高度-100 之间
-  const clampedY = Math.max(0, Math.min(window.innerHeight - 100, newY))
+  const clampedY = clamp(newY, 0, window.innerHeight - 100)
   // 更新 store 中的卡片位置
   pdfStore.updateSmartRefPosition({ x: clampedX, y: clampedY })
 }
