@@ -23,8 +23,7 @@ from langgraph.graph import StateGraph, END  # 状态图和结束节点
 # 本地服务和工具
 from services.rag_service import RAGService  # RAG服务
 from services.storage_service import StorageService
-from utils.web_search_tool import WebSearchTool  # 网络搜索工具
-from utils.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
+from services.websearch_service import web_search_service
 
 class AgentState(TypedDict):
     """ Agent 状态定义 """
@@ -80,10 +79,6 @@ class AcademicAgentService:
             self.llm = None  
             self.has_llm = False  
             print("Warning: OpenAI API key not found. Agent will use demo mode.")  
-          
-        # 初始化工具  
-        self.web_search = WebSearchTool()  
-        self.paper_discovery = PaperDiscoveryTool()  
           
         self.workflow = self._build_workflow()  
 
@@ -435,12 +430,12 @@ Agent:
                         
                     try:
                         if tool_name == 'web_search':
-                            results = self.web_search.search(query)
+                            results = web_search_service.search_web(query)
                             external_context.extend(results)
                             tool_logs.append(f"Web: {query}")
                             
                         elif tool_name == 'search_papers':
-                            results = self.paper_discovery.search_papers(query)
+                            results = web_search_service.search_papers(query)
                             external_context.extend(results)
                             tool_logs.append(f"Paper: {query}")
                             

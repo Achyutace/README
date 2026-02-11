@@ -175,6 +175,43 @@ components:
         message:
           type: string
 
+    # --- SmartRef Schemas ---
+    PaperRef:
+      type: object
+      properties:
+        paperId: {type: string}
+        title: {type: string}
+        authors: {type: array, items: {type: string}}
+        abstract: {type: string}
+        year: {type: integer}
+        venue: {type: string}
+        citationCount: {type: integer}
+        url: {type: string}
+        doi: {type: string}
+        arxivId: {type: string}
+
+    SmartRefSearchResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        paper:
+          $ref: '#/components/schemas/PaperRef'
+        searchedBy: {type: string}
+
+    SmartRefBatchResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              query: {type: object}
+              found: {type: boolean}
+              paper:
+                $ref: '#/components/schemas/PaperRef'
+
 security:
   - UserIdHeader: []
 
@@ -263,6 +300,33 @@ paths:
                 type: string
                 format: binary
 
+  /pdf/{pdf_id}/paragraphs:
+    get:
+      tags: [PDF]
+      summary: Get parsed paragraphs for a PDF
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        200:
+          description: List of paragraphs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paragraphs:
+                    type: array
+                    items:
+                      type: object
+
   # ================= Chatbox =================
   /chatbox/new:
     post:
@@ -280,6 +344,23 @@ paths:
     post:
       tags: [Chat]
       summary: Send a message (Non-streaming)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+      responses:
+        200:
+          description: AI Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+
+  /chatbox/simple-chat:
+    post:
+      tags: [Chat]
+      summary: Simple Chat (Full text context, Non-streaming)
       requestBody:
         content:
           application/json:
@@ -366,6 +447,36 @@ paths:
       responses:
         200:
           description: Success
+
+  /chatbox/session/{session_id}/title:
+    put:
+      tags: [Chat]
+      summary: Update session title
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string}
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  sessionId: {type: string}
+                  title: {type: string}
 
   # ================= Highlight =================
   /highlight/:
@@ -476,6 +587,31 @@ paths:
         200:
           description: Translation result
 
+  /translate/page/{pdf_id}/{page_number}:
+    get:
+      tags: [Translate]
+      summary: Get all cached translations for a page
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: page_number
+          required: true
+          schema: {type: integer}
+      responses:
+        200:
+          description: Page translations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pdfId: {type: string}
+                  page: {type: integer}
+                  translations: {type: object}
+
   # ================= Notes =================
   /notes:
     post:
@@ -542,6 +678,56 @@ paths:
       responses:
         200:
           description: Success
+
+  # ================= SmartRef =================
+  /smartref/search:
+    post:
+      tags: [SmartRef]
+      summary: Search for a paper (by DOI, arXiv, or title)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                doi: {type: string}
+                arxivId: {type: string}
+      responses:
+        200:
+          description: Found paper
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartRefSearchResponse'
+        404:
+          description: Not found
+
+  /smartref/batch:
+    post:
+      tags: [SmartRef]
+      summary: Batch search papers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                references:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      title: {type: string}
+                      doi: {type: string}
+                      arxivId: {type: string}
+      responses:
+        200:
+          description: Batch results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartRefBatchResponse'
 
   # ================= Health =================
   /health:

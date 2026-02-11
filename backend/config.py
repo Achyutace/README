@@ -30,10 +30,16 @@ class TavilyConfig:
 
 
 @dataclass
+class ScientificConfig:
+    semantic_scholar_api_key: str = ""
+
+
+@dataclass
 class Config:
     openai: OpenAIConfig
     translate: TranslateConfig
     tavily: TavilyConfig
+    scientific: ScientificConfig
 
     @property
     def has_openai_key(self) -> bool:
@@ -70,6 +76,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
     openai_config = OpenAIConfig()
     translate_config = TranslateConfig()
     tavily_config = TavilyConfig()
+    scientific_config = ScientificConfig()
 
     if config_path.exists():
         try:
@@ -100,6 +107,13 @@ def load_config(config_path: Optional[str] = None) -> Config:
                     api_key=tavily_data.get('api_key', '')
                 )
 
+            # 解析科学配置
+            if 'scientific' in data:
+                sci_data = data['scientific']
+                scientific_config = ScientificConfig(
+                    semantic_scholar_api_key=sci_data.get('semantic_scholar_api_key', '')
+                )
+
         except Exception as e:
             print(f"Warning: Failed to load config from {config_path}: {e}")
     else:
@@ -108,7 +122,8 @@ def load_config(config_path: Optional[str] = None) -> Config:
     return Config(
         openai=openai_config,
         translate=translate_config,
-        tavily=tavily_config
+        tavily=tavily_config,
+        scientific=scientific_config
     )
 
 
