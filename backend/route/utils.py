@@ -1,25 +1,96 @@
 """
 路由层公共工具函数
-1. 鉴权辅助
+1. JWT 鉴权辅助
 2. 段落 ID 解析
 3. 高亮坐标归一化
 """
+import uuid as _uuid
 from functools import wraps
-from flask import g, jsonify, current_app
+from flask import g, jsonify, current_app, request
 from utils.pdf_engine import parse_paragraph_id as _parse_paragraph_id
+from utils.jwt_handler import decode_token
+import jwt as pyjwt
+
+
+# ==================== JWT 配置辅助 ====================
+
+def get_jwt_secret() -> str:
+    """
+    从 core.config.settings 或 app.config 中获取 JWT 密钥。
+    必须在 config.yaml 中配置 jwt.secret, 否则使用不安全的默认值。
+    """
+    try:
+        from core.config import settings
+        if hasattr(settings, 'jwt') and settings.jwt:
+            return settings.jwt.secret
+        secret = getattr(settings, 'jwt_secret', None)
+        if secret:
+            return secret
+    except Exception:
+        pass
+    # 回退：从 app.config 读取
+    return current_app.config.get('JWT_SECRET', 'change-me-in-config-yaml')
+
+
+def get_jwt_config():
+    """
+    获取完整 JWT 配置 (secret, access_expire_minutes, refresh_expire_days)
+    """
+    try:
+        from core.config import settings
+        if hasattr(settings, 'jwt') and settings.jwt:
+            return {
+                'secret': settings.jwt.secret,
+                'access_expire_minutes': settings.jwt.access_expire_minutes,
+                'refresh_expire_days': settings.jwt.refresh_expire_days,
+            }
+    except Exception:
+        pass
+    return {
+        'secret': 'change-me-in-config-yaml',
+        'access_expire_minutes': 30,
+        'refresh_expire_days': 7,
+    }
 
 
 # ==================== 鉴权 ====================
 
 def require_auth(f):
     """
-    鉴权装饰器：确保 g.user_id 存在且有效
-    before_request 已经完成解析，这里做最终校验
+    JWT 鉴权装饰器
+
+    从 Authorization: Bearer <token> 头中解析 Access Token，
+    验证签名与有效期，并将 user_id 挂载到 g.user_id (uuid.UUID)。
+
+    失败时返回 401。
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not hasattr(g, 'user_id') or g.user_id is None:
-            return jsonify({'error': 'Unauthorized: user identity not resolved'}), 401
+        auth_header = request.headers.get('Authorization', '')
+
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Missing or invalid Authorization header'}), 401
+
+        token = auth_header[7:]  # 去掉 "Bearer " 前缀
+
+        try:
+            secret = get_jwt_secret()
+            payload = decode_token(token, secret=secret, expected_type='access')
+            user_id = payload.get('sub')
+            if not user_id:
+                return jsonify({'error': 'Invalid token payload'}), 401
+
+            # 将用户 ID 挂载到请求上下文
+            g.user_id = _uuid.UUID(user_id)
+            g.user_id_str = user_id
+
+        except pyjwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except pyjwt.InvalidTokenError as e:
+            return jsonify({'error': f'Invalid token: {str(e)}'}), 401
+        except ValueError:
+            return jsonify({'error': 'Invalid user ID in token'}), 401
+
         return f(*args, **kwargs)
     return decorated
 

@@ -9,11 +9,11 @@ servers:
 
 components:
   securitySchemes:
-    UserIdHeader:
-      type: apiKey
-      in: header
-      name: X-User-Id
-      description: User ID (UUID) or Username for authentication.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Access Token. 通过 /api/auth/login 或 /api/auth/register 获取。
 
   schemas:
     Error:
@@ -213,9 +213,127 @@ components:
                 $ref: '#/components/schemas/PaperRef'
 
 security:
-  - UserIdHeader: []
+  - BearerAuth: []
 
 paths:
+  # ================= Auth =================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 用户注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username: {type: string}
+                email: {type: string, format: email}
+                password: {type: string, minLength: 6}
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  user:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      username: {type: string}
+                      email: {type: string}
+                  accessToken: {type: string}
+                  refreshToken: {type: string}
+        '400':
+          description: 参数错误或邮箱/用户名已存在
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string}
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  user:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      username: {type: string}
+                      email: {type: string}
+                  accessToken: {type: string}
+                  refreshToken: {type: string}
+        '401':
+          description: 邮箱或密码错误
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新 Access Token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: {type: string}
+      responses:
+        '200':
+          description: 新的 Access Token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: {type: string}
+        '401':
+          description: Refresh Token 无效或过期
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前用户信息
+      responses:
+        '200':
+          description: 用户信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      username: {type: string}
+                      email: {type: string}
+                      createdAt: {type: string, format: date-time}
+
   # ================= PDF Upload =================
   /pdf/upload:
     post:

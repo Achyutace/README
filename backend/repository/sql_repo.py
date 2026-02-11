@@ -29,6 +29,11 @@ class SQLRepository:
         stmt = select(User).where(User.username == username)
         return self.db.execute(stmt).scalar_one_or_none()
 
+    def get_user_by_email(self, email: str) -> Optional[User]:
+        """根据邮箱获取用户信息"""
+        stmt = select(User).where(User.email == email)
+        return self.db.execute(stmt).scalar_one_or_none()
+
     def get_user_by_id(self, user_id: uuid.UUID) -> Optional[User]:
         """根据用户 ID 获取用户信息"""
         stmt = select(User).where(User.id == user_id)

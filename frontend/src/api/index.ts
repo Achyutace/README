@@ -1,20 +1,171 @@
 import axios from 'axios'
 import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph } from '../types'
-// 当前用户ID，需要添加登陆验证逻辑
-// TODO
-const CURRENT_USER_ID = 'default_user' 
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   timeout: 60000, // AI 生成可能较慢，增加超时时间
 })
 
-// 请求拦截器，自动注入 X-User-Id 
+// ==================== Token 管理 ====================
+
+const TOKEN_KEY = 'readme_access_token'
+const REFRESH_TOKEN_KEY = 'readme_refresh_token'
+const USER_KEY = 'readme_user'
+
+export function getAccessToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY)
+}
+
+export function setTokens(accessToken: string, refreshToken: string) {
+  localStorage.setItem(TOKEN_KEY, accessToken)
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+}
+
+export function clearTokens() {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
+}
+
+export function setCurrentUser(user: { id: string; username: string; email: string }) {
+  localStorage.setItem(USER_KEY, JSON.stringify(user))
+}
+
+export function getCurrentUser(): { id: string; username: string; email: string } | null {
+  const raw = localStorage.getItem(USER_KEY)
+  if (!raw) return null
+  try { return JSON.parse(raw) } catch { return null }
+}
+
+export function isAuthenticated(): boolean {
+  return !!getAccessToken()
+}
+
+// ==================== 请求拦截器：自动注入 Bearer Token ====================
+
 api.interceptors.request.use((config) => {
-  config.headers['X-User-Id'] = CURRENT_USER_ID
+  const token = getAccessToken()
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`
+  }
   return config
 }, (error) => {
   return Promise.reject(error)
 })
+
+// ==================== 响应拦截器：自动刷新过期 Token ====================
+
+let isRefreshing = false
+let failedQueue: Array<{ resolve: (v: any) => void; reject: (e: any) => void }> = []
+
+function processQueue(error: any, token: string | null = null) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error)
+    else resolve(token)
+  })
+  failedQueue = []
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+
+    // 仅在 401 且非 auth 接口时尝试刷新
+    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/')) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject })
+        }).then((token) => {
+          originalRequest.headers['Authorization'] = `Bearer ${token}`
+          return api(originalRequest)
+        })
+      }
+
+      originalRequest._retry = true
+      isRefreshing = true
+
+      const refreshToken = getRefreshToken()
+      if (!refreshToken) {
+        clearTokens()
+        window.dispatchEvent(new CustomEvent('auth:logout'))
+        return Promise.reject(error)
+      }
+
+      try {
+        const { data } = await axios.post(
+          `${api.defaults.baseURL}/auth/refresh`,
+          { refreshToken },
+        )
+        const newAccessToken = data.accessToken
+        localStorage.setItem(TOKEN_KEY, newAccessToken)
+        processQueue(null, newAccessToken)
+        originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
+        return api(originalRequest)
+      } catch (refreshError) {
+        processQueue(refreshError, null)
+        clearTokens()
+        window.dispatchEvent(new CustomEvent('auth:logout'))
+        return Promise.reject(refreshError)
+      } finally {
+        isRefreshing = false
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
+
+/**
+ * 认证相关 API
+ * 对应后端 route/auth.py
+ */
+export const authApi = {
+  // 注册
+  register: async (username: string, email: string, password: string) => {
+    const { data } = await api.post('/auth/register', { username, email, password })
+    if (data.accessToken) {
+      setTokens(data.accessToken, data.refreshToken)
+      setCurrentUser(data.user)
+    }
+    return data
+  },
+
+  // 登录
+  login: async (email: string, password: string) => {
+    const { data } = await api.post('/auth/login', { email, password })
+    if (data.accessToken) {
+      setTokens(data.accessToken, data.refreshToken)
+      setCurrentUser(data.user)
+    }
+    return data
+  },
+
+  // 登出
+  logout: () => {
+    clearTokens()
+    window.dispatchEvent(new CustomEvent('auth:logout'))
+  },
+
+  // 获取当前用户信息
+  getMe: async () => {
+    const { data } = await api.get('/auth/me')
+    return data.user
+  },
+
+  // 刷新 Token
+  refreshToken: async () => {
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) throw new Error('No refresh token')
+    const { data } = await api.post('/auth/refresh', { refreshToken })
+    localStorage.setItem(TOKEN_KEY, data.accessToken)
+    return data
+  },
+}
 
 export interface PdfUploadResponse {
   id: string
@@ -146,7 +297,6 @@ export const aiApi = {
       pdfId,
       message,
       history,
-      userId: CURRENT_USER_ID
     })
     return data
   },
@@ -236,7 +386,6 @@ export const chatSessionApi = {
       sessionId,
       message,
       pdfId,
-      userId: CURRENT_USER_ID,
       model, 
       apiBase,
       apiKey

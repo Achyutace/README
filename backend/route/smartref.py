@@ -4,6 +4,7 @@
 """
 from flask import Blueprint, request, jsonify
 from services.websearch_service import web_search_service
+from route.utils import require_auth
 
 # 定义蓝图
 smartref_bp = Blueprint('smartref', __name__, url_prefix='/api/smartref')
@@ -15,6 +16,7 @@ smartref_bp = Blueprint('smartref', __name__, url_prefix='/api/smartref')
 # ==================== 路由接口 ====================
 
 @smartref_bp.route('/search', methods=['POST'])
+@require_auth
 def search_paper():
     """
     搜索论文信息
@@ -48,6 +50,7 @@ def search_paper():
     return jsonify(result)
 
 @smartref_bp.route('/query', methods=['POST'])
+@require_auth
 def query_papers():
     """
     通用论文搜索 (关键词)
@@ -75,6 +78,7 @@ def query_papers():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @smartref_bp.route('/batch', methods=['POST'])
+@require_auth
 def batch_search():
     """
     批量搜索多篇论文

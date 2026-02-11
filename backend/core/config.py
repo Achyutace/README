@@ -39,6 +39,11 @@ class CeleryConfig(BaseModel):
     broker_url: str = "redis://localhost:6379/0"
     result_backend: str = "redis://localhost:6379/1"
 
+class JWTConfig(BaseModel):
+    secret: str = "change-me-in-config-yaml"
+    access_expire_minutes: int = 30
+    refresh_expire_days: int = 7
+
 class AppConfig:
     def __init__(self, raw: Dict[str, Any]):
         self.DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/paper_agent_db")
@@ -73,6 +78,16 @@ class AppConfig:
             broker_url=celery_conf.get("broker_url", "redis://localhost:6379/0"),
             result_backend=celery_conf.get("result_backend", "redis://localhost:6379/1"),
         )
+
+        # JWT
+        jwt_conf = raw.get("jwt", {})
+        self.jwt = JWTConfig(
+            secret=jwt_conf.get("secret", "change-me-in-config-yaml"),
+            access_expire_minutes=jwt_conf.get("access_expire_minutes", 30),
+            refresh_expire_days=jwt_conf.get("refresh_expire_days", 7),
+        )
+        # 便捷属性
+        self.jwt_secret = self.jwt.secret
 
 # Global Instance
 settings = AppConfig(_raw_config)
