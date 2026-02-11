@@ -181,9 +181,11 @@ export function usePageRender(
         cssViewport,
         refs.linkLayer,
         pdf,
-        (destPage) => {
-          // 内部链接跳转 - 通过事件通知外部处理
-          const event = new CustomEvent('pdf-internal-link', { detail: { page: destPage } })
+        (destCoords, clickX, clickY) => {
+          // 内部链接点击 - 通过事件通知外部处理，传递目标坐标和点击位置
+          const event = new CustomEvent('pdf-internal-link', { 
+            detail: { destCoords, clickX, clickY } 
+          })
           window.dispatchEvent(event)
         }
       )

@@ -45,7 +45,8 @@ import { useNotesLookup } from '../../composables/useNotesLookup'
 
 import TextSelectionTooltip from './TextSelectionTooltip.vue' 
 import TranslationPanel from './TranslationPanel.vue' 
-import NotePreviewCard from './NotePreviewCard.vue' 
+import NotePreviewCard from './NotePreviewCard.vue'
+import InternalLinkPopup from './InternalLinkPopup.vue' 
 
 GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -682,9 +683,17 @@ watch(
   }
 )
 
-// 监听内部链接跳转事件
-window.addEventListener('pdf-internal-link', ((event: CustomEvent<{ page: number }>) => {
-  pdfStore.goToPage(event.detail.page)
+// 监听内部链接点击事件
+window.addEventListener('pdf-internal-link', ((event: CustomEvent<{ 
+  destCoords: { page: number; x: number | null; y: number | null; zoom: number | null; type: string }
+  clickX: number
+  clickY: number 
+}>) => {
+  const { destCoords, clickX, clickY } = event.detail
+  // 显示弹窗而不是直接跳转，弹窗位置在点击位置右侧下方
+  const popupX = Math.min(clickX + 10, window.innerWidth - 280)
+  const popupY = Math.min(clickY + 10, window.innerHeight - 200)
+  pdfStore.openInternalLinkPopup(destCoords, { x: popupX, y: popupY })
 }) as EventListener)
 
 // ------------------------- 生命周期 -------------------------
@@ -823,6 +832,7 @@ onBeforeUnmount(() => {
     
     <TranslationPanel />
     <NotePreviewCard />
+    <InternalLinkPopup />
   </div>
 </template>
 

@@ -37,13 +37,13 @@ export function appendLinkOverlay(
 export function appendInternalLinkOverlay(
   container: HTMLElement,
   rect: LinkOverlayRect,
-  destPage: number,
-  onClick: (page: number) => void,
+  destCoords: DestinationCoords,
+  onClick: (dest: DestinationCoords, clickX: number, clickY: number) => void,
   title?: string
 ): void {
   const link = document.createElement('div')
-  link.dataset.destPage = String(destPage)
-  link.title = title || `跳转到第 ${destPage} 页`
+  link.dataset.destPage = String(destCoords.page)
+  link.title = title || `跳转到第 ${destCoords.page} 页`
   link.style.display = 'block'
   link.style.left = `${rect.left}px`
   link.style.top = `${rect.top}px`
@@ -60,18 +60,37 @@ export function appendInternalLinkOverlay(
   link.addEventListener('click', (e) => {
     e.preventDefault()
     e.stopPropagation()
-    onClick(destPage)
+    onClick(destCoords, e.clientX, e.clientY)
   })
   container.appendChild(link)
 }
 
 /**
- * 解析 PDF 内部链接目标页码
+ * PDF 内部链接目标坐标
+ * XYZ 目标类型: [pageRef, 'XYZ', x, y, zoom]
+ * Fit 目标类型: [pageRef, 'Fit']
+ * FitH 目标类型: [pageRef, 'FitH', top]
+ */
+export type DestinationCoords = {
+  /** 目标页码 */
+  page: number
+  /** X 坐标 (PDF 用户空间单位) */
+  x: number | null
+  /** Y 坐标 (PDF 用户空间单位) */
+  y: number | null
+  /** 缩放级别 (null 表示保持当前缩放) */
+  zoom: number | null
+  /** 目标类型: XYZ, Fit, FitH, FitV, FitR, FitB, FitBH, FitBV */
+  type: string
+}
+
+/**
+ * 解析 PDF 内部链接目标页码和坐标
  */
 export async function resolveDestination(
   pdfDoc: PDFDocumentProxy,
   dest: unknown
-): Promise<number | null> {
+): Promise<DestinationCoords | null> {
   if (!pdfDoc) return null
 
   try {
@@ -92,8 +111,54 @@ export async function resolveDestination(
     // 获取页码
     const pageIndex = await pdfDoc.getPageIndex(pageRef)
 
-    // 页码从 1 开始
-    return pageIndex + 1
+    // 解析目标类型和坐标
+    // destArray[1] 可能是字符串或 {name: string} 对象
+    const destTypeRaw = destArray[1]
+    const destType = typeof destTypeRaw === 'string' 
+      ? destTypeRaw 
+      : (destTypeRaw as { name?: string })?.name || 'Fit'
+    
+    let x: number | null = null
+    let y: number | null = null
+    let zoom: number | null = null
+
+    switch (destType) {
+      case 'XYZ':
+        // [pageRef, 'XYZ', x, y, zoom]
+        x = typeof destArray[2] === 'number' ? destArray[2] : null
+        y = typeof destArray[3] === 'number' ? destArray[3] : null
+        zoom = typeof destArray[4] === 'number' ? destArray[4] : null
+        break
+      case 'FitH':
+      case 'FitBH':
+        // [pageRef, 'FitH', top]
+        y = typeof destArray[2] === 'number' ? destArray[2] : null
+        break
+      case 'FitV':
+      case 'FitBV':
+        // [pageRef, 'FitV', left]
+        x = typeof destArray[2] === 'number' ? destArray[2] : null
+        break
+      case 'FitR':
+        // [pageRef, 'FitR', left, bottom, right, top]
+        x = typeof destArray[2] === 'number' ? destArray[2] : null
+        y = typeof destArray[5] === 'number' ? destArray[5] : null
+        break
+      case 'Fit':
+      case 'FitB':
+      default:
+        // 无特定坐标，适应页面
+        console.warn(`Unsupported destination type "${destType}", defaulting to "Fit"`)
+        break
+    }
+
+    return {
+      page: pageIndex + 1, // 页码从 1 开始
+      x,
+      y,
+      zoom,
+      type: destType || 'Fit'
+    }
 
   } catch (err) {
     console.error('Error resolving destination:', err)
@@ -109,7 +174,7 @@ export async function renderLinkLayer(
   viewport: { convertToViewportRectangle: (rect: number[]) => number[] },
   container: HTMLElement,
   pdfDoc: PDFDocumentProxy,
-  onInternalLinkClick: (page: number) => void
+  onInternalLinkClick: (dest: DestinationCoords, clickX: number, clickY: number) => void
 ): Promise<void> {
   container.innerHTML = ''
 
@@ -140,26 +205,26 @@ export async function renderLinkLayer(
       appendLinkOverlay(container, overlayRect, annot.url, annot.url || 'External Link')
     } else if (annot.dest) {
       // 内部链接（如论文引用）
-      const destPage = await resolveDestination(pdfDoc, annot.dest)
-      if (destPage) {
+      const destCoords = await resolveDestination(pdfDoc, annot.dest)
+      if (destCoords) {
         appendInternalLinkOverlay(
           container,
           overlayRect,
-          destPage,
+          destCoords,
           onInternalLinkClick,
-          `跳转到第 ${destPage} 页`
+          `跳转到第 ${destCoords.page} 页`
         )
       }
     } else if (annot.action?.dest) {
       // 带 action 的内部链接
-      const destPage = await resolveDestination(pdfDoc, annot.action.dest)
-      if (destPage) {
+      const destCoords = await resolveDestination(pdfDoc, annot.action.dest)
+      if (destCoords) {
         appendInternalLinkOverlay(
           container,
           overlayRect,
-          destPage,
+          destCoords,
           onInternalLinkClick,
-          `跳转到第 ${destPage} 页`
+          `跳转到第 ${destCoords.page} 页`
         )
       }
     }

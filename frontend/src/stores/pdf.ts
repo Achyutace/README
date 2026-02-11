@@ -378,6 +378,42 @@ export const usePdfStore = defineStore('pdf', () => {
     smartRefCard.value.position = position
   }
 
+  // ---------------------- 内部链接弹窗 ----------------------
+  /** PDF 内部链接目标坐标 */
+  type DestinationCoords = {
+    page: number
+    x: number | null
+    y: number | null
+    zoom: number | null
+    type: string
+  }
+
+  const internalLinkPopup = ref<{
+    isVisible: boolean
+    destCoords: DestinationCoords | null
+    position: { x: number; y: number }
+  }>({
+    isVisible: false,
+    destCoords: null,
+    position: { x: 0, y: 0 }
+  })
+
+  function openInternalLinkPopup(destCoords: DestinationCoords, position: { x: number; y: number }) {
+    internalLinkPopup.value = {
+      isVisible: true,
+      destCoords,
+      position
+    }
+  }
+
+  function closeInternalLinkPopup() {
+    internalLinkPopup.value.isVisible = false
+  }
+
+  function updateInternalLinkPopupPosition(position: { x: number; y: number }) {
+    internalLinkPopup.value.position = position
+  }
+
   // ---------------------- 导出 store 接口 ----------------------
   return {
     currentPdfUrl,
@@ -435,5 +471,10 @@ export const usePdfStore = defineStore('pdf', () => {
     openSmartRefCard,
     closeSmartRefCard,
     updateSmartRefPosition,
+    // 内部链接弹窗
+    internalLinkPopup,
+    openInternalLinkPopup,
+    closeInternalLinkPopup,
+    updateInternalLinkPopupPosition,
   }
 })
