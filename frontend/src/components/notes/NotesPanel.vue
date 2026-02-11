@@ -396,7 +396,7 @@ defineExpose({ addCard })
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="postcss">
 /* 
   Tiptap 编辑器的 Markdown 渲染样式
   通过 :deep() 深度选择器作用到 NoteEditor 组件内部

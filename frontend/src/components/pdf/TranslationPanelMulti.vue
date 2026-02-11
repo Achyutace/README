@@ -661,11 +661,6 @@ onBeforeUnmount(() => {
   border-color: rgba(140, 160, 180, 0.2);
 }
 
-/* 划词翻译面板特殊样式（可选） */
-.translation-panel.is-text-panel {
-    /* 例如稍微不同的边框颜色来区分？目前保持一致 */
-}
-
 .translation-panel.is-dragging {
   opacity: 0.9;
   cursor: grabbing;
