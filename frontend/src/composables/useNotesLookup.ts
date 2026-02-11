@@ -4,7 +4,6 @@
  */
 
 import { ref } from 'vue'
-import type { Ref } from 'vue'
 import type { Note } from '../api'
 
 export interface UseNotesLookupOptions {
