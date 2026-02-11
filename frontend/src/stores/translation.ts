@@ -20,6 +20,7 @@ export const useTranslationStore = defineStore('translation', () => {
   const showTextTranslation = ref(false)
   const isTextTranslating = ref(false)
   const textTranslationResult = ref('')
+  const textTranslationOriginal = ref('')  // 存储划词翻译的原文，用于重新翻译
 
   // 兼容旧版的单一翻译面板状态（为向后兼容保留）
   const translationPanel = ref<TranslationPanelState>({
@@ -45,9 +46,17 @@ export const useTranslationStore = defineStore('translation', () => {
   // ---------------------- 划词翻译功能 ----------------------
   
   // 翻译文本 (Translate Text Selection)
-  async function translateText(text: string) {
+  async function translateText(text: string, forceRefresh = false) {
     showTextTranslation.value = true
     isTextTranslating.value = true
+    textTranslationOriginal.value = text  // 保存原文用于重新翻译
+    
+    // 如果不是强制刷新且有缓存结果，则直接使用缓存
+    if (!forceRefresh && textTranslationResult.value) {
+      isTextTranslating.value = false
+      return
+    }
+    
     textTranslationResult.value = ''
     
     try {
@@ -256,6 +265,7 @@ export const useTranslationStore = defineStore('translation', () => {
     showTextTranslation,
     isTextTranslating,
     textTranslationResult,
+    textTranslationOriginal,
     
     // Actions
     translateText,

@@ -2,17 +2,12 @@
 // =============================================================================
 // TranslationPanelMulti.vue
 //
-// 功能概述：多实例翻译面板管理器，允许在 PDF 页面同时打开和管理多个段落翻译窗口。
-// - 每个面板实例存储在 `translationStore.translationPanels` 中（包含 id、position、size、snapMode 等）。
-// - 提供拖拽、吸附到段落、停靠到侧边栏、尺寸调整、复制译文、字体缩放、置顶等交互。
-// - 为了性能与流畅性，使用防抖（useDebounceFn）、requestAnimationFrame、ResizeObserver 等手段优化滚动与重排的更新。
-// 交互要点：
-// - 拖动期间会计算与最近段落或侧边栏的距离以决定是否显示吸附提示，并在释放时切换 snapMode。
-// - 吸附到段落的面板会在缩放或滚动时重新计算位置/尺寸以精确覆盖原文段落。
-// - 目标是让用户可以并行查看多个段落的译文并灵活组织它们的布局。
+// 功能概述：统一翻译面板管理器，整合了“划词翻译”与“段落多窗口翻译”功能。
+// - 划词翻译：单例模式，由 translationStore.showTextTranslation 控制，ID 为 text-selection-panel。
+// - 段落翻译：多实例模式，由 translationStore.translationPanels 管理。
+// - 共享相同的 UI 风格、交互逻辑（拖拽、缩放、字体调整等）。
 // =============================================================================
-/* 导入：Vue 响应式 API、debounce 工具、pdf store、可复用拖拽/缩放 hook、翻译 composable、类型定义 */
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { usePdfStore } from '../../stores/pdf'
 import { useTranslationStore } from '../../stores/translation'
@@ -23,165 +18,252 @@ import type { TranslationPanelInstance } from '../../types'
 const pdfStore = usePdfStore()
 const translationStore = useTranslationStore()
 
-// 当前拖动的面板
-const draggingPanelId = ref<string | null>(null)
+// 常量定义
+const TEXT_PANEL_ID = 'text-selection-panel'
+const MIN_WIDTH = 280
+const MAX_WIDTH = 900
+const MIN_HEIGHT = 150
+const MAX_HEIGHT = 600
+const SIDEBAR_SNAP_THRESHOLD = 100
+const PARAGRAPH_SNAP_THRESHOLD = 150
+const DEFAULT_FONT_SIZE = 14
+const MIN_FONT_SIZE = 12
+const MAX_FONT_SIZE = 24
 
-// 调整大小相关
+// 划词翻译面板的本地状态（因为 Store 中未存储其尺寸）
+const textPanelSize = ref({ width: 320, height: 280 })
+
+// 拖拽与缩放状态
+const draggingPanelId = ref<string | null>(null)
 const resizingPanelId = ref<string | null>(null)
 
-// 吸附相关
-const isNearSnapTarget = ref(false) // 是否接近吸附目标（段落）
-const snapTargetRect = ref<{ left: number; top: number; width: number; height: number } | null>(null) // 吸附目标的矩形区域
-const snapTargetParagraphId = ref<string | null>(null) // 吸附目标段落的ID
-const isNearSidebar = ref(false) // 是否接近侧边栏
+// 吸附相关状态
+const isNearSnapTarget = ref(false)
+const snapTargetRect = ref<{ left: number; top: number; width: number; height: number } | null>(null)
+const snapTargetParagraphId = ref<string | null>(null)
+const isNearSidebar = ref(false)
 
-// 字体大小管理
-const fontSizeMap: Record<string, number> = {} // panelId -> fontSize 映射，存储每个面板的字体大小
-const DEFAULT_FONT_SIZE = 14 // 默认字体大小
-const MIN_FONT_SIZE = 12 // 最小字体大小
-const MAX_FONT_SIZE = 24 // 最大字体大小
+// 字体大小映射
+const fontSizeMap: Record<string, number> = {}
 
-// 复制状态
-const copiedPanelId = ref<string | null>(null) // 最近复制翻译内容的面板ID，用于显示复制成功状态
+// 复制状态映射
+const copiedPanelId = ref<string | null>(null)
 
-// 复制翻译内容到剪贴板（并显示短暂的复制成功提示）
-// 说明：复制失败会在控制台记录错误，复制成功会把状态写入 `copiedPanelId`，2s 后自动清除以恢复按钮状态。
-async function copyTranslation(panel: TranslationPanelInstance) { // 异步函数，复制指定面板的翻译内容
-  if (!panel.translation) return // 如果没有翻译内容，直接返回
+// ===========================================
+// 计算属性：合并显示所有面板
+// ===========================================
+const visiblePanels = computed(() => {
+  // 1. 获取所有非侧边栏停靠的段落面板
+  const panels: Array<TranslationPanelInstance & { isTextPanel?: boolean }> = 
+    translationStore.translationPanels.filter(p => !p.isSidebarDocked).map(p => ({ ...p, isTextPanel: false }))
+  
+  // 2. 如果划词翻译开启，添加划词翻译面板
+  if (translationStore.showTextTranslation) {
+    panels.push({
+      id: TEXT_PANEL_ID,
+      paragraphId: '', // 划词翻译无段落ID
+      position: translationStore.translationPanel.position,
+      size: textPanelSize.value,
+      translation: translationStore.textTranslationResult || (translationStore.isTextTranslating ? '' : '暂无翻译'),
+      isLoading: translationStore.isTextTranslating,
+      originalText: '', 
+      snapMode: 'none',
+      snapTargetParagraphId: null,
+      isSidebarDocked: false,
+      isTextPanel: true
+    })
+  }
+  
+  return panels
+})
 
+// ===========================================
+// 辅助功能
+// ===========================================
+
+function getFontSize(panelId: string): number {
+  return fontSizeMap[panelId] || DEFAULT_FONT_SIZE
+}
+
+function increaseFontSize(panelId: string) {
+  const current = getFontSize(panelId)
+  if (current < MAX_FONT_SIZE) fontSizeMap[panelId] = current + 1
+}
+
+function decreaseFontSize(panelId: string) {
+  const current = getFontSize(panelId)
+  if (current > MIN_FONT_SIZE) fontSizeMap[panelId] = current - 1
+}
+
+async function copyTranslation(panel: any) {
+  if (!panel.translation) return
   try {
-    await navigator.clipboard.writeText(panel.translation) // 将翻译内容写入系统剪贴板
-    copiedPanelId.value = panel.id // 设置复制状态为当前面板ID
-    // 2秒后重置状态，清除复制成功提示
-    setTimeout(() => {
-      if (copiedPanelId.value === panel.id) { // 检查是否还是同一个面板，避免多面板同时复制时的冲突
-        copiedPanelId.value = null // 重置复制状态
-      }
-    }, 2000)
+    await navigator.clipboard.writeText(panel.translation)
+    copiedPanelId.value = panel.id
+    // 不再自动清除复制状态，让它一直显示
   } catch (err) {
-    console.error('Failed to copy:', err) // 复制失败时记录错误信息
+    console.error('Failed to copy:', err)
   }
 }
 
-// 获取指定面板的字体大小
-function getFontSize(panelId: string): number { // 返回面板的当前字体大小
-  return fontSizeMap[panelId] || DEFAULT_FONT_SIZE // 从映射中获取，或返回默认值
-}
-
-// 增加指定面板的字体大小
-function increaseFontSize(panelId: string) { // 增大字体
-  const current = getFontSize(panelId) // 获取当前字体大小
-  if (current < MAX_FONT_SIZE) { // 如果小于最大值
-    fontSizeMap[panelId] = current + 1 // 增加1px
+function closePanel(panelId: string) {
+  if (panelId === TEXT_PANEL_ID) {
+    translationStore.closeTextTranslation()
+  } else {
+    translationStore.closeTranslationPanelById(panelId)
   }
 }
 
-// 减少指定面板的字体大小
-function decreaseFontSize(panelId: string) { // 减小字体
-  const current = getFontSize(panelId) // 获取当前字体大小
-  if (current > MIN_FONT_SIZE) { // 如果大于最小值
-    fontSizeMap[panelId] = current - 1 // 减少1px
-  }
-}
-
-// 面板尺寸限制常量
-const MIN_WIDTH = 280 // 最小面板宽度
-const MAX_WIDTH = 900 // 最大面板宽度
-const MIN_HEIGHT = 150 // 最小面板高度
-const MAX_HEIGHT = 600 // 最大面板高度
-const SIDEBAR_SNAP_THRESHOLD = 100 // 侧边栏吸附阈值距离（像素）
-const PARAGRAPH_SNAP_THRESHOLD = 150 // 段落吸附阈值距离（像素）
-
-// 获取所有可吸附的段落位置信息
-function getAllParagraphRects(): Array<{ id: string; rect: DOMRect; page: number }> { // 返回所有段落的矩形信息数组
-  const results: Array<{ id: string; rect: DOMRect; page: number }> = [] // 初始化结果数组
-  const markers = document.querySelectorAll('[data-paragraph-id]') // 查找所有带有段落ID属性的元素
-  markers.forEach(marker => { // 遍历每个标记元素
-    const id = marker.getAttribute('data-paragraph-id') // 获取段落ID
-    if (id) { // 如果ID存在
-      const pageEl = marker.closest('.pdf-page') // 找到最近的PDF页面元素
-      const page = pageEl ? Number(pageEl.getAttribute('data-page')) : 0 // 获取页面号
-      results.push({ id, rect: marker.getBoundingClientRect(), page }) // 添加到结果数组
+async function retranslate(panel: any) {
+  if (panel.isTextPanel) {
+    // 划词翻译重新翻译
+    const originalText = translationStore.textTranslationOriginal
+    if (!originalText) return
+    await translationStore.translateText(originalText, true)
+  } else {
+    // 段落翻译重新翻译
+    if (!panel.paragraphId) return
+    translationStore.setPanelLoading(panel.id, true)
+    const translation = await translationStore.translateParagraph(panel.paragraphId, true)
+    if (translation) {
+      translationStore.setTranslation(panel.paragraphId, translation)
     }
-  })
-  return results // 返回段落信息数组
-}
-
-// 计算指定段落的吸附位置（将段落 bbox 基于 pdfStore.scale 映射到当前渲染坐标）
-// 说明：
-// - 本函数会查找段落数据并计算其在当前页面与缩放下的屏幕坐标，用于把面板精确放置到原文上方。
-// - 采用 pdfStore.scale 作为缩放因子（与 render pipeline 保持一致），并返回包含 pageElement 的位置信息以便后续使用。
-function calculateParagraphSnapPosition(paragraphId: string) { // 根据段落ID计算吸附位置
-  const paragraphs = pdfStore.paragraphs // 获取所有段落数据
-  const paragraph = paragraphs.find(p => p.id === paragraphId) // 查找指定段落
-  if (!paragraph) return null // 如果没找到段落，返回null
-
-  const pageElement = document.querySelector(`.pdf-page[data-page="${paragraph.page}"]`) as HTMLElement // 找到段落所在页面元素
-  if (!pageElement) return null // 如果页面元素不存在，返回null
-
-  const pageRect = pageElement.getBoundingClientRect() // 获取页面元素的边界矩形
-
-  // 直接使用 pdfStore.scale 作为缩放因子
-  const scaleFactor = pdfStore.scale // 获取当前PDF缩放因子
-
-  // bbox坐标是相对于原始PDF尺寸（scale=1）的绝对坐标
-  // 需要乘以当前缩放因子得到当前渲染尺寸下的坐标
-  // pageRect.left/top 是页面在屏幕上的位置（会随滚动变化）
-  const left = pageRect.left + (paragraph.bbox.x0 * scaleFactor) // 计算段落在屏幕上的左边距
-  const top = pageRect.top + (paragraph.bbox.y0 * scaleFactor) // 计算段落在屏幕上的上边距
-  const width = paragraph.bbox.width * scaleFactor // 计算段落的宽度
-  const height = paragraph.bbox.height * scaleFactor // 计算段落的高度
-
-  return { // 返回吸附位置信息
-    left,
-    top,
-    width,
-    height,
-    pageElement
   }
 }
 
-// 拖动处理：用于处理任意面板的拖拽逻辑
-// 说明：
-// - 在拖动过程中检测是否接近侧边栏或周围段落的吸附目标，并设置相应的提示状态；
-// - onDragEnd 会根据是否接近侧边栏或段落决定面板的 snapMode（sidebar / paragraph / none），并在需要时更新位置与尺寸；
-// - 拖动过程中也会限制面板位置使其保持在视口范围内并同步回 store。
+function focusPanel(panelId: string) {
+  if (panelId !== TEXT_PANEL_ID) {
+    translationStore.bringPanelToFront(panelId)
+  }
+  // Text panel stays implicitly on top due to render order in computed
+}
+
+// ===========================================
+// 拖拽逻辑 (Draggable)
+// ===========================================
+
+// 计算吸附位置
+function calculateParagraphSnapPosition(paragraphId: string) {
+  const paragraph = pdfStore.paragraphs.find(p => p.id === paragraphId)
+  if (!paragraph) return null
+
+  // 查找对应的段落 marker 元素
+  const marker = document.querySelector(`[data-paragraph-id="${paragraphId}"]`) as HTMLElement
+  if (!marker) return null
+
+  const scaleFactor = pdfStore.scale
+  const markerRect = marker.getBoundingClientRect()
+
+  // 使用 marker 的位置作为段落左上角，计算段落的完整位置
+  const left = markerRect.left
+  const top = markerRect.top
+  const width = paragraph.bbox.width * scaleFactor
+  const height = paragraph.bbox.height * scaleFactor
+
+  const pageElement = marker.closest('.pdf-page') as HTMLElement | null
+
+  return { left, top, width, height, pageElement }
+}
+
+function getAllParagraphRects() {
+  const results: Array<{ id: string; rect: { left: number; top: number; width: number; height: number }; page: number }> = []
+  
+  // 获取所有带有段落ID的元素
+  const markers = document.querySelectorAll('[data-paragraph-id]')
+  const scale = pdfStore.scale
+
+  markers.forEach(marker => {
+    const id = marker.getAttribute('data-paragraph-id')
+    if (!id) return
+    
+    // 查找 store 中的段落数据
+    const paragraph = pdfStore.paragraphs.find(p => p.id === id)
+    if (!paragraph) return
+
+    // 获取 marker 的位置作为参考点
+    // marker 位于段落的左上角 (x0, y0)
+    const markerRect = marker.getBoundingClientRect()
+    
+    // 计算段落在视口中的位置
+    // 使用 marker 作为 (x0, y0) 参考点，然后计算整个 bbox
+    const left = markerRect.left
+    const top = markerRect.top
+    const width = paragraph.bbox.width * scale
+    const height = paragraph.bbox.height * scale
+
+    results.push({
+      id,
+      rect: { left, top, width, height },
+      page: paragraph.page
+    })
+  })
+  
+  return results
+}
+
 const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow({
   onDrag: (newPos) => {
     if (!draggingPanelId.value) return
-    const panel = translationStore.translationPanels.find(p => p.id === draggingPanelId.value)
+    const currentId = draggingPanelId.value
+
+    // --- 1. 划词翻译面板处理 ---
+    if (currentId === TEXT_PANEL_ID) {
+       const maxX = window.innerWidth - textPanelSize.value.width
+       const maxY = window.innerHeight - textPanelSize.value.height
+       translationStore.updateTranslationPanelPosition({
+          x: Math.max(0, Math.min(maxX, newPos.x)),
+          y: Math.max(0, Math.min(maxY, newPos.y))
+       })
+       // 划词翻译不支持吸附逻辑
+       return
+    }
+
+    // --- 2. 段落翻译面板处理 ---
+    const panel = translationStore.translationPanels.find(p => p.id === currentId)
     if (!panel) return
     
-    // Snapping Logic
+    // 吸附检测逻辑
     const distanceToRight = window.innerWidth - (newPos.x + panel.size.width)
     isNearSidebar.value = distanceToRight < SIDEBAR_SNAP_THRESHOLD
     
     if (!isNearSidebar.value) {
+      // 检测附近段落
       const allParagraphs = getAllParagraphRects()
-      let nearestParagraph: { id: string; distance: number; rect: DOMRect } | null = null
+      let nearest: { id: string; distance: number; rect: { left: number; top: number; width: number; height: number } } | null = null
       
-      const panelCenterX = newPos.x + panel.size.width / 2
-      const panelCenterY = newPos.y + panel.size.height / 2
+      const panelCx = newPos.x + panel.size.width / 2
+      const panelCy = newPos.y + panel.size.height / 2
 
       for (const p of allParagraphs) {
-        const markerCenterX = p.rect.left + p.rect.width / 2
-        const markerCenterY = p.rect.top + p.rect.height / 2
-        const distanceFromCorner = Math.sqrt(Math.pow(newPos.x - markerCenterX, 2) + Math.pow(newPos.y - markerCenterY, 2))
-        const distanceFromCenter = Math.sqrt(Math.pow(panelCenterX - markerCenterX, 2) + Math.pow(panelCenterY - markerCenterY, 2))
-        const distance = Math.min(distanceFromCorner, distanceFromCenter)
+        // 优先判断：面板中心点是否在段落 Rect 内部
+        const isInside = 
+          panelCx >= p.rect.left && 
+          panelCx <= p.rect.left + p.rect.width &&
+          panelCy >= p.rect.top &&
+          panelCy <= p.rect.top + p.rect.height
 
-        if (distance < PARAGRAPH_SNAP_THRESHOLD) {
-          if (!nearestParagraph || distance < nearestParagraph.distance) {
-            nearestParagraph = { id: p.id, distance, rect: p.rect }
-          }
+        if (isInside) {
+          nearest = { id: p.id, distance: 0, rect: p.rect }
+          break // 找到直接吸附
+        }
+
+        // 备选逻辑：计算中心点距离
+        const markerCx = p.rect.left + p.rect.width / 2
+        const markerCy = p.rect.top + p.rect.height / 2
+        
+        const dist = Math.hypot(panelCx - markerCx, panelCy - markerCy)
+        if (dist < PARAGRAPH_SNAP_THRESHOLD) {
+           if (!nearest || (nearest.distance > 0 && dist < nearest.distance)) {
+             nearest = { id: p.id, distance: dist, rect: p.rect }
+           }
         }
       }
 
-      if (nearestParagraph) {
+      if (nearest) {
         isNearSnapTarget.value = true
-        snapTargetParagraphId.value = nearestParagraph.id
-        const snapPos = calculateParagraphSnapPosition(nearestParagraph.id)
-        if (snapPos) snapTargetRect.value = snapPos
+        snapTargetParagraphId.value = nearest.id
+        // 直接使用计算好的 nearest.rect，避免二次计算
+        snapTargetRect.value = nearest.rect
       } else {
         isNearSnapTarget.value = false
         snapTargetParagraphId.value = null
@@ -193,34 +275,36 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
       snapTargetRect.value = null
     }
 
-    // Constraints
+    // 限制在窗口内并更新 store
     const maxX = window.innerWidth - panel.size.width
     const maxY = window.innerHeight - panel.size.height
-    
-    translationStore.updatePanelPosition(draggingPanelId.value, {
+    translationStore.updatePanelPosition(currentId, {
       x: Math.max(0, Math.min(maxX, newPos.x)),
       y: Math.max(0, Math.min(maxY, newPos.y))
     })
   },
   onDragEnd: () => {
-    if (draggingPanelId.value) {
-      const panel = translationStore.translationPanels.find(p => p.id === draggingPanelId.value)
-      if (panel) {
+    if (draggingPanelId.value && draggingPanelId.value !== TEXT_PANEL_ID) {
+        // 应用吸附/停靠
         if (isNearSidebar.value) {
-          translationStore.setPanelSnapMode(draggingPanelId.value, 'sidebar')
+            translationStore.setPanelSnapMode(draggingPanelId.value, 'sidebar')
         } else if (isNearSnapTarget.value && snapTargetRect.value && snapTargetParagraphId.value) {
-          translationStore.setPanelSnapMode(draggingPanelId.value, 'paragraph', snapTargetParagraphId.value)
-          translationStore.updatePanelPosition(draggingPanelId.value, {
-            x: snapTargetRect.value.left,
-            y: snapTargetRect.value.top
-          })
-          translationStore.updatePanelSize(draggingPanelId.value, {
-            width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapTargetRect.value.width)),
-            height: panel.size.height
-          })
+             translationStore.setPanelSnapMode(draggingPanelId.value, 'paragraph', snapTargetParagraphId.value)
+             translationStore.updatePanelPosition(draggingPanelId.value, {
+                 x: snapTargetRect.value.left,
+                 y: snapTargetRect.value.top
+             })
+             // 同时调整宽度以匹配段落
+             const panel = translationStore.translationPanels.find(p => p.id === draggingPanelId.value)
+             if (panel) {
+                translationStore.updatePanelSize(draggingPanelId.value, {
+                    width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapTargetRect.value.width)),
+                    height: panel.size.height
+                })
+             }
         }
-      }
     }
+    // 重置状态
     draggingPanelId.value = null
     isNearSnapTarget.value = false
     isNearSidebar.value = false
@@ -232,30 +316,51 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
 function startDrag(e: MouseEvent, panelId: string) {
   if (!(e.target as HTMLElement).closest('.panel-header')) return
   
-  const panel = translationStore.translationPanels.find(p => p.id === panelId)
-  if (!panel) return
-  
   draggingPanelId.value = panelId
-  setDragPosition(panel.position)
   
-  translationStore.setPanelSnapMode(panelId, 'none')
-  translationStore.bringPanelToFront(panelId)
+  if (panelId === TEXT_PANEL_ID) {
+    setDragPosition(translationStore.translationPanel.position)
+  } else {
+    const panel = translationStore.translationPanels.find(p => p.id === panelId)
+    if (!panel) return
+    setDragPosition(panel.position)
+    translationStore.setPanelSnapMode(panelId, 'none')
+    translationStore.bringPanelToFront(panelId)
+  }
   
   initDrag(e)
 }
 
-// 调整大小处理
+// ===========================================
+// 缩放逻辑 (Resizable)
+// ===========================================
+
 const { startResize: initResize, setSize: setResizeSize } = useResizableWindow({
   minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH, minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT,
   onResize: ({ size, delta }) => {
     if (!resizingPanelId.value) return
-    const panel = translationStore.translationPanels.find(p => p.id === resizingPanelId.value)
+    const id = resizingPanelId.value
+
+    // 1. 划词翻译面板
+    if (id === TEXT_PANEL_ID) {
+        textPanelSize.value = size
+        if (delta.x !== 0 || delta.y !== 0) {
+            const curPos = translationStore.translationPanel.position
+            translationStore.updateTranslationPanelPosition({
+                x: curPos.x + delta.x,
+                y: curPos.y + delta.y
+            })
+        }
+        return
+    }
+
+    // 2. 段落翻译面板
+    const panel = translationStore.translationPanels.find(p => p.id === id)
     if (!panel) return
 
-    translationStore.updatePanelSize(resizingPanelId.value, size)
-    
+    translationStore.updatePanelSize(id, size)
     if (delta.x !== 0 || delta.y !== 0) {
-      translationStore.updatePanelPosition(resizingPanelId.value, {
+       translationStore.updatePanelPosition(id, {
         x: panel.position.x + delta.x,
         y: panel.position.y + delta.y
       })
@@ -267,177 +372,122 @@ const { startResize: initResize, setSize: setResizeSize } = useResizableWindow({
 })
 
 function startResize(e: MouseEvent, panelId: string, direction: string) {
-  const panel = translationStore.translationPanels.find(p => p.id === panelId)
-  if (!panel) return
-  
   resizingPanelId.value = panelId
-  setResizeSize(panel.size)
-  translationStore.bringPanelToFront(panelId)
+  
+  if (panelId === TEXT_PANEL_ID) {
+    setResizeSize(textPanelSize.value)
+  } else {
+      const panel = translationStore.translationPanels.find(p => p.id === panelId)
+      if (!panel) return
+      setResizeSize(panel.size)
+      translationStore.bringPanelToFront(panelId)
+  }
   
   initResize(e, direction)
 }
 
-// 关闭指定面板
-function closePanel(panelId: string) { // 关闭翻译面板
-  translationStore.closeTranslationPanelById(panelId) // 调用store关闭面板
-}
+// ===========================================
+// PDF滚动与更新逻辑
+// ===========================================
 
-// 重新翻译指定面板的内容
-async function retranslate(panel: TranslationPanelInstance) {
-  if (!panel.paragraphId) return
-  
-  translationStore.setPanelLoading(panel.id, true)
-  
-  const translation = await translationStore.translateParagraph(panel.paragraphId, true)
-  if (translation) {
-    translationStore.setTranslation(panel.paragraphId, translation)
-  }
-}
-
-// 获取指定面板的翻译内容（向后端请求并把结果写回 store，处理加载状态与错误提示）
+// 自动请求翻译（仅针对段落面板）
 async function fetchTranslation(panel: TranslationPanelInstance) {
   if (!panel.paragraphId || panel.translation) return
-  
-  // 标记该面板为加载中（UI 将显示 loading 状态）
   translationStore.setPanelLoading(panel.id, true)
-  
-  // 调用翻译 composable 请求翻译结果
   const translation = await translationStore.translateParagraph(panel.paragraphId)
   if (translation) {
-    // 成功则将翻译结果写入 store（store 会把结果分配到相关 panel）
     translationStore.setTranslation(panel.paragraphId, translation)
   } else {
-    // 失败则写入错误提示，前端可在 UI 中显示
     translationStore.setTranslation(panel.paragraphId, '翻译失败，请重试')
   }
 }
 
-// 监听面板数量变化，自动请求翻译
-watch(() => translationStore.translationPanels.length, () => { // 监听翻译面板数组长度变化
-  translationStore.translationPanels.forEach(panel => { // 遍历所有面板
-    if (!panel.translation && panel.isLoading) { // 如果面板没有翻译内容且正在加载
-      fetchTranslation(panel) // 获取翻译
+watch(() => translationStore.translationPanels.length, () => {
+  translationStore.translationPanels.forEach(panel => {
+    if (!panel.translation && panel.isLoading) {
+      fetchTranslation(panel)
     }
   })
-}, { immediate: true }) // 立即执行一次
+}, { immediate: true })
 
-// 监听PDF缩放变化，更新吸附面板位置
-watch(() => pdfStore.scale, () => { // 监听PDF缩放因子变化
-  // 延迟执行以等待DOM更新
-  setTimeout(() => {
-    debouncedUpdatePositions() // 防抖更新位置
-  }, 100)
-})
-
-// 更新所有吸附到段落的面板位置
-function updateSnappedPanelPositions() { // 更新所有吸附面板的位置
-  translationStore.translationPanels.forEach(panel => { // 遍历所有面板
-    if (panel.snapMode === 'paragraph' && panel.snapTargetParagraphId) { // 如果面板吸附到段落
-      const snapPos = calculateParagraphSnapPosition(panel.snapTargetParagraphId) // 计算吸附位置
-      if (snapPos) { // 如果位置计算成功
-        translationStore.updatePanelPosition(panel.id, { // 更新面板位置
+// 滚动同步
+function updateSnappedPanelPositions() {
+  translationStore.translationPanels.forEach(panel => {
+    if (panel.snapMode === 'paragraph' && panel.snapTargetParagraphId) {
+      const snapPos = calculateParagraphSnapPosition(panel.snapTargetParagraphId)
+      if (snapPos) {
+        translationStore.updatePanelPosition(panel.id, {
           x: snapPos.left,
           y: snapPos.top
         })
-        // 同时更新宽度以匹配段落
-        translationStore.updatePanelSize(panel.id, { // 更新面板尺寸
-          width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapPos.width)), // 限制宽度
-          height: panel.size.height // 保持高度
+        translationStore.updatePanelSize(panel.id, {
+          width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, snapPos.width)),
+          height: panel.size.height
         })
       }
     }
   })
 }
 
-// 防抖的位置更新函数，减少频繁更新
-const debouncedUpdatePositions = useDebounceFn(updateSnappedPanelPositions, 16) // 16ms防抖
+const debouncedUpdatePositions = useDebounceFn(updateSnappedPanelPositions, 16)
+let scrollRafId: number | null = null
 
-// 使用 requestAnimationFrame 实现平滑滚动跟随
-let scrollRafId: number | null = null // RAF请求ID
-
-function onPdfScroll() { // PDF滚动事件处理
-  // 取消之前的 RAF 请求
-  if (scrollRafId) { // 如果有之前的RAF请求
-    cancelAnimationFrame(scrollRafId) // 取消它
-  }
-  // 使用 RAF 确保流畅更新
-  scrollRafId = requestAnimationFrame(() => { // 请求动画帧
-    updateSnappedPanelPositions() // 更新吸附面板位置
-    scrollRafId = null // 重置ID
+function onPdfScroll() {
+  if (scrollRafId) cancelAnimationFrame(scrollRafId)
+  scrollRafId = requestAnimationFrame(() => {
+    updateSnappedPanelPositions()
+    scrollRafId = null
   })
 }
 
-// 点击面板时聚焦
-function focusPanel(panelId: string) { // 将指定面板置于顶层
-  translationStore.bringPanelToFront(panelId) // 调用store置于顶层
-}
+// 容器绑定监听
+let pdfContainerRef: Element | null = null
+let resizeObserver: ResizeObserver | null = null
+let bindRetryCount = 0
+const MAX_BIND_RETRIES = 10
 
-// 存储事件监听器引用
-let pdfContainerRef: Element | null = null // PDF容器元素引用
-let resizeObserver: ResizeObserver | null = null // 调整大小观察器引用
-
-// 绑定滚动监听器（带重试机制）
-// 说明：
-// - 在某些 PDF 渲染实现中，滚动容器可能延迟渲染或切换，故使用重试机制以保证能正确绑定。
-// - 绑定后会监听 scroll（被动监听）并使用 ResizeObserver 监听容器尺寸变化，结合防抖与 RAF 优化吸附面板的更新，减少卡顿。
-let bindRetryCount = 0 // 绑定重试计数
-const MAX_BIND_RETRIES = 10 // 最大重试次数
-
-function bindScrollListener() { // 绑定PDF滚动监听器
-  if (pdfContainerRef) return // 如果已经绑定，返回
-
-  pdfContainerRef = document.querySelector('.pdf-scroll-container') // 查找PDF滚动容器
-  if (pdfContainerRef) { // 如果找到容器
-    pdfContainerRef.addEventListener('scroll', onPdfScroll, { passive: true }) // 添加滚动监听器
-
-    // 监听容器大小变化
-    resizeObserver = new ResizeObserver(() => { // 创建大小观察器
-      debouncedUpdatePositions() // 更新位置
-    })
-    resizeObserver.observe(pdfContainerRef) // 观察容器大小变化
-    bindRetryCount = 0 // 重置重试计数
-  } else if (bindRetryCount < MAX_BIND_RETRIES) { // 如果没找到且未超过重试次数
-    // 容器未找到，延迟重试
-    bindRetryCount++ // 增加重试计数
-    setTimeout(bindScrollListener, 200) // 200ms后重试
+function bindScrollListener() {
+  if (pdfContainerRef) return
+  pdfContainerRef = document.querySelector('.pdf-scroll-container')
+  if (pdfContainerRef) {
+    pdfContainerRef.addEventListener('scroll', onPdfScroll, { passive: true })
+    resizeObserver = new ResizeObserver(() => debouncedUpdatePositions())
+    resizeObserver.observe(pdfContainerRef)
+    bindRetryCount = 0
+  } else if (bindRetryCount < MAX_BIND_RETRIES) {
+    bindRetryCount++
+    setTimeout(bindScrollListener, 200)
   }
 }
 
-// 监听 PDF URL 变化，重新绑定监听器
-watch(() => pdfStore.currentPdfUrl, () => { // 监听当前PDF URL变化
-  // 先解绑旧的监听器
-  if (pdfContainerRef) { // 如果有容器引用
-    pdfContainerRef.removeEventListener('scroll', onPdfScroll) // 移除滚动监听器
-    if (resizeObserver) { // 如果有观察器
-      resizeObserver.disconnect() // 断开观察器
-      resizeObserver = null // 重置引用
+watch(() => pdfStore.currentPdfUrl, () => {
+  if (pdfContainerRef) {
+    pdfContainerRef.removeEventListener('scroll', onPdfScroll)
+    if (resizeObserver) {
+      resizeObserver.disconnect()
+      resizeObserver = null
     }
-    pdfContainerRef = null // 重置容器引用
+    pdfContainerRef = null
   }
-  bindRetryCount = 0 // 重置重试计数
-  // PDF 切换时重新绑定
-  setTimeout(bindScrollListener, 200) // 延迟绑定
-}, { immediate: true }) // 立即执行一次
+  bindRetryCount = 0
+  setTimeout(bindScrollListener, 200)
+}, { immediate: true })
 
 onMounted(() => {
-  // 延迟绑定，确保 PDF 容器已渲染
   setTimeout(bindScrollListener, 200)
 })
 
 onBeforeUnmount(() => {
   if (pdfContainerRef) {
-    pdfContainerRef.removeEventListener('scroll', onPdfScroll) // 移除滚动监听
-    pdfContainerRef = null // 重置引用
+    pdfContainerRef.removeEventListener('scroll', onPdfScroll)
+    pdfContainerRef = null
   }
-
-  if (resizeObserver) { // 如果有观察器
-    resizeObserver.disconnect() // 断开观察器
-    resizeObserver = null // 重置引用
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
   }
-
-  if (scrollRafId) { // 如果有RAF请求
-    cancelAnimationFrame(scrollRafId) // 取消请求
-    scrollRafId = null // 重置ID
+  if (scrollRafId) {
+    cancelAnimationFrame(scrollRafId)
   }
 })
 </script>
@@ -445,7 +495,7 @@ onBeforeUnmount(() => {
 <template>
   <!-- 拖动时显示的吸附提示 -->
   <div
-    v-if="draggingPanelId && snapTargetRect && isNearSnapTarget"
+    v-if="draggingPanelId && draggingPanelId !== TEXT_PANEL_ID && snapTargetRect && isNearSnapTarget"
     class="snap-hint fixed z-[998] pointer-events-none"
     :style="{
       left: snapTargetRect.left + 'px',
@@ -459,19 +509,20 @@ onBeforeUnmount(() => {
   
   <!-- 侧边栏吸附提示 -->
   <div
-    v-if="draggingPanelId && isNearSidebar"
+    v-if="draggingPanelId && draggingPanelId !== TEXT_PANEL_ID && isNearSidebar"
     class="sidebar-snap-hint fixed z-[998] pointer-events-none right-0 top-0 bottom-0 w-16"
   >
     <div class="sidebar-hint-text">停靠到侧边栏</div>
   </div>
 
-  <!-- 渲染所有翻译面板（排除已停靠到侧边栏的） -->
-  <template v-for="(panel, index) in translationStore.translationPanels.filter(p => !p.isSidebarDocked)" :key="panel.id">
+  <!-- 渲染所有翻译面板 -->
+  <template v-for="(panel, index) in visiblePanels" :key="panel.id">
     <div
-      class="translation-panel fixed z-[1000] rounded-lg overflow-hidden select-none"
+      class="translation-panel fixed rounded-lg overflow-hidden select-none"
       :class="{ 
         'is-snapped': panel.snapMode === 'paragraph',
-        'is-dragging': draggingPanelId === panel.id
+        'is-dragging': draggingPanelId === panel.id,
+        'is-text-panel': panel.isTextPanel // 辅助类
       }"
       :style="{
         left: panel.position.x + 'px',
@@ -482,13 +533,15 @@ onBeforeUnmount(() => {
       }"
       @mousedown="focusPanel(panel.id)"
     >
-      <!-- 头部 - 极简细条拖动区域 -->
+      <!-- 头部 -->
       <div 
         class="panel-header flex items-center justify-between px-2 py-1 cursor-move"
         @mousedown="startDrag($event, panel.id)"
       >
         <div class="flex items-center gap-1.5">
-          <span class="text-xs font-medium text-gray-600 dark:text-gray-400">译文</span>
+          <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
+            {{ panel.isTextPanel ? '划词翻译' : 'AI 译文' }}
+          </span>
           <span v-if="panel.snapMode === 'paragraph'" class="text-[10px] text-gray-400 dark:text-gray-500">· 已吸附</span>
         </div>
         <div class="flex items-center gap-0.5">
@@ -503,30 +556,24 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
             </svg>
             <svg v-else class="w-3 h-3 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke-width="2" />
             </svg>
           </button>
-          <!-- 字体减小按钮 -->
-          <button
-            @click.stop="decreaseFontSize(panel.id)"
-            class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors"
-            title="减小字体"
-          >
+          
+          <!-- 字体大小控制 -->
+          <button @click.stop="decreaseFontSize(panel.id)" class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors" title="减小字体">
             <svg class="w-3 h-3 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
             </svg>
           </button>
-          <!-- 字体增大按钮 -->
-          <button
-            @click.stop="increaseFontSize(panel.id)"
-            class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors"
-            title="增大字体"
-          >
+          <button @click.stop="increaseFontSize(panel.id)" class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors" title="增大字体">
             <svg class="w-3 h-3 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
             </svg>
           </button>
-          <!-- 重新翻译按钮 -->
+          
+          <!-- 重新翻译 -->
           <button
             @click.stop="retranslate(panel)"
             class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors"
@@ -537,7 +584,8 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
-          <!-- 关闭按钮 -->
+          
+          <!-- 关闭 -->
           <button
             @click.stop="closePanel(panel.id)"
             class="p-1 hover:bg-gray-200/50 dark:hover:bg-[#3e3e42] rounded transition-colors"
@@ -552,13 +600,11 @@ onBeforeUnmount(() => {
       
       <!-- 内容区域 -->
       <div class="panel-content flex-1 overflow-y-auto p-3 cursor-auto select-text" @mousedown.stop>
-        <!-- 加载中状态 -->
         <div v-if="panel.isLoading" class="flex flex-col items-center justify-center py-6">
           <div class="loading-spinner mb-2"></div>
           <span class="text-gray-400 dark:text-gray-500 text-xs">翻译中...</span>
         </div>
 
-        <!-- 翻译内容 -->
         <div
           v-else
           class="translation-text text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
@@ -568,7 +614,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       
-      <!-- 调整大小的边框（非侧边栏模式） -->
+      <!-- 调整大小的边框 (TextPanel也允许调整) -->
       <template v-if="!panel.isSidebarDocked">
         <div class="resize-handle resize-w" @mousedown="startResize($event, panel.id, 'w')"></div>
         <div class="resize-handle resize-e" @mousedown="startResize($event, panel.id, 'e')"></div>
@@ -590,21 +636,18 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-/* 夜间模式 - 与Chat面板保持一致的深色背景 */
 .dark .translation-panel {
-  background: #1e1e1e; /* 与Chat一致的深色背景 */
+  background: #1e1e1e;
   border-color: #121726;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* 极简顶栏 - 低饱和度云雾般的灰蓝 */
 .panel-header {
   height: 24px;
   background: linear-gradient(to right, #e8eef3, #dfe6ed);
   border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-/* 夜间模式顶栏 - 与sidebar风格一致 */
 .dark .panel-header {
   background: #252526;
   border-bottom-color: #121726;
@@ -618,13 +661,9 @@ onBeforeUnmount(() => {
   border-color: rgba(140, 160, 180, 0.2);
 }
 
-.translation-panel.is-sidebar-docked {
-  border-radius: 0;
-  border-left: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.dark .translation-panel.is-sidebar-docked {
-  border-left-color: rgba(255, 255, 255, 0.08);
+/* 划词翻译面板特殊样式（可选） */
+.translation-panel.is-text-panel {
+    /* 例如稍微不同的边框颜色来区分？目前保持一致 */
 }
 
 .translation-panel.is-dragging {
@@ -647,88 +686,24 @@ onBeforeUnmount(() => {
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
-/* 滚动条 */
-.panel-content::-webkit-scrollbar {
-  width: 4px;
-}
+.panel-content::-webkit-scrollbar { width: 4px; }
+.panel-content::-webkit-scrollbar-track { background: transparent; }
+.panel-content::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+.panel-content::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.dark .panel-content::-webkit-scrollbar-thumb { background: #4b5563; }
+.dark .panel-content::-webkit-scrollbar-thumb:hover { background: #6b7280; }
 
-.panel-content::-webkit-scrollbar-track {
-  background: transparent;
-}
+.resize-handle { position: absolute; background: transparent; }
+.resize-w { left: 0; top: 24px; bottom: 6px; width: 4px; cursor: ew-resize; }
+.resize-e { right: 0; top: 24px; bottom: 6px; width: 4px; cursor: ew-resize; }
+.resize-s { bottom: 0; left: 6px; right: 6px; height: 4px; cursor: ns-resize; }
+.resize-sw { left: 0; bottom: 0; width: 8px; height: 8px; cursor: nesw-resize; }
+.resize-se { right: 0; bottom: 0; width: 8px; height: 8px; cursor: nwse-resize; }
+.resize-handle:hover { background: rgba(120, 140, 160, 0.1); }
 
-.panel-content::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 2px;
-}
-
-.panel-content::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
-
-.dark .panel-content::-webkit-scrollbar-thumb {
-  background: #4b5563;
-}
-
-.dark .panel-content::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
-}
-
-/* 调整大小边框 */
-.resize-handle {
-  position: absolute;
-  background: transparent;
-}
-
-.resize-w {
-  left: 0;
-  top: 24px;
-  bottom: 6px;
-  width: 4px;
-  cursor: ew-resize;
-}
-
-.resize-e {
-  right: 0;
-  top: 24px;
-  bottom: 6px;
-  width: 4px;
-  cursor: ew-resize;
-}
-
-.resize-s {
-  bottom: 0;
-  left: 6px;
-  right: 6px;
-  height: 4px;
-  cursor: ns-resize;
-}
-
-.resize-sw {
-  left: 0;
-  bottom: 0;
-  width: 8px;
-  height: 8px;
-  cursor: nesw-resize;
-}
-
-.resize-se {
-  right: 0;
-  bottom: 0;
-  width: 8px;
-  height: 8px;
-  cursor: nwse-resize;
-}
-
-.resize-handle:hover {
-  background: rgba(120, 140, 160, 0.1);
-}
-
-/* 吸附提示框 */
 .snap-hint {
   border: 2px dashed rgba(59, 130, 246, 0.6);
   border-radius: 6px;
@@ -736,45 +711,32 @@ onBeforeUnmount(() => {
   transition: all 0.15s ease;
   animation: snap-pulse 1s ease-in-out infinite;
 }
-
-@keyframes snap-pulse {
-  0%, 100% { opacity: 0.8; }
-  50% { opacity: 1; }
-}
+@keyframes snap-pulse { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
 
 .snap-hint-text {
-  position: absolute;
-  top: 50%;
-  left: 50%;
+  position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   padding: 4px 12px;
   background: rgba(59, 130, 246, 0.9);
   color: white;
-  font-size: 11px;
-  font-weight: 500;
-  border-radius: 4px;
-  white-space: nowrap;
+  font-size: 11px; font-weight: 500;
+  border-radius: 4px; white-space: nowrap;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
-/* 侧边栏吸附提示 */
 .sidebar-snap-hint {
   background: linear-gradient(to left, rgba(59, 130, 246, 0.15), transparent);
   border-left: 2px dashed rgba(59, 130, 246, 0.5);
 }
 
 .sidebar-hint-text {
-  position: absolute;
-  top: 50%;
-  right: 16px;
+  position: absolute; top: 50%; right: 16px;
   transform: translateY(-50%) rotate(-90deg);
   padding: 4px 12px;
   background: rgba(59, 130, 246, 0.9);
   color: white;
-  font-size: 11px;
-  font-weight: 500;
-  border-radius: 4px;
-  white-space: nowrap;
+  font-size: 11px; font-weight: 500;
+  border-radius: 4px; white-space: nowrap;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 </style>
