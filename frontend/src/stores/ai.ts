@@ -1,42 +1,66 @@
+/*
+----------------------------------------------------------------------
+                          上传PDF管理（AI 相关状态与会话）
+----------------------------------------------------------------------
+
+  说明：
+  - 本文件使用 Pinia 定义了一个名为 `ai` 的 store，用于管理与 PDF 相关的 AI 功能：
+    大纲（roadmap）、摘要（summary）、翻译（translation）以及基于 PDF 的聊天会话（chat sessions）。
+  - 主要职责包括：缓存会话（sessionStorage）、与后端同步会话列表/消息、管理当前会话状态、以及调用 AI 接口生成大纲。
+*/
+
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { Roadmap, Summary, Translation, ChatMessage, AiPanelTab } from '../types'
 import { aiApi, chatSessionApi } from '../api'
 
-// 聊天会话类型
+// -----------------------------
+// 会话类型定义（前端使用的格式）
+// -----------------------------
+// 注：后端返回的数据会被转换为此结构以便前端统一处理
 export interface ChatSession {
-  id: string
-  pdfId: string
-  title: string
-  messages: ChatMessage[]
-  createdAt: string
-  updatedAt: string
+  id: string            // 会话唯一 ID（优先使用后端 id，离线时前端可生成临时 id）
+  pdfId: string         // 关联的 PDF ID，用于按文档分组会话
+  title: string         // 会话标题（通常使用首条用户消息的前 30 字）
+  messages: ChatMessage[] // 消息数组（ChatMessage 在 types 中定义，包含 role/content/timestamp 等）
+  createdAt: string     // 会话创建时间（ISO 字符串）
+  updatedAt: string     // 会话更新时间（ISO 字符串）
 }
 
+// -----------------------------
+// Pinia store: useAiStore
+// -----------------------------
 export const useAiStore = defineStore('ai', () => {
-  const activeTab = ref<AiPanelTab['id']>('roadmap')
-  const isPanelHidden = ref(false)
+  // UI 状态
+  const activeTab = ref<AiPanelTab['id']>('roadmap') // 当前激活面板（roadmap/summary/translation）
+  const isPanelHidden = ref(false) // 面板是否被折叠隐藏
 
-  const roadmap = ref<Roadmap | null>(null)
-  const summary = ref<Summary | null>(null)
-  const currentTranslation = ref<Translation | null>(null)
-  const chatMessages = ref<ChatMessage[]>([])
+  // 数据状态
+  const roadmap = ref<Roadmap | null>(null) // 当前 PDF 的大纲（缓存）
+  const summary = ref<Summary | null>(null) // 文档摘要
+  const currentTranslation = ref<Translation | null>(null) // 当前选中的翻译结果
+  const chatMessages = ref<ChatMessage[]>([]) // 当前会话的消息（显示在聊天窗口）
   
-  // 聊天会话管理
-  const currentSessionId = ref<string | null>(null)
-  const chatSessions = ref<ChatSession[]>([])
+  // 会话管理
+  const currentSessionId = ref<string | null>(null) // 当前激活的会话 ID（null 表示未选择会话）
+  const chatSessions = ref<ChatSession[]>([]) // 所有会话（可能包含来自不同 PDF 的会话）
 
+  // 加载状态标志，用于显示 loading 指示器
   const isLoadingRoadmap = ref(false)
   const isLoadingSummary = ref(false)
   const isLoadingTranslation = ref(false)
   const isLoadingChat = ref(false)
 
-  // 从 sessionStorage 加载聊天会话缓存（关闭浏览器后自动清除）
+  // -----------------------------
+  // 本地缓存（sessionStorage）相关逻辑
+  // -----------------------------
+  // 从 sessionStorage 加载聊天会话缓存（仅在标签页/窗口内有效，浏览器关闭后清除）
   function loadSessionsFromStorage() {
     try {
       const stored = sessionStorage.getItem('chatSessions')
       if (stored) {
         const sessions = JSON.parse(stored)
+        // 将序列化后的 timestamp 恢复为 Date 对象
         chatSessions.value = sessions.map((s: any) => ({
           ...s,
           messages: s.messages.map((m: any) => ({
@@ -46,11 +70,12 @@ export const useAiStore = defineStore('ai', () => {
         }))
       }
     } catch (error) {
+      // 加载失败时记录错误，不让异常中断应用
       console.error('Failed to load chat sessions from cache:', error)
     }
   }
 
-  // 保存聊天会话到 sessionStorage 缓存
+  // 将当前会话数组保存到 sessionStorage（字符串化）
   function saveSessionsToStorage() {
     try {
       sessionStorage.setItem('chatSessions', JSON.stringify(chatSessions.value))
@@ -59,31 +84,35 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  // 监听会话变化并自动缓存
+  // 监听 chatSessions 的变化并自动触发保存（使用 deep 递归监听以捕获内部数组/对象变更）
   watch(chatSessions, () => {
     saveSessionsToStorage()
   }, { deep: true })
 
-  // 从后端加载指定PDF的会话列表
+  // -----------------------------
+  // 与后端交互：加载会话列表
+  // -----------------------------
+  // 可传入 pdfId 指定只加载某个 PDF 的会话；否则加载后端返回的所有会话
   async function loadSessionsFromBackend(pdfId?: string) {
     try {
       const response = await chatSessionApi.listSessions(pdfId)
       if (response.success && response.sessions) {
-        // 将后端数据转换为前端格式
+        // 将后端数据转换为前端 ChatSession 格式（消息列表单独加载，避免一次性拉取大量消息）
         const backendSessions = response.sessions.map(s => ({
           id: s.id,
           pdfId: s.pdfId || '',
           title: s.title,
-          messages: [] as ChatMessage[], // 消息需要单独加载
+          messages: [] as ChatMessage[], // 延迟加载消息
           createdAt: s.createdAt,
           updatedAt: s.updatedAt
         }))
 
         if (pdfId) {
-          // 如果指定了 pdfId，合并会话（替换该PDF的会话，保留其他PDF的会话）
+          // 如果指定了 pdfId，则用后端返回的该 PDF 的会话替换本地同一 pdfId 的会话，保留其它 PDF 的会话
           const otherSessions = chatSessions.value.filter(s => s.pdfId !== pdfId)
           chatSessions.value = [...backendSessions, ...otherSessions]
         } else {
+          // 否则直接使用后端返回的会话列表
           chatSessions.value = backendSessions
         }
 
@@ -91,17 +120,19 @@ export const useAiStore = defineStore('ai', () => {
       }
     } catch (error) {
       console.error('Failed to load sessions from backend:', error)
-      // 如果后端加载失败，回退到缓存
+      // 后端不可用时，回退到本地缓存以保证离线体验
       loadSessionsFromStorage()
     }
   }
 
-  // 从后端加载指定会话的消息
+  // -----------------------------
+  // 与后端交互：加载指定会话的消息列表
+  // -----------------------------
   async function loadSessionMessagesFromBackend(sessionId: string) {
     try {
       const response = await chatSessionApi.getSessionMessages(sessionId)
       if (response.success && response.messages) {
-        // 将后端消息格式转换为前端格式
+        // 转换后端消息为前端 ChatMessage 格式并把时间戳转为 Date
         const messages: ChatMessage[] = response.messages.map(m => ({
           id: String(m.id),
           role: m.role as 'user' | 'assistant',
@@ -110,17 +141,18 @@ export const useAiStore = defineStore('ai', () => {
           citations: m.citations || []
         }))
 
-        // 更新会话的消息列表
+        // 更新对应会话的 messages
         const session = chatSessions.value.find(s => s.id === sessionId)
         if (session) {
           session.messages = messages
         }
 
-        // 如果是当前会话，更新 chatMessages
+        // 如果当前正在查看该会话，则更新 chatMessages（聊天窗口显示）
         if (currentSessionId.value === sessionId) {
           chatMessages.value = messages
         }
 
+        // 同步缓存
         saveSessionsToStorage()
         console.log(`Loaded ${messages.length} messages for session: ${sessionId}`)
         return messages
@@ -131,51 +163,57 @@ export const useAiStore = defineStore('ai', () => {
     return []
   }
 
-  // 初始化时从缓存加载（后端加载由组件在PDF变化时触发）
+  // 组件初始化时尝试从本地缓存加载（真正从后端加载会话在 PDF 切换时由组件触发）
   loadSessionsFromStorage()
 
+  // -----------------------------
+  // 面板标签定义（用于 UI）
+  // -----------------------------
   const tabs: AiPanelTab[] = [
     { id: 'roadmap', label: 'Roadmap', icon: 'map' },
     { id: 'summary', label: 'Summary', icon: 'document' },
     { id: 'translation', label: 'Translation', icon: 'translate' },
   ]
 
-  // 设置当前激活的tab
+  // 切换当前激活的 tab
   function setActiveTab(tabId: AiPanelTab['id']) {
     activeTab.value = tabId
   }
 
-  // 隐藏/显示面板
+  // 折叠/展开侧边面板
   function togglePanel() {
     isPanelHidden.value = !isPanelHidden.value
   }
 
-  // 设置摘要
+  // 更新摘要
   function setSummary(newSummary: Summary) {
     summary.value = newSummary
   }
 
-  // 设置翻译
+  // 更新翻译结果
   function setTranslation(translation: Translation) {
     currentTranslation.value = translation
   }
 
-  // 添加聊天消息
+  // -----------------------------
+  // 聊天消息操作
+  // -----------------------------
+  // 添加一条消息到当前聊天（不含 id/timestamp -- 由此函数生成）
   function addChatMessage(message: Omit<ChatMessage, 'id' | 'timestamp'>) {
     const newMessage = {
       ...message,
-      id: crypto.randomUUID(),
-      timestamp: new Date(),
+      id: crypto.randomUUID(),      // 使用 Web Crypto API 生成唯一 id
+      timestamp: new Date(),        // 生成消息时间戳
     }
     chatMessages.value.push(newMessage)
     
-    // 如果有当前会话,更新会话的消息列表
+    // 如果当前有会话，更新该会话的消息数组并刷新 updatedAt
     if (currentSessionId.value) {
       const session = chatSessions.value.find(s => s.id === currentSessionId.value)
       if (session) {
         session.messages = [...chatMessages.value]
         session.updatedAt = new Date().toISOString()
-        // 更新标题(使用第一条用户消息)
+        // 如果会话标题为空或默认为 '新对话'，则用第一条用户消息生成简短标题
         if (!session.title || session.title === '新对话') {
           const firstUserMsg = session.messages.find(m => m.role === 'user')
           if (firstUserMsg) {
@@ -186,20 +224,23 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  // 清空聊天消息
+  // 清空当前聊天窗口并取消选中会话
   function clearChat() {
     chatMessages.value = []
     currentSessionId.value = null
   }
   
-  // 创建新会话
+  // -----------------------------
+  // 会话创建 / 加载 / 删除
+  // -----------------------------
+  // 创建新会话：优先调用后端创建，会返回后端 sessionId；若失败则降级为前端生成临时 id
   async function createNewSession(pdfId: string): Promise<string> {
     try {
-      // 调用后端生成 Session ID
+      // 请求后端创建会话
       const data = await chatSessionApi.createSession()
       
       const newSession: ChatSession = {
-        id: data.sessionId, // 使用后端 ID
+        id: data.sessionId, // 使用后端返回的 ID
         pdfId,
         title: data.title || '新对话',
         messages: [],
@@ -207,13 +248,14 @@ export const useAiStore = defineStore('ai', () => {
         updatedAt: new Date().toISOString()
       }
       
+      // 将新会话插入到本地会话列表（靠前显示）并设置为当前会话
       chatSessions.value.unshift(newSession)
       currentSessionId.value = data.sessionId
       chatMessages.value = []
       return data.sessionId
     } catch (error) {
       console.error('Failed to create session on backend:', error)
-      // 降级处理：如果在离线模式或后端挂了，前端生成临时ID
+      // 后端创建失败时，前端生成临时 ID 以继续会话（离线体验）
       const tempId = crypto.randomUUID()
       currentSessionId.value = tempId
       chatMessages.value = []
@@ -221,13 +263,13 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
   
-  // 加载会话（从后端获取消息）
+  // 加载某个会话：如果本地没有消息，则从后端拉取；否则直接使用本地消息
   async function loadSession(sessionId: string) {
     const session = chatSessions.value.find(s => s.id === sessionId)
     if (session) {
       currentSessionId.value = sessionId
 
-      // 如果本地没有消息，从后端加载
+      // 如果没有本地消息，则从后端加载（并显示 loading）
       if (session.messages.length === 0) {
         isLoadingChat.value = true
         try {
@@ -236,24 +278,23 @@ export const useAiStore = defineStore('ai', () => {
           isLoadingChat.value = false
         }
       } else {
+        // 有本地消息则直接赋值给 chatMessages（更新界面）
         chatMessages.value = [...session.messages]
       }
     }
   }
   
-  // 获取当前 PDF 的所有会话
+  // 根据 pdfId 筛选出该文档的所有会话
   function getSessionsByPdfId(pdfId: string): ChatSession[] {
     return chatSessions.value.filter(s => s.pdfId === pdfId)
   }
   
-  // 删除会话
+  // 删除会话：调用后端接口删除，同时从本地移除；若后端返回 404（会话不存在）也会本地删除
   async function deleteSession(sessionId: string) {
     try {
-      // 调用后端 API 删除会话
       const response = await chatSessionApi.deleteSession(sessionId)
       
       if (response.success) {
-        // 删除成功后，从本地状态中移除
         const index = chatSessions.value.findIndex(s => s.id === sessionId)
         if (index !== -1) {
           chatSessions.value.splice(index, 1)
@@ -261,13 +302,12 @@ export const useAiStore = defineStore('ai', () => {
             clearChat()
           }
         }
-        // 缓存会通过 watch 自动更新
         console.log(`Session ${sessionId} deleted. ${response.deletedMessages} messages removed.`)
       }
     } catch (error: any) {
       console.error('Failed to delete session:', error)
       
-      // 如果后端返回 404（会话不存在），也从本地删除
+      // 如果后端返回 404（会话不存在），从本地也删除以保持一致性
       if (error?.response?.status === 404) {
         console.warn(`Session ${sessionId} not found in backend, removing from cache`)
         const index = chatSessions.value.findIndex(s => s.id === sessionId)
@@ -278,12 +318,16 @@ export const useAiStore = defineStore('ai', () => {
           }
         }
       } else {
+        // 其他错误向上抛出以便上层处理（比如显示错误通知）
         throw error
       }
     }
   }
 
-  // 重置所有数据
+  // -----------------------------
+  // 文档切换 / 重置
+  // -----------------------------
+  // 当加载新文档时需要重置与上一个文档相关的状态
   function resetForNewDocument() {
     roadmap.value = null
     summary.value = null
@@ -292,19 +336,22 @@ export const useAiStore = defineStore('ai', () => {
     currentSessionId.value = null
   }
 
-  // 设置大纲
+  // 更新 roadmap
   function setRoadmap(newRoadmap: Roadmap) {
     roadmap.value = newRoadmap
   }
 
-  // 获取大纲
+  // -----------------------------
+  // 与 AI 接口相关：生成并缓存大纲（roadmap）
+  // -----------------------------
   async function fetchRoadmap(pdfId: string) {
-    if (roadmap.value) return // Return cached version if exists
+    // 已经缓存则直接返回，避免重复请求
+    if (roadmap.value) return
 
     isLoadingRoadmap.value = true
     try {
       const data = await aiApi.generateRoadmap(pdfId)
-      // Ensure nodes have positions for Vue Flow
+      // 为了在 Vue Flow 中显示，需要确保每个节点有 position；这里提供简单自动布局
       const processedRoadmap = layoutNodes(data)
       setRoadmap(processedRoadmap)
     } catch (error) {
@@ -314,9 +361,10 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  // Simple auto-layout helper (in a real app, use dagre or elkjs)
+  // 简单的自动布局函数：为没有 position 的节点生成网格布局
+  // 提示：真实项目中建议使用更专业的布局库（dagre/elkjs）以获得更好的可视化效果
   function layoutNodes(data: Roadmap): Roadmap {
-    // Check if positions already exist
+    // 如果节点已经有明确 position，则保留原样
     if (data.nodes.some(n => n.position && (n.position.x !== 0 || n.position.y !== 0))) {
         return data;
     }
@@ -324,11 +372,14 @@ export const useAiStore = defineStore('ai', () => {
     const nodes = data.nodes.map((node, index) => ({
       ...node,
       position: { x: (index % 3) * 250, y: Math.floor(index / 3) * 150 },
-      data: node.data // preserve data
+      data: node.data // 保持原有 data
     }))
     return { ...data, nodes }
   }
 
+  // -----------------------------
+  // 对外暴露的状态与方法
+  // -----------------------------
   return {
     activeTab,
     isPanelHidden,

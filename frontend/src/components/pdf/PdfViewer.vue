@@ -6,345 +6,194 @@
 */ 
 
 // ------------------------- 导入依赖与组件 -------------------------
-// 引入 Vue 核心 API、第三方工具及子组件
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue' 
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue' 
 import { useDebounceFn } from '@vueuse/core' 
 import {
   getDocument,
   GlobalWorkerOptions,
-  renderTextLayer,
   type PDFDocumentProxy,
   type RenderTask,
 } from 'pdfjs-dist' 
 import 'pdfjs-dist/web/pdf_viewer.css' 
 
-// 引入 pdf.js worker
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url' 
 import { usePdfStore } from '../../stores/pdf' 
+import { useTranslationStore } from '../../stores/translation'
 import { useLibraryStore } from '../../stores/library' 
 import { notesApi, type Note } from '../../api' 
+import { clamp } from '@vueuse/core'
+
+// 导入拆分出的模块
+import type { PageRef, PageSize } from '../../types/pdf'
+import {
+  getPageSize,
+  getScaledPageSize,
+  getPageTop,
+  getPageAtY,
+  findPageElement,
+  getHighlightColor,
+  getBoundingBoxStyle,
+  getParagraphMarkerStyle,
+  CLICK_TIME_THRESHOLD,
+  DRAG_DISTANCE_THRESHOLD
+} from '../../utils/PdfHelper'
+import { applyInterimScaleToPage } from '../../utils/PdfRender'
+import { useZoomAnchor } from '../../composables/useZoomAnchor'
+import { usePageRender } from '../../composables/usePageRender'
+import { usePdfSelection } from '../../composables/usePdfSelection'
+import { useNotesLookup } from '../../composables/useNotesLookup'
+
 import TextSelectionTooltip from './TextSelectionTooltip.vue' 
-import TranslationPanelMulti from './TranslationPanelMulti.vue' 
+import TranslationPanel from './TranslationPanel.vue' 
 import NotePreviewCard from './NotePreviewCard.vue' 
 
-GlobalWorkerOptions.workerSrc = pdfWorker // 设置 pdf.js 全局 worker 路径
-
-// 每一页的元素定义
-// 包含 页面容器、Canvas 层、Text 层和 Link 层
-type PageRef = {
-  container: HTMLElement // 页面容器元素引用
-  canvas: HTMLCanvasElement // 页面绘制的画布引用
-  textLayer: HTMLDivElement // 文字图层容器引用
-  linkLayer: HTMLDivElement // 链接图层容器引用
-  highlightLayer: HTMLDivElement // 高亮图层容器引用
-}
+GlobalWorkerOptions.workerSrc = pdfWorker
 
 // ------------------------- 初始化 store 实例 -------------------------
-// 获取 store 实例
 const pdfStore = usePdfStore() 
 const libraryStore = useLibraryStore() 
+const translationStore = useTranslationStore()
 
 // ------------------------- 初始化 PDF 状态与引用 -------------------------
-// 滚动条
 const containerRef = ref<HTMLElement | null>(null) 
-
-// 当前 PDF 文档实例
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null) 
-
-// 页面序号集合
 const pageNumbers = ref<number[]>([]) 
-
-// 每页元素引用集合
 const pageRefs = new Map<number, PageRef>() 
-
-// 每页渲染任务集合
 const renderTasks = new Map<number, RenderTask>() 
-
-// 当前可见页面集合
-const visiblePages = new Set<number>()
-
-// 缩放后需要重绘的页面集合
 const pagesNeedingRefresh = new Set<number>()
-
-// 每页最后一次渲染使用的缩放比例
 const lastRenderedScale = new Map<number, number>() 
 
-// 缩放锚点：包含页码、垂直/水平比例、以及目标回复的屏幕坐标（可选）
-type ZoomAnchor = {
-  page: number
-  ratioY: number
-  ratioX: number
-  destX?: number // 鼠标缩放时的目标屏幕X
-  destY?: number // 鼠标缩放时的目标屏幕Y
-}
+const pageSizesConstant = ref<PageSize | null>(null)
+const pageSizesArray = ref<PageSize[] | null>(null)
+const pageHeightAccumulator = ref<number[]>([])
 
-// 当前待处理的缩放锚点
-const pendingAnchor = ref<ZoomAnchor | null>(null)
-
-// 是否指针悬停在 PDF 区域
+const renderedPages = ref<Set<number>>(new Set())
+const isZooming = ref(false)
 const isPointerOverPdf = ref(false)
 
-// 是否正在缩放
-const isZooming = ref(false)
+const showTooltip = ref(false)
+const tooltipPosition = ref({ x: 0, y: 0 })
 
-// 页面尺寸预加载（用于快速滚动时的占位）
-// 优化：如果是常数（大部分论文），使用 pageSizesConstant；否则使用 pageSizesArray 并配合 accumulatedHeights 进行二分查找
-const pageSizesConstant = ref<{ width: number; height: number } | null>(null)
-const pageSizesArray = ref<{ width: number; height: number }[] | null>(null)
-const pageHeightAccumulator = ref<number[]>([]) // 前缀和数组，用于二分查找
+const highlightsAtCurrentPoint = ref<ReturnType<typeof pdfStore.getHighlightsAtPoint>>([])
+const currentHighlightIndex = ref(0)
 
-// 已渲染完成的页面集合
-// TODO: 渲染完成的难道不应该是连续的吗？记录两端即可
-const renderedPages = ref<Set<number>>(new Set())
+const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
+const linksDisabled = ref(false)
 
-// // ------------------------- 事件监听与响应式处理 -------------------------
-// 缩放防抖处理，确保缩放停止后才进行重渲染
+const preloadProgress = ref(0)
+const isPreloading = ref(false)
+let preloadAbortController: AbortController | null = null
+
+let resizeObserver: ResizeObserver | null = null
+let resizeTimeout: ReturnType<typeof setTimeout> | null = null
+const isResizing = ref(false)
+
+const notesCache = ref<Note[]>([])
+
+// Zoom 节流相关
+let zoomRafId: number | null = null
+let pendingZoomDelta = 0
+let lastZoomEvent: WheelEvent | null = null
+
+// ------------------------- 初始化 composables -------------------------
+const scaleRef = computed(() => pdfStore.scale)
+const {
+  pendingAnchor,
+  captureCenterAnchor,
+  restoreAnchor,
+  setPendingAnchor,
+  clearPendingAnchor
+} = useZoomAnchor(
+  containerRef,
+  pageNumbers,
+  pageRefs,
+  pageSizesConstant,
+  pageHeightAccumulator,
+  scaleRef
+)
+
+const {
+  updateVisiblePages,
+  renderPage,
+  scrollToPage
+} = usePageRender(
+  containerRef,
+  pdfDoc,
+  pageNumbers,
+  pageRefs,
+  renderTasks,
+  renderedPages,
+  pagesNeedingRefresh,
+  lastRenderedScale,
+  pageSizesConstant,
+  pageSizesArray,
+  pageHeightAccumulator,
+  scaleRef,
+  isZooming
+)
+
+const {
+  handleTextSelection,
+} = usePdfSelection({
+  onTextSelected: (text, position, page, rects) => {
+    pdfStore.setSelectedText(text, position)
+    pdfStore.setSelectionInfo({ page, rects })
+    tooltipPosition.value = position
+    showTooltip.value = true
+  },
+  onHighlightSelected: (highlight, position) => {
+    pdfStore.selectHighlight(highlight, position)
+  },
+  onClickOutside: handleClickOutside,
+  getHighlightsAtPoint: pdfStore.getHighlightsAtPoint.bind(pdfStore)
+})
+
+const {
+  loadNotesCache,
+  handleCtrlClick
+} = useNotesLookup({
+  getNotes: notesApi.getNotes.bind(notesApi),
+  getCurrentDocumentId: () => libraryStore.currentDocument?.id,
+  onNoteFound: (note, position) => {
+    pdfStore.closeNotePreviewCard()
+    pdfStore.openNotePreviewCard(
+      { id: note.id, title: note.title, content: note.content },
+      position
+    )
+  }
+})
+
+// ------------------------- 事件监听与响应式处理 -------------------------
 const settleZooming = useDebounceFn(() => {
   isZooming.value = false
   updateVisiblePages()
   startBackgroundPreload()
 }, 180)
 
-const showTooltip = ref(false) // 是否显示选中文本的工具提示
-const tooltipPosition = ref({ x: 0, y: 0 }) // 工具提示的坐标
-
-// 后台预加载相关
-const preloadProgress = ref(0) // 预加载进度 (0-100)
-const isPreloading = ref(false) // 是否正在预加载
-let preloadAbortController: AbortController | null = null // 用于取消预加载
-
-// 点击/拖动检测相关
-const mouseDownInfo = ref<{ x: number; y: number; time: number } | null>(null)
-const CLICK_TIME_THRESHOLD = 300 // 点击时间小于此值视为点击（毫秒）
-const DRAG_DISTANCE_THRESHOLD = 6 // 鼠标移动超过此像素数视为拖动（px）
-const linksDisabled = ref(false) // 拖拽选中时临时关闭链接点击，避免 selection 终点落在 linkLayer
-
-// 循环选择高亮相关
-const highlightsAtCurrentPoint = ref<ReturnType<typeof pdfStore.getHighlightsAtPoint>>([])
-const currentHighlightIndex = ref(0)
-
-// 容器尺寸变化监听（用于面板收起/展开时保持页面位置）
-let resizeObserver: ResizeObserver | null = null
-let resizeTimeout: ReturnType<typeof setTimeout> | null = null
-const isResizing = ref(false)
-
-// 笔记缓存（用于 Ctrl+点击快速查找）
-const notesCache = ref<Note[]>([])
-const isLoadingNotes = ref(false)
-
-// ------------------------- 辅助计算函数 -------------------------
-const PAGE_GAP = 16 // space-y-4 = 16px
-const CONTAINER_PADDING = 16 // p-4 = 16px
-
-function getPageSize(pageNumber: number) {
-  if (pageSizesConstant.value) {
-    return pageSizesConstant.value
-  }
-  if (pageSizesArray.value) {
-    return pageSizesArray.value[pageNumber - 1]
-  }
-  return { width: 612, height: 792 }
-}
-
-// 获取指定页面的缩放后尺寸
-function getScaledPageSize(pageNumber: number) {
-  const size = getPageSize(pageNumber) || { width: 612, height: 792 }
-
-  return {
-    width: Math.floor(size.width * pdfStore.scale),
-    height: Math.floor(size.height * pdfStore.scale)
-  }
-}
-
-// 获取页面顶部距离容器顶部的距离 (px)
-function getPageTop(pageNumber: number) {
-  const index = pageNumber - 1
-  if (index < 0) return CONTAINER_PADDING
-  
-  const scale = pdfStore.scale
-  
-  // 常数高度情况 - O(1)
-  if (pageSizesConstant.value) {
-    const h = pageSizesConstant.value.height * scale
-    // 保证计算出来的 top 为整数像素，避免缩放后累积的浮点误差
-    return Math.round(CONTAINER_PADDING + index * (h + PAGE_GAP))
-  }
-  
-  // 变长高度情况 - O(1) 查表
-  if (pageHeightAccumulator.value.length > index) {
-    const accH = pageHeightAccumulator.value[index] ?? 0
-    // 同样对变长高度情况取整，保证逻辑上的页 top 与 DOM 中的 offsetTop 对齐
-    return Math.round(CONTAINER_PADDING + accH * scale + index * PAGE_GAP)
-  }
-  
-  return CONTAINER_PADDING
-}
-
-// 根据垂直滚动位置查找页码
-function getPageAtY(y: number): number {
-  const count = pageNumbers.value.length
-  if (count === 0) return 1
-  
-  const scale = pdfStore.scale
-  const yAdjusted = y - CONTAINER_PADDING // Adjust for container padding
-  
-  if (yAdjusted < 0) return 1
-
-  // 常数PDF高度情况 - 直接计算 O(1)
-  if (pageSizesConstant.value) {
-    const itemHeight = pageSizesConstant.value.height * scale + PAGE_GAP
-    const index = Math.floor(yAdjusted / itemHeight)
-    return Math.max(1, Math.min(count, index + 1))
-  }
-  
-  // 变长PDF高度情况 - 二分查找 O(log N)
-  let low = 1, high = count
-  let result = 1
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2)
-    const top = getPageTop(mid)
-    
-    if (y >= top) {
-      result = mid
-      low = mid + 1
-    } else {
-      high = mid - 1
-    }
-  }
-  return result
-}
-
-// 页面是否已渲染
-function isPageRendered(pageNumber: number) {
+// ------------------------- 辅助函数 -------------------------
+function isPageRendered(pageNumber: number): boolean {
   return renderedPages.value.has(pageNumber)
 }
 
-// ------------------------- 缩放锚点与位置恢复逻辑 -------------------------
-// 捕获当前的中心锚点，用于缩放后恢复位置
-// mousePos: 可选的鼠标位置（相对于视口坐标）
-function captureCenterAnchor(mousePos?: { x: number; y: number }): ZoomAnchor | null {
-  // 获取滚动容器引用
-  const container = containerRef.value
-  if (!container || !pageNumbers.value.length) return null
-
-  // 返回该容器相对于视口（viewport）的矩形（DOMRect）
-  const rect = container.getBoundingClientRect()
-  
-  // 目标内容坐标（相对于容器内容左上角 - 包含滚动距离）
-  const targetX = mousePos 
-    ? (mousePos.x - rect.left + container.scrollLeft) 
-    : (container.scrollLeft + container.clientWidth / 2)
-    
-  const targetY = mousePos 
-    ? (mousePos.y - rect.top + container.scrollTop) 
-    : (container.scrollTop + container.clientHeight / 2)
-
-  let anchor: ZoomAnchor | null = null // 初始化锚点变量
-
-  // 使用计算/二分法快速定位页面
-  const page = getPageAtY(targetY)
-  
-  if (page) {
-    const refs = pageRefs.get(page)
-    const size = getScaledPageSize(page)
-    
-    if (refs) {
-        // 使用实际 DOM 位置（最准确）
-        const pageTop = refs.container.offsetTop
-        const pageLeft = refs.container.offsetLeft
-        const height = refs.container.offsetHeight || size.height
-        const width = refs.container.offsetWidth || size.width
-        
-        anchor = { 
-          page, 
-          ratioY: (targetY - pageTop) / height,
-          ratioX: (targetX - pageLeft) / width,
-          destX: mousePos ? mousePos.x - rect.left : undefined,
-          destY: mousePos ? mousePos.y - rect.top : undefined
-        }
-    } else {
-        // 如果页面未渲染（例如在虚拟列表中），使用计算位置作为兜底
-        const calculatedTop = getPageTop(page)
-        
-        anchor = {
-           page,
-           ratioY: (targetY - calculatedTop) / size.height,
-           ratioX: 0.5, // 默认水平居中
-           destX: mousePos ? mousePos.x - rect.left : undefined,
-           destY: mousePos ? mousePos.y - rect.top : undefined
-        }
-    }
-  }
-
-  return anchor
-}
-
-// 恢复缩放前的位置锚点
-function restoreAnchor(anchor: ZoomAnchor) {
-  const container = containerRef.value
-  if (!container) return
-
-  const refs = pageRefs.get(anchor.page)
-  if (!refs) {
-    nextTick(() => {
-      if (pendingAnchor.value) {
-        restoreAnchor(pendingAnchor.value)
-      }
-    })
-    return
-  }
-
-  const height = refs.container.offsetHeight || refs.container.clientHeight
-  const width = refs.container.offsetWidth || refs.container.clientWidth
-  if (!height) return
-
-  // 计算原来那个内容点现在的位置
-  const currentContentY = refs.container.offsetTop + anchor.ratioY * height
-  const currentContentX = refs.container.offsetLeft + anchor.ratioX * width
-  
-  let top = 0
-  let left = 0
-  
-  if (anchor.destX !== undefined && anchor.destY !== undefined) {
-      // 鼠标缩放恢复模式：让内容点回到屏幕上的 dest 位置
-      top = currentContentY - anchor.destY
-      left = currentContentX - anchor.destX
-  } else {
-      // 中心缩放恢复模式：让内容点回到视口中心
-      top = currentContentY - container.clientHeight / 2
-      left = currentContentX - container.clientWidth / 2
-  }
-
-  // 吸附到整数像素，避免亚像素渲染导致模糊
-  container.scrollTo({
-    top: Math.round(top),
-    left: Math.round(left),
-    behavior: 'instant' as ScrollBehavior
-  })
-}
-
 // ------------------------- 引用处理与资源管理 -------------------------
-// 处理页面容器的引用挂载
 function handlePageContainerRef(
-  pageNumber: number, // 当前页码
-  ref: Element | ComponentPublicInstance | null, // Vue 传入的泛型引用
-  _refs?: Record<string, Element | ComponentPublicInstance> // 备用的 refs 对象占位
+  pageNumber: number,
+  el: Element | { $el: Element } | null
 ) {
-  const el = ref instanceof HTMLElement ? ref : null // 仅当 ref 为原生元素时才使用
-  setPageRef(pageNumber, el) // 将合法引用交给内部处理
+  const htmlEl = el instanceof HTMLElement ? el : null
+  setPageRef(pageNumber, htmlEl)
 }
 
-// 缓存页面相关的 DOM 引用
 function setPageRef(pageNumber: number, el: HTMLElement | null) {
   if (!el) {
-    pageRefs.delete(pageNumber) // 若元素不存在则移除缓存
+    pageRefs.delete(pageNumber)
     return
   }
 
-  const canvas = el.querySelector('canvas') // 查找页面对应的画布
-  const textLayer = el.querySelector('.textLayer') // 查找页面对应的文字图层
-  const linkLayer = el.querySelector('.linkLayer') // 查找页面对应的链接图层
-  const highlightLayer = el.querySelector('.highlightLayer') // 查找页面对应的高亮图层
+  const canvas = el.querySelector('canvas')
+  const textLayer = el.querySelector('.textLayer')
+  const linkLayer = el.querySelector('.linkLayer')
+  const highlightLayer = el.querySelector('.highlightLayer')
 
   if (
     canvas instanceof HTMLCanvasElement &&
@@ -353,100 +202,441 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
     highlightLayer instanceof HTMLDivElement
   ) {
     pageRefs.set(pageNumber, {
-      container: el, // 存储页面容器
-      canvas, // 存储画布引用
-      textLayer, // 存储 Text Layer 引用
-      linkLayer, // 存储 Link Layer 引用
-      highlightLayer // 存储高亮层引用
+      container: el,
+      canvas,
+      textLayer,
+      linkLayer,
+      highlightLayer
     })
   }
 }
 
 // ------------------------- 渲染核心与监听调度 -------------------------
-// 核心渲染逻辑：仅渲染可见区域页面，大幅提升长文档性能
-const updateVisiblePages = useDebounceFn(() => {
-  // 如果容器或 PDF 文档不存在，则返回
-  if (!containerRef.value || !pdfDoc.value) return
+const handleScroll = useDebounceFn(() => {
+  if (!containerRef.value) return
 
-  const container = containerRef.value
-  // 使用 scrollTop 而不是 getBoundingClientRect 以避免重排
-  const scrollTop = container.scrollTop
-  const clientHeight = container.clientHeight
-  const buffer = 500 // 视口上下预加载缓冲区 (加大缓冲区以提升流畅度)
+  updateVisiblePages()
 
-  // 计算可见范围内的起始和结束页码
-  const startY = Math.max(0, scrollTop - buffer)
-  const endY = scrollTop + clientHeight + buffer
-  
-  const startPage = getPageAtY(startY)
-  const endPage = getPageAtY(endY)
+  const scrollTop = containerRef.value.scrollTop
+  const p = getPageAtY(
+    scrollTop,
+    pageNumbers.value.length,
+    pdfStore.scale,
+    pageSizesConstant.value,
+    pageHeightAccumulator.value
+  )
 
-  const newVisiblePages = new Set<number>()
-  
-  // 仅遍历需要在视口内的页面
-  for (let p = startPage; p <= endPage; p++) {
-    if (p > pdfStore.totalPages) break
-    newVisiblePages.add(p)
-    
-    const alreadyRendered = renderedPages.value.has(p)
-    const needsRefresh = pagesNeedingRefresh.has(p)
-    const shouldRenderNow = !alreadyRendered || (!isZooming.value && needsRefresh)
+  let nearestPage = p
+  const minDistance = Math.abs(getPageTop(p, pdfStore.scale, pageSizesConstant.value, pageHeightAccumulator.value) - scrollTop)
 
-    // 如果之前未渲染或（缩放后）需要重绘且已结束缩放，则触发渲染
-    // 注意：如果是虚拟列表，这里还需要确保 DOM 元素已挂载
-    // 当前实现默认挂载所有空 div，所以没问题
-    if (shouldRenderNow && !renderTasks.has(p)) {
-      renderPage(p, { preserveContent: alreadyRendered })
-      pagesNeedingRefresh.delete(p)
+  if (p < pdfStore.totalPages) {
+    const nextP = p + 1
+    const distNext = Math.abs(getPageTop(nextP, pdfStore.scale, pageSizesConstant.value, pageHeightAccumulator.value) - scrollTop)
+    if (distNext < minDistance) {
+      nearestPage = nextP
     }
   }
 
-  visiblePages.clear()
-  newVisiblePages.forEach(p => visiblePages.add(p))
-}, 100)
+  // 仅更新页码显示，不触发滚动对齐
+  if (nearestPage !== pdfStore.currentPage && nearestPage <= pdfStore.totalPages) {
+    lastUserTriggeredPage = nearestPage
+    pdfStore.goToPage(nearestPage)
+  }
+}, 50)
 
-// 监听当前 PDF 地址的变化
+// ------------------------- PDF 文档加载与预加载策略 -------------------------
+async function loadPdf(url: string) {
+  cleanup()
+  pdfStore.isLoading = true
+
+  const loadingTask = getDocument({
+    url,
+    cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+    cMapPacked: true
+  })
+
+  const pdf = await loadingTask.promise
+  pdfDoc.value = pdf
+  pdfStore.setTotalPages(pdf.numPages)
+  
+  if (libraryStore.currentDocumentId) {
+    libraryStore.updateDocumentPageCount(libraryStore.currentDocumentId, pdf.numPages)
+  }
+
+  await preloadPageSizes(pdf)
+  pageNumbers.value = Array.from({ length: pdf.numPages }, (_, index) => index + 1)
+
+  pdfStore.isLoading = false
+  await nextTick()
+
+  updateVisiblePages()
+  setTimeout(() => startBackgroundPreload(), 500)
+}
+
+async function preloadPageSizes(pdf: PDFDocumentProxy) {
+  const tempSizes: PageSize[] = []
+  const tempAccumulator: number[] = [0]
+  let currentAccHeight = 0
+  let allSameSize = true
+  let firstSize: PageSize | null = null
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const viewport = page.getViewport({ scale: 1 })
+    const size: PageSize = { width: viewport.width, height: viewport.height }
+
+    if (i === 1) {
+      firstSize = size
+    } else if (firstSize) {
+      if (Math.abs(size.width - firstSize.width) > 1 || Math.abs(size.height - firstSize.height) > 1) {
+        allSameSize = false
+      }
+    }
+
+    tempSizes.push(size)
+    currentAccHeight += size.height
+    if (i < pdf.numPages) {
+      tempAccumulator.push(currentAccHeight)
+    }
+  }
+
+  if (allSameSize && firstSize) {
+    pageSizesConstant.value = firstSize
+    pageSizesArray.value = null
+    pageHeightAccumulator.value = []
+  } else {
+    pageSizesConstant.value = null
+    pageSizesArray.value = tempSizes
+    pageHeightAccumulator.value = tempAccumulator
+  }
+}
+
+async function startBackgroundPreload() {
+  const pdf = pdfDoc.value
+  if (!pdf) return
+
+  if (preloadAbortController) {
+    preloadAbortController.abort()
+  }
+  preloadAbortController = new AbortController()
+  const signal = preloadAbortController.signal
+
+  isPreloading.value = true
+  preloadProgress.value = 0
+
+  const totalPages = pdf.numPages
+  let loadedCount = 0
+
+  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
+    if (signal.aborted) break
+
+    if (renderedPages.value.has(pageNumber)) {
+      loadedCount++
+      preloadProgress.value = Math.round((loadedCount / totalPages) * 100)
+      continue
+    }
+
+    const refs = pageRefs.get(pageNumber)
+    if (refs && !renderTasks.has(pageNumber)) {
+      await new Promise<void>((resolve) => {
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(() => {
+            if (!signal.aborted) renderPage(pageNumber)
+            resolve()
+          }, { timeout: 100 })
+        } else {
+          setTimeout(() => {
+            if (!signal.aborted) renderPage(pageNumber)
+            resolve()
+          }, 10)
+        }
+      })
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+
+    loadedCount++
+    preloadProgress.value = Math.round((loadedCount / totalPages) * 100)
+  }
+
+  isPreloading.value = false
+  preloadProgress.value = 100
+}
+
+function cleanup() {
+  if (preloadAbortController) {
+    preloadAbortController.abort()
+    preloadAbortController = null
+  }
+  isPreloading.value = false
+  preloadProgress.value = 0
+
+  renderTasks.forEach((task) => task.cancel())
+  renderTasks.clear()
+  pageRefs.clear()
+  pageNumbers.value = []
+  pageSizesConstant.value = null
+  pageSizesArray.value = null
+  pageHeightAccumulator.value = []
+  renderedPages.value = new Set()
+  pagesNeedingRefresh.clear()
+  lastRenderedScale.clear()
+  isZooming.value = false
+  pdfDoc.value = null
+
+  // 清理 zoom RAF
+  if (zoomRafId) {
+    cancelAnimationFrame(zoomRafId)
+    zoomRafId = null
+  }
+  pendingZoomDelta = 0
+  lastZoomEvent = null
+}
+
+// ------------------------- 交互处理 -------------------------
+function applyInterimScale() {
+  pageRefs.forEach((refs, pageNumber) => {
+    const size = getPageSize(pageNumber, pageSizesConstant.value, pageSizesArray.value)
+    if (!size) return
+
+    applyInterimScaleToPage(
+      refs,
+      pageNumber,
+      pdfStore.scale,
+      lastRenderedScale.get(pageNumber),
+      size
+    )
+  })
+}
+
+function handleMouseEnterContainer() {
+  isPointerOverPdf.value = true
+}
+
+function handleMouseLeaveContainer() {
+  isPointerOverPdf.value = false
+  linksDisabled.value = false
+}
+
+function handleWheel(event: WheelEvent) {
+  if (!isPointerOverPdf.value) return
+
+  const container = containerRef.value
+  if (!container) return
+
+  if (event.ctrlKey) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    // 累积 delta，使用 RAF 节流
+    pendingZoomDelta += event.deltaY
+    lastZoomEvent = event
+
+    if (zoomRafId) return // 已有待执行的帧，直接返回
+
+    zoomRafId = requestAnimationFrame(() => {
+      zoomRafId = null
+
+      const isHorizontalOverflow = container.scrollWidth > container.clientWidth + 1
+
+      if (isHorizontalOverflow && lastZoomEvent) {
+        setPendingAnchor(captureCenterAnchor({ x: lastZoomEvent.clientX, y: lastZoomEvent.clientY }))
+      } else {
+        setPendingAnchor(captureCenterAnchor())
+      }
+
+      const step = clamp(Math.abs(pendingZoomDelta) / 100, 0.05, 0.25)
+      const nextScale = pendingZoomDelta < 0 ? pdfStore.scale + step : pdfStore.scale - step
+      pdfStore.setScale(nextScale)
+
+      pendingZoomDelta = 0
+      lastZoomEvent = null
+    })
+    return
+  }
+
+  const deltaX = event.deltaX
+  if (Math.abs(deltaX) > Math.abs(event.deltaY) * 0.5) {
+    const scrollLeft = container.scrollLeft
+    const maxScrollLeft = container.scrollWidth - container.clientWidth
+    const canScrollRight = scrollLeft < maxScrollLeft - 1
+    const canScrollLeft = scrollLeft > 1
+
+    if ((deltaX > 0 && canScrollRight) || (deltaX < 0 && canScrollLeft)) {
+      container.scrollLeft = Math.round(container.scrollLeft + deltaX)
+      event.preventDefault()
+    }
+  }
+}
+
+function handleMouseMove(event: MouseEvent) {
+  const down = mouseDownInfo.value
+  if (!down || linksDisabled.value) return
+
+  const elapsed = Date.now() - down.time
+  const dx = event.clientX - down.x
+  const dy = event.clientY - down.y
+  const dist = Math.hypot(dx, dy)
+
+  if (elapsed >= CLICK_TIME_THRESHOLD || dist >= DRAG_DISTANCE_THRESHOLD) {
+    linksDisabled.value = true
+  }
+}
+
+function handleMouseDown(event: MouseEvent) {
+  mouseDownInfo.value = { x: event.clientX, y: event.clientY, time: Date.now() }
+  linksDisabled.value = false
+}
+
+function handleMouseUp(event: MouseEvent) {
+  const downInfo = mouseDownInfo.value
+  mouseDownInfo.value = null
+
+  const isDrag = !!downInfo && (
+    (Date.now() - downInfo.time >= CLICK_TIME_THRESHOLD) ||
+    (Math.hypot(event.clientX - downInfo.x, event.clientY - downInfo.y) >= DRAG_DISTANCE_THRESHOLD)
+  )
+
+  if (isDrag) {
+    handleTextSelection()
+    linksDisabled.value = false
+    return
+  }
+
+  const target = event.target as HTMLElement
+  if (target.tagName === 'A' || target.closest('a') || target.classList.contains('internal-link') || target.closest('.internal-link')) {
+    linksDisabled.value = false
+    return
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    pdfStore.closeNotePreviewCard()
+    handleCtrlClick(event)
+    linksDisabled.value = false
+    return
+  }
+
+  handleClick(event)
+  linksDisabled.value = false
+}
+
+function handleClick(event: MouseEvent) {
+  const pageEl = findPageElement(event.target as Node)
+  if (!pageEl || !pageEl.dataset.page) {
+    handleClickOutside(true)
+    return
+  }
+
+  const pageNumber = Number(pageEl.dataset.page)
+  const textLayer = pageEl.querySelector('.textLayer') as HTMLDivElement | null
+  if (!textLayer) return
+
+  const layerRect = textLayer.getBoundingClientRect()
+  if (!layerRect.width || !layerRect.height) return
+
+  const normalizedX = (event.clientX - layerRect.left) / layerRect.width
+  const normalizedY = (event.clientY - layerRect.top) / layerRect.height
+
+  const highlightsAtPoint = pdfStore.getHighlightsAtPoint(pageNumber, normalizedX, normalizedY)
+
+  if (highlightsAtPoint.length === 0) {
+    handleClickOutside(true)
+    return
+  }
+
+  const isSamePoint = highlightsAtCurrentPoint.value.length > 0 &&
+    highlightsAtCurrentPoint.value.some(h => highlightsAtPoint.some(hp => hp.id === h.id))
+
+  if (isSamePoint && highlightsAtPoint.length > 1) {
+    currentHighlightIndex.value = (currentHighlightIndex.value + 1) % highlightsAtPoint.length
+  } else {
+    highlightsAtCurrentPoint.value = highlightsAtPoint
+    currentHighlightIndex.value = 0
+  }
+
+  const selectedHighlight = highlightsAtPoint[currentHighlightIndex.value]
+  if (!selectedHighlight) return
+
+  const firstRect = selectedHighlight.rects[0]
+  if (!firstRect) return
+
+  const tooltipX = layerRect.left + (firstRect.left + firstRect.width / 2) * layerRect.width
+  const tooltipY = layerRect.top + firstRect.top * layerRect.height - 10
+
+  pdfStore.selectHighlight(selectedHighlight, { x: tooltipX, y: tooltipY })
+  tooltipPosition.value = { x: tooltipX, y: tooltipY }
+  showTooltip.value = true
+
+  window.getSelection()?.removeAllRanges()
+}
+
+function handleClickOutside(forceClose: boolean = false) {
+  const selection = window.getSelection()
+  if (!forceClose && selection && selection.toString().trim()) return
+
+  selection?.removeAllRanges()
+  showTooltip.value = false
+  pdfStore.clearSelection()
+  pdfStore.clearHighlightSelection()
+  pdfStore.closeNotePreviewCard()
+  highlightsAtCurrentPoint.value = []
+  currentHighlightIndex.value = 0
+}
+
+function closeTooltip() {
+  showTooltip.value = false
+  pdfStore.clearSelection()
+  pdfStore.clearHighlightSelection()
+  highlightsAtCurrentPoint.value = []
+  currentHighlightIndex.value = 0
+}
+
+function handleParagraphMarkerClick(event: MouseEvent, paragraphId: string, originalText: string) {
+  event.stopPropagation()
+  event.preventDefault()
+
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const panelX = rect.right + 10
+  const panelY = rect.top
+  const panelWidth = 320
+  const finalX = (panelX + panelWidth > window.innerWidth) ? (rect.left - panelWidth - 10) : panelX
+
+  translationStore.openTranslationPanel(paragraphId, { x: Math.max(0, finalX), y: Math.max(0, panelY) }, originalText)
+}
+
+// ------------------------- Watch 监听 -------------------------
 watch(
-  () => pdfStore.currentPdfUrl, 
+  () => pdfStore.currentPdfUrl,
   (url) => {
-    // 切换文档时重置UI状态
     showTooltip.value = false
     highlightsAtCurrentPoint.value = []
     currentHighlightIndex.value = 0
-    // pdfStore.closeNotePreviewCard() // 关闭笔记预览卡片
 
     if (url) {
-      loadPdf(url) // 地址存在则加载 PDF
-      loadNotesCache() // 加载笔记缓存
+      loadPdf(url)
+      loadNotesCache()
     } else {
-      console.log('No PDF URL provided.') // 调试日志
-      cleanup() // 地址清空则重置状态
-      notesCache.value = [] // 清空笔记缓存
+      cleanup()
+      notesCache.value = []
     }
   },
   { immediate: true }
 )
 
-// ------------------------- 缩放、跳转与文本选择监听 -------------------------
-
-// 监听缩放比例变化，动态触发位置恢复
 watch(
-  () => pdfStore.scale, 
+  () => pdfStore.scale,
   () => {
-    // 如果没有 pendingAnchor（说明不是滚轮触发的缩放，而是按钮触发），则使用中心锚点
     if (!pendingAnchor.value) {
-      pendingAnchor.value = captureCenterAnchor()
+      setPendingAnchor(captureCenterAnchor())
     }
 
     isZooming.value = true
 
-    // 取消当前预加载
     if (preloadAbortController) {
       preloadAbortController.abort()
       preloadAbortController = null
     }
 
-    // 缩放时清除所有现有任务和已渲染状态，重新检测可见区域进行渲染
     renderTasks.forEach(task => task.cancel())
     renderTasks.clear()
     pagesNeedingRefresh.clear()
@@ -462,30 +652,26 @@ watch(
         nextTick(() => {
           if (pendingAnchor.value) {
             restoreAnchor(pendingAnchor.value)
-            pendingAnchor.value = null
+            clearPendingAnchor()
           }
         })
       }
-      // 延迟重新启动预加载
       settleZooming()
     })
   }
 )
 
-// 监听工具栏触发的页面跳转
 let lastUserTriggeredPage = 1
 watch(
   () => pdfStore.currentPage,
   (page, oldPage) => {
-    // 只有当页码变化且不是由滚动触发时才跳转
     if (page !== oldPage && page !== lastUserTriggeredPage) {
       lastUserTriggeredPage = page
-      scrollToPage(page, true) // 使用 instant 滚动
+      scrollToPage(page, true)
     }
   }
 )
 
-// 监听选区清除
 watch(
   () => pdfStore.selectedText,
   (newText) => {
@@ -496,1142 +682,22 @@ watch(
   }
 )
 
-// -------------------------  Link Layer 渲染 -------------------------
-// Link Layer 定义
-type LinkOverlayRect = {
-  left: number
-  top: number
-  width: number
-  height: number
-}
-
-// 外部链接的 HTML 格式
-function appendLinkOverlay(container: HTMLElement, rect: LinkOverlayRect, href: string, title?: string) {
-  const link = document.createElement('a')
-  // 最终设置前移除 URL 内部空格，避免不可点击
-  link.href = href.replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '')
-  link.target = '_blank'
-  link.rel = 'noreferrer noopener'
-  link.title = title || href
-  link.style.display = 'block'
-  link.style.left = `${rect.left}px`
-  link.style.top = `${rect.top}px`
-  link.style.width = `${rect.width}px`
-  link.style.height = `${rect.height}px`
-  link.style.position = 'absolute'
-  link.className = 'hover:bg-yellow-200/20 cursor-pointer'
-  container.appendChild(link)
-}
-
-// 内部链接的 HTML 格式
-function appendInternalLinkOverlay(container: HTMLElement, rect: LinkOverlayRect, destPage: number, title?: string) {
-  const link = document.createElement('div')
-  link.dataset.destPage = String(destPage)
-  link.title = title || `跳转到第 ${destPage} 页`
-  link.style.display = 'block'
-  link.style.left = `${rect.left}px`
-  link.style.top = `${rect.top}px`
-  link.style.width = `${rect.width}px`
-  link.style.height = `${rect.height}px`
-  link.style.position = 'absolute'
-  link.className = 'hover:bg-blue-200/30 cursor-pointer internal-link'
-  
-  // 防止与容器的点击处理冲突
-  link.addEventListener('mousedown', (e) => {
-    e.stopPropagation()
-  })
-  
-  link.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    console.log('Jumping to page:', destPage)
-    pdfStore.goToPage(destPage)
-  })
-  container.appendChild(link)
-}
-
-// 内部链接解析
-async function resolveDestination(dest: any): Promise<number | null> {
-  if (!pdfDoc.value) return null
-
-  try {
-    let destArray = dest
-
-    // 如果目标是 String，需要先解析
-    if (typeof dest === 'string') {
-      destArray = await pdfDoc.value.getDestination(dest)
-    }
-
-    // 确保目标是数组
-    if (!destArray || !Array.isArray(destArray)) return null
-
-    // 目标数组的第一个元素是页面引用
-    // TODO: 是否可以精确到页面的具体位置？
-    const pageRef = destArray[0]
-    if (!pageRef) return null
-
-    // 获取页码
-    const pageIndex = await pdfDoc.value.getPageIndex(pageRef)
-
-    // 页码从 1 开始
-    return pageIndex + 1 
-
-  } catch (err) {
-    console.error('Error resolving destination:', err)
-    return null
-  }
-}
-
-// ------------------------- 页面重绘与渲染逻辑 -------------------------
-
-// 渲染页面：绘制 Canvas -> 生成 Text Layer -> 生成 Link Layer 
-async function renderPage(pageNumber: number, options?: { preserveContent?: boolean }) {
-  const pdf = pdfDoc.value // 当前文档实例
-  const refs = pageRefs.get(pageNumber) // 当前页的引用集合
-  if (!pdf || !refs) return // 缺失则跳过
-
-  // 防止重复渲染同一页
-  if(renderTasks.has(pageNumber)) return
-
-  // 是否需要保留已有内容（选项里设置了且该页已渲染过）
-  const preserveContent = !!options?.preserveContent && renderedPages.value.has(pageNumber)
-
-  // 获取页面对象
-  const page = await pdf.getPage(pageNumber) 
-
-  
-  // 准备目标 Canvas
-  const targetCanvas = preserveContent ? // 是否保留已有内容
-    document.createElement('canvas') : // 如是：新建临时 Canvas 用于保留内容
-    refs.canvas // 如不是：直接使用页面的 Canvas
-  
-  // 获取画布 2D 上下文
-  const context = targetCanvas.getContext('2d', {
-    alpha: false,
-    willReadFrequently: false // 如果不需要频繁读取像素，建议设为 false 以优化性能
-  })
-  if (!context) return // 无上下文则终止
-
-  // 1. 高清屏优化：获取设备像素比
-  const outputScale = window.devicePixelRatio || 1
-  // const outputScale = Math.max(window.devicePixelRatio || 1, 1.125);
-
-  // 获取PDF视口（把 PDF 的内部坐标系映射到页面/画布坐标）
-  // 为什么要renderViewport？在 PDF.js 内部，Font Hinting（字体微调） 和 路径计算 是基于 viewport 的原始比例计算的。 当你生成一个 scale: 1.0 的 viewport，PDF.js 可能会认为“这里的字很小，不需要太多细节”或者应用针对低分辨率的抗锯齿策略。
-  // 为了解决高分屏下字体渲染模糊的问题，使用[Render Viewport] 用于 Canvas 实际绘制，直接包含 outputScale
-  // 这样 PDF.js 会知道它是为高分屏渲染，从而使用更精细的字体渲染策略
-  const cssViewport = page.getViewport({ scale: pdfStore.scale })
-  const renderViewport = page.getViewport({ scale: pdfStore.scale * outputScale });
-
-  // 2. 布局优化：统一使用 getScaledPageSize 作为显示尺寸的唯一来源，
-  //    避免与 Vue 模板 :style 的 getScaledPageSize 产生浮点精度差异（可能差 1px）
-  const scaledSize = getScaledPageSize(pageNumber)
-  const displayWidth = scaledSize.width
-  const displayHeight = scaledSize.height
-
-  refs.container.style.width = `${displayWidth}px`
-  refs.container.style.height = `${displayHeight}px`
-
-  // Canvas 内部像素缓冲区直接使用 renderViewport 尺寸（已包含 outputScale）
-  targetCanvas.width = Math.floor(renderViewport.width)
-  targetCanvas.height = Math.floor(renderViewport.height)
-  targetCanvas.style.width = `${displayWidth}px`
-  targetCanvas.style.height = `${displayHeight}px`
-
-  // Text Layer 和 Link Layer 使用统一的显示尺寸
-  refs.textLayer.style.width = `${displayWidth}px`
-  refs.textLayer.style.height = `${displayHeight}px`
-  refs.textLayer.style.setProperty('--scale-factor', `${cssViewport.scale}`)
-  refs.textLayer.style.transform = 'scale(1)'
-  refs.textLayer.style.transformOrigin = 'top left'
-  refs.textLayer.innerHTML = '' // 重绘前清空 Text Layer
-
-  // Link Layer 同样使用统一的显示尺寸
-  refs.linkLayer.style.width = `${displayWidth}px`
-  refs.linkLayer.style.height = `${displayHeight}px`
-  refs.linkLayer.style.transform = 'scale(1)'
-  refs.linkLayer.style.transformOrigin = 'top left'
-
-  // 高亮层尺寸与缩放复位
-  refs.highlightLayer.style.width = `${displayWidth}px`
-  refs.highlightLayer.style.height = `${displayHeight}px`
-  refs.highlightLayer.style.transform = 'scale(1)'
-  refs.highlightLayer.style.transformOrigin = 'top left'
-
-  // 3. 使用 renderViewport 直接渲染，不再需要 transform
-  //    renderViewport 的 scale 已包含 outputScale，PDF.js 会使用高分辨率的字体微调策略
-  const renderTask = page.render({
-    canvasContext: context,
-    viewport: renderViewport
-  }) // 创建页面渲染任务
-  renderTasks.set(pageNumber, renderTask) // 缓存任务便于取消
-  
-  try {
-    await renderTask.promise // 等待绘制完成
-  } catch (err: any) {
-    if (err.name === 'RenderingCancelledException') {
-      // 忽略因取消导致的报错
-      return
-    }
-    console.error(err)
-  }
-  
-  // 仅任务未被取消时才继续渲染文本
-  const textContent = await page.getTextContent() // 获取文字内容
-  const textDivs: HTMLElement[] = []
-  await renderTextLayer({
-    textContentSource: textContent, // 提供文字内容
-    container: refs.textLayer, // 指定 Text Layer 容器
-    viewport: cssViewport, // 使用 CSS 尺度的视口，文字层对应屏幕像素
-    textDivs // Capture created divs
-  }).promise // 等待 Text Layer 绘制完成
-
-  // 修复：强制调整文字宽度以对齐 PDF 原始内容
-  if (textContent && textContent.items && textDivs.length === textContent.items.length) {
-    const items = textContent.items as any[]
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      const div = textDivs[i]
-      
-      // 跳过空内容
-      if (!item.str || !item.width || !div) continue
-
-      // item.width 是 PDF 坐标系下的宽度
-      // cssViewport.scale 是当前的 CSS 缩放倍率
-      const targetWidth = item.width * cssViewport.scale
-      
-      // 获取当前 DOM 元素的实际渲染尺寸（包括 transform）
-      const rect = div.getBoundingClientRect()
-      
-      // 判断文字方向
-      // item.transform [a, b, c, d, e, f]
-      // 水平文字通常 b=0, c=0
-      // 垂直文字通常 a=0, d=0 (90或270度旋转)
-      const transform = item.transform
-      const isVertical = transform && Math.abs(transform[0]) < 1e-3 && Math.abs(transform[3]) < 1e-3
-      const isHorizontal = !transform || (Math.abs(transform[1]) < 1e-3 && Math.abs(transform[2]) < 1e-3)
-
-      let currentLength = 0
-      if (isVertical) {
-        currentLength = rect.height
-      } else if (isHorizontal) {
-        currentLength = rect.width
-      } else {
-        // 对于非正交旋转的文字，跳过宽度调整以避免破坏
-        continue 
-      }
-      
-      if (currentLength > 0) {
-        // 计算需要的水平缩放比例
-        const scaleFactor = targetWidth / currentLength
-        
-        // 只有当偏差超过一定阈值才调整
-        if (Math.abs(scaleFactor - 1) > 0.01) {
-            const existingTransform = div.style.transform || ''
-            // 追加 scaling，保留原有的旋转和平移
-            div.style.transform = `${existingTransform} scaleX(${scaleFactor})`
-        }
-      }
-    }
-  }
-
-  try {
-    const annotations = await page.getAnnotations()
-    renderLinkLayer(annotations, cssViewport, refs.linkLayer)
-  } catch (err) {
-    console.error('Error rendering Link Layer :', err)
-  }
-
-  if (preserveContent) {
-    const destContext = refs.canvas.getContext('2d', {
-      alpha: false,
-      willReadFrequently: false // 如果不需要频繁读取像素，建议设为 false 以优化性能
-    })
-    if (destContext) {
-      refs.canvas.width = targetCanvas.width
-      refs.canvas.height = targetCanvas.height
-      refs.canvas.style.width = targetCanvas.style.width
-      refs.canvas.style.height = targetCanvas.style.height
-      destContext.clearRect(0, 0, refs.canvas.width, refs.canvas.height)
-      destContext.drawImage(targetCanvas, 0, 0)
-    }
-  }
-
-  lastRenderedScale.set(pageNumber, pdfStore.scale)
-
-  // 标记页面为已渲染完成（创建新 Set 以触发响应式更新）
-  renderedPages.value = new Set([...renderedPages.value, pageNumber])
-}
-
-// 渲染 Link Layer 
-async function renderLinkLayer(annotations: any[], viewport: any, container: HTMLElement) {
-  container.innerHTML = '' // 清空 Link Layer（宽高已在 renderPage 中统一设置）
-
-  // 遍历所有PDF注释，找到是链接的注释
-  for (const annotation of annotations) {
-    if (annotation.subtype !== 'Link') continue
-
-    // 计算注释在视口中的位置
-    const rect = viewport.convertToViewportRectangle(annotation.rect)
-    const [x1, y1, x2, y2] = rect
-    const overlayRect = {
-      left: Math.min(x1, x2),
-      top: Math.min(y1, y2),
-      width: Math.abs(x2 - x1),
-      height: Math.abs(y2 - y1)
-    }
-
-    if (annotation.url) {
-      // 外部链接
-      appendLinkOverlay(container, overlayRect, annotation.url, annotation.url || 'External Link')
-    } else if (annotation.dest) {
-      // 内部链接（如论文引用）
-      const destPage = await resolveDestination(annotation.dest)
-      if (destPage) {
-        appendInternalLinkOverlay(container, overlayRect, destPage, `跳转到第 ${destPage} 页`)
-      }
-    } else if (annotation.action?.dest) {
-      // 带action的内部链接
-      const destPage = await resolveDestination(annotation.action.dest)
-      if (destPage) {
-        appendInternalLinkOverlay(container, overlayRect, destPage, `跳转到第 ${destPage} 页`)
-      }
-    }
-  }
-}
-
-// ------------------------- PDF 文档加载与预加载策略 -------------------------
-// 加载 PDF 文档并初始化尺寸信息与页码列表
-async function loadPdf(url: string) {
-  cleanup() // 清理旧状态
-  pdfStore.isLoading = true // 标记加载中
-
-  // 配置 CMaps 以正确渲染中文字符
-  const loadingTask = getDocument({
-    url,
-    cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-    cMapPacked: true
-  })
-  const pdf = await loadingTask.promise // 等待文档加载完成
-
-  pdfDoc.value = pdf // 保存文档实例
-  pdfStore.setTotalPages(pdf.numPages) // 更新总页数到状态
-  if (libraryStore.currentDocumentId) {
-    libraryStore.updateDocumentPageCount(libraryStore.currentDocumentId, pdf.numPages) // 同步更新文库记录页数
-  }
-
-  // 预加载所有页面的尺寸信息
-  const tempSizes: { width: number; height: number }[] = []
-  const tempAccumulator: number[] = [0]
-  let currentAccHeight = 0
-  let allSameSize = true
-  let firstSize: { width: number; height: number } | null = null
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i)
-    const viewport = page.getViewport({ scale: 1 })
-    const size = { width: viewport.width, height: viewport.height }
-    
-    if (i === 1) {
-      firstSize = size
-    } else if (firstSize) {
-      if (Math.abs(size.width - firstSize.width) > 1 || Math.abs(size.height - firstSize.height) > 1) {
-        allSameSize = false
-      }
-    }
-    
-    tempSizes.push(size)
-    
-    // Calculate accumulator for the NEXT page
-    currentAccHeight += size.height
-    if (i < pdf.numPages) {
-       tempAccumulator.push(currentAccHeight)
-    }
-  }
-
-  if (allSameSize && firstSize) {
-    pageSizesConstant.value = firstSize
-    pageSizesArray.value = null
-    // Constant mode implicitly calculates positions, so accumulator might not be strictly needed,
-    // but the helper uses direct calculation.
-    pageHeightAccumulator.value = []
-  } else {
-    pageSizesConstant.value = null
-    pageSizesArray.value = tempSizes
-    pageHeightAccumulator.value = tempAccumulator
-  }
-
-  pageNumbers.value = Array.from({ length: pdf.numPages }, (_, index) => index + 1) // 构造页码数组
-
-  pdfStore.isLoading = false // 结束加载态
-  await nextTick() // 等待 DOM 更新
-
-  // 先渲染可见页面，然后启动后台预加载
-  updateVisiblePages()
-
-  // 延迟启动后台预加载，让可见页面优先渲染
-  setTimeout(() => {
-    startBackgroundPreload()
-  }, 500)
-}
-
-// 后台预加载所有页面
-async function startBackgroundPreload() {
-  const pdf = pdfDoc.value
-  if (!pdf) return
-
-  // 取消之前的预加载
-  if (preloadAbortController) {
-    preloadAbortController.abort()
-  }
-  preloadAbortController = new AbortController()
-  const signal = preloadAbortController.signal
-
-  isPreloading.value = true
-  preloadProgress.value = 0
-
-  const totalPages = pdf.numPages
-  let loadedCount = 0
-
-  // 按顺序预加载所有页面
-  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
-    if (signal.aborted) break
-
-    // 如果页面已经渲染过，跳过
-    if (renderedPages.value.has(pageNumber)) {
-      loadedCount++
-      preloadProgress.value = Math.round((loadedCount / totalPages) * 100)
-      continue
-    }
-
-    // 等待 DOM 元素准备好
-    const refs = pageRefs.get(pageNumber)
-    if (refs && !renderTasks.has(pageNumber)) {
-      // 使用 requestIdleCallback 或 setTimeout 在空闲时渲染
-      await new Promise<void>((resolve) => {
-        if ('requestIdleCallback' in window) {
-          requestIdleCallback(() => {
-            if (!signal.aborted) {
-              renderPage(pageNumber)
-            }
-            resolve()
-          }, { timeout: 100 })
-        } else {
-          setTimeout(() => {
-            if (!signal.aborted) {
-              renderPage(pageNumber)
-            }
-            resolve()
-          }, 10)
-        }
-      })
-
-      // 等待渲染完成
-      await new Promise(resolve => setTimeout(resolve, 50))
-    }
-
-    loadedCount++
-    preloadProgress.value = Math.round((loadedCount / totalPages) * 100)
-  }
-
-  isPreloading.value = false
-  preloadProgress.value = 100
-}
-
-function cleanup() {
-  // 取消后台预加载
-  if (preloadAbortController) {
-    preloadAbortController.abort()
-    preloadAbortController = null
-  }
-  isPreloading.value = false
-  preloadProgress.value = 0
-
-  renderTasks.forEach((task) => task.cancel()) // 取消未完成的渲染任务
-  renderTasks.clear() // 清空任务缓存
-  pageRefs.clear() // 清空页面引用缓存
-  pageNumbers.value = [] // 清空页码列表
-  pageSizesConstant.value = null
-  pageSizesArray.value = null
-  pageHeightAccumulator.value = []
-  renderedPages.value = new Set() // 清空已渲染页面集合
-  pagesNeedingRefresh.clear()
-  lastRenderedScale.clear()
-  isZooming.value = false
-  pdfDoc.value = null // 释放文档实例
-}
-
-// ------------------------- 交互处理 (滚动、缩放、点击) -------------------------
-// 缩放手势进行时，先按目标尺寸拉伸已有渲染
-function applyInterimScale() {
-  pageRefs.forEach((refs, pageNumber) => {
-    const size = getPageSize(pageNumber)
-    if (!size) return
-
-    const renderedScale = lastRenderedScale.get(pageNumber) ?? pdfStore.scale
-    const targetScale = pdfStore.scale
-    const ratio = renderedScale ? targetScale / renderedScale : 1
-
-    // 基准尺寸：最后一次真实渲染时的尺寸（与文本层布局一致）
-    const baseWidth = Math.floor(size.width * renderedScale)
-    const baseHeight = Math.floor(size.height * renderedScale)
-    // 目标尺寸：当前缩放下容器所需的可视尺寸
-    const targetWidth = Math.floor(size.width * targetScale)
-    const targetHeight = Math.floor(size.height * targetScale)
-
-    // Canvas 直接用目标尺寸拉伸即可
-    refs.canvas.style.width = `${targetWidth}px`
-    refs.canvas.style.height = `${targetHeight}px`
-
-    // 文本层保持“旧尺度”尺寸，通过 transform 过渡到新尺度，避免跟随过慢
-    refs.textLayer.style.width = `${baseWidth}px`
-    refs.textLayer.style.height = `${baseHeight}px`
-    refs.textLayer.style.transformOrigin = 'top left'
-    refs.textLayer.style.transform = `scale(${ratio})`
-
-    // 链接层同样按旧尺寸 + 缩放，保证点击区域同步
-    refs.linkLayer.style.width = `${baseWidth}px`
-    refs.linkLayer.style.height = `${baseHeight}px`
-    refs.linkLayer.style.transformOrigin = 'top left'
-    refs.linkLayer.style.transform = `scale(${ratio})`
-
-    // 高亮层同步缩放，避免在缩放过渡时错位
-    refs.highlightLayer.style.width = `${baseWidth}px`
-    refs.highlightLayer.style.height = `${baseHeight}px`
-    refs.highlightLayer.style.transformOrigin = 'top left'
-    refs.highlightLayer.style.transform = `scale(${ratio})`
-  })
-}
-
-// 鼠标进入 PDF 框
-function handleMouseEnterContainer() {
-  isPointerOverPdf.value = true
-}
-
-// 鼠标离开 PDF 框
-function handleMouseLeaveContainer() {
-  isPointerOverPdf.value = false
-  linksDisabled.value = false
-}
-
-// 水平划动 + 缩放 PDF
-// 滚动滚轮或触摸板动作进行时一直触发，负责实时渲染PDF
-function handleWheel(event: WheelEvent) {
-  // 确保鼠标在 PDF 容器内
-  if (!isPointerOverPdf.value) return
-
-  // 获取滚动容器引用
-  const container = containerRef.value
-  if (!container) return
-
-  // 缩放 PDF：Ctrl + 滚轮（即触摸板双指缩放）
-  if (event.ctrlKey) {
-    event.preventDefault()
-    event.stopPropagation()
-
-    // 是否已经缩放进PDF内了（即PDF是否横向溢出）
-    // True 为已经缩放到PDF内，会根据鼠标位置进行定点缩放
-    // False 为未缩放到PDF内，统一往中间缩放
-    const isHorizontalOverflow = container.scrollWidth > container.clientWidth + 1 // +1 容错
-
-    if (isHorizontalOverflow) {
-      // 往鼠标方向放大
-      pendingAnchor.value = captureCenterAnchor({ x: event.clientX, y: event.clientY })
-    } else {
-      // 往中间放大
-      pendingAnchor.value = captureCenterAnchor()
-    }
-    // 算出缩放锚点后，见后面的 watch 监听 pdfStore.scale 变化进行缩放处理
-
-    // 读取缩放大小（由于是ctrl+滚轮，所以不是上下左右滚动，而是缩放手势）
-    const delta = event.deltaY
-
-    // 根据滚动距离计算缩放步长
-    const step = Math.min(0.25, Math.max(0.05, // 步长在 0.05 到 0.25 之间
-      Math.abs(delta) / 100)) // 缩放速度（数值越小，缩放越快）
-
-    // 计算新的缩放比例
-    const nextScale = delta < 0
-      ? pdfStore.scale + step // 放大
-      : pdfStore.scale - step // 缩小
-
-    // 应用新的缩放比例
-    pdfStore.setScale(nextScale)
-    return
-  }
-
-  // 水平划动 PDF 处理模块
-  // 由于垂直划动是浏览器的默认行为，不需要处理
-  // 这里主要的作用是阻止浏览器做前进后退的默认行为
-
-  // 水平划动的距离（+为右，-为左）
-  const deltaX = event.deltaX
-
-  // 检查水平滚动幅度是否大于垂直滚动的0.5倍。如果是，则判定为主要水平滚动手势（而非垂直滚动）。
-  if (Math.abs(deltaX) > Math.abs(event.deltaY) * 0.5) {
-
-    // 当前水平滚动位置
-    const scrollLeft = container.scrollLeft
-
-    // 计算水平滚动空间（总宽度 - 可见宽度）
-    const maxScrollLeft = container.scrollWidth - container.clientWidth
-
-    // 是否能继续向右或向左滚动
-    const canScrollRight = scrollLeft < maxScrollLeft - 1
-    const canScrollLeft = scrollLeft > 1
-
-    // 如果能滚动且有水平滚动
-    if ((deltaX > 0 && canScrollRight) || (deltaX < 0 && canScrollLeft)) {
-      container.scrollLeft = Math.round(container.scrollLeft + deltaX) // 执行水平滚动，吸附整数像素
-      event.preventDefault() // 阻止默认行为（防止前进后退）
-    }
-    // 否则让浏览器处理（可能是到达边界后的前进后退）
-  }
-}
-
-// 划动 PDF
-// 在滚动容器滚动后触发，负责更新当前页码显示
-const handleScroll = useDebounceFn(() => { // useDebounceFn 是防抖函数，只有连续运行一段时间才会执行
-  if (!containerRef.value) return
-
-  updateVisiblePages() // 滚动时触发可见检测
-
-  // 优化：使用计算而不是 DOM 查询来确定当前页面
-  const scrollTop = containerRef.value.scrollTop
-  
-  // 查找位于视口顶部的页面
-  const p = getPageAtY(scrollTop)
-  
-  // 比较该页面顶部和下一页顶部，看谁离视口顶部更近
-  let nearestPage = p
-  let minDistance = Math.abs(getPageTop(p) - scrollTop)
-  
-  if (p < pdfStore.totalPages) {
-      const nextP = p + 1
-      const distNext = Math.abs(getPageTop(nextP) - scrollTop)
-      if (distNext < minDistance) {
-          nearestPage = nextP
-      }
-  }
-
-  // 仅更新页码显示，不触发滚动（通过更新 lastUserTriggeredPage 防止 watch 触发滚动）
-  if (nearestPage !== pdfStore.currentPage && nearestPage <= pdfStore.totalPages) {
-    lastUserTriggeredPage = nearestPage
-    pdfStore.goToPage(nearestPage)
-  }
-}, 50)
-
-// 鼠标移动：按下超过阈值时间视为拖动，期间关闭链接点击，避免 selection 终点落在 linkLayer
-function handleMouseMove(event: MouseEvent) {
-  const down = mouseDownInfo.value
-  if (!down || linksDisabled.value) return
-
-  const elapsed = Date.now() - down.time
-  const dx = event.clientX - down.x
-  const dy = event.clientY - down.y
-  const dist = Math.hypot(dx, dy)
-
-  // 当按下时间超过阈值或者移动距离超过阈值时视为拖动（立刻关闭链接点击）
-  if (elapsed >= CLICK_TIME_THRESHOLD || dist >= DRAG_DISTANCE_THRESHOLD) {
-    linksDisabled.value = true
-  }
-} 
-
-// ------------------------- 点击与选择处理 -------------------------
-// 鼠标点击
-function handleMouseDown(event: MouseEvent) {
-  // 记录鼠标按下位置和时间
-  mouseDownInfo.value = {
-    x: event.clientX,
-    y: event.clientY,
-    time: Date.now()
-  }
-  linksDisabled.value = false
-}
-
-// 鼠标抬起（此时处理是点击还是拖动）
-function handleMouseUp(event: MouseEvent) {
-  const downInfo = mouseDownInfo.value
-  mouseDownInfo.value = null
-
-  // 如果时间超过阈值或鼠标移动距离超过阈值则判定为拖动
-  const isDrag = !!downInfo && (
-    (Date.now() - downInfo.time >= CLICK_TIME_THRESHOLD) ||
-    (Math.hypot(event.clientX - downInfo.x, event.clientY - downInfo.y) >= DRAG_DISTANCE_THRESHOLD)
-  )
-
-  if (isDrag) {
-    // 判定为拖动：全部当作文本选择处理
-    handleTextSelection()
-    linksDisabled.value = false
-    return
-  }
-
-  // 非拖动（短按）：若点击的是链接，则让浏览器/链接自身处理（不再拦截）
-  const target = event.target as HTMLElement
-  if (target.tagName === 'A' || target.closest('a') || target.classList.contains('internal-link') || target.closest('.internal-link')) {
-    // 点击在链接上，保持默认行为
-    linksDisabled.value = false
-    return
-  }
-
-  // 非拖动且非链接：视作点击并交给常规点击处理逻辑（包括 Ctrl+点击查找笔记等）
-  handleClick(event)
-  linksDisabled.value = false
-}
-
-// 处理普通点击事件
-function handleClick(event: MouseEvent) {
-  // Ctrl+点击：查找笔记
-  if (event.ctrlKey || event.metaKey) {
-    handleCtrlClick(event)
-    return
-  }
-
-  // 查找点击位置对应的页面
-  const pageEl = findPageElement(event.target as Node)
-  if (!pageEl || !pageEl.dataset.page) {
-    // 点击在页面外部，清除选择
-    handleClickOutside(true)
-    return
-  }
-
-  const pageNumber = Number(pageEl.dataset.page)
-  const textLayer = pageEl.querySelector('.textLayer') as HTMLDivElement | null
-  if (!textLayer) return
-
-  const layerRect = textLayer.getBoundingClientRect()
-  if (!layerRect.width || !layerRect.height) return
-
-  // 计算归一化坐标
-  const normalizedX = (event.clientX - layerRect.left) / layerRect.width
-  const normalizedY = (event.clientY - layerRect.top) / layerRect.height
-
-  // 查找该位置的所有高亮
-  const highlightsAtPoint = pdfStore.getHighlightsAtPoint(pageNumber, normalizedX, normalizedY)
-
-  if (highlightsAtPoint.length === 0) {
-    // 点击的是未高亮区域，清除选择
-    handleClickOutside(true)
-    return
-  }
-
-  // 检查是否是同一位置的重复点击（循环选择）
-  const isSamePoint = highlightsAtCurrentPoint.value.length > 0 &&
-    highlightsAtCurrentPoint.value.some(h => highlightsAtPoint.some(hp => hp.id === h.id))
-
-  if (isSamePoint && highlightsAtPoint.length > 1) {
-    // 循环到下一个高亮
-    currentHighlightIndex.value = (currentHighlightIndex.value + 1) % highlightsAtPoint.length
-  } else {
-    // 新位置，重置索引
-    highlightsAtCurrentPoint.value = highlightsAtPoint
-    currentHighlightIndex.value = 0
-  }
-
-  // 选中当前索引的高亮
-  const selectedHighlight = highlightsAtPoint[currentHighlightIndex.value]
-  if (!selectedHighlight) return
-
-  // 计算高亮的显示位置（用于工具提示）
-  const firstRect = selectedHighlight.rects[0]
-  if (!firstRect) return
-
-  const tooltipX = layerRect.left + (firstRect.left + firstRect.width / 2) * layerRect.width
-  const tooltipY = layerRect.top + firstRect.top * layerRect.height - 10
-
-  pdfStore.selectHighlight(selectedHighlight, { x: tooltipX, y: tooltipY })
-
-  tooltipPosition.value = { x: tooltipX, y: tooltipY }
-  showTooltip.value = true
-
-  // 清除任何文本选择
-  window.getSelection()?.removeAllRanges()
-}
-
-function IoU(rectA: { left: number; top: number; width: number; height: number }, rectB: { left: number; top: number; width: number; height: number }) {
-  const xA = Math.max(rectA.left, rectB.left)
-  const yA = Math.max(rectA.top, rectB.top)
-  const xB = Math.min(rectA.left + rectA.width, rectB.left + rectB.width)
-  const yB = Math.min(rectA.top + rectA.height, rectB.top + rectB.height)
-
-  const intersectionArea = Math.max(0, xB - xA) * Math.max(0, yB - yA)
-  const boxAArea = rectA.width * rectA.height
-  const boxBArea = rectB.width * rectB.height
-
-  const iou = intersectionArea / (boxAArea + boxBArea - intersectionArea)
-  return iou
-}
-
-// ------------------------- 高亮与文本选择处理 -------------------------
-
-// 手动文本选择的处理逻辑（逐行中文注释）
-function handleTextSelection() {
-  const selection = window.getSelection() // 获取当前窗口选择
-  
-  // 如果没有选择或仅包含空白字符，直接退出
-  if (!selection || !selection.toString().trim()) {
-    return
-  }
-  // 清除任何已有的高亮选择状态（优先处理文本选择）
-  pdfStore.clearHighlightSelection()
-
-  // 获取选中的纯文本（去除首尾空白）
-  const text = selection.toString().trim()
-  // 获取选区的第一个 Range（代表一段连续的文本范围）
-  const range = selection.getRangeAt(0)
-  // 从 Range 的 commonAncestorContainer 向上查找所属的页面元素（.pdf-page）
-  const pageEl = findPageElement(range.commonAncestorContainer)
-
-  // 如果无法定位到页面元素或该元素没有 page 数据属性，则放弃处理
-  if (!pageEl || !pageEl.dataset.page) {
-    return
-  }
-
-  // 解析页面的页码（dataset 存储的是字符串）
-  // TODO: 以后要支持跨页的高亮吗？
-  const pageNumber = Number(pageEl.dataset.page)
-
-  // 找到当前页面上的文本层（textLayer），用于计算坐标和尺寸
-  const textLayer = pageEl.querySelector('.textLayer') as HTMLDivElement | null
-  if (!textLayer) return
-
-  // 获取文本层在视口中的边界（DOMRect），用于坐标归一化
-  const layerRect = textLayer.getBoundingClientRect()
-
-  // 若宽或高为 0（不可见或未渲染），则退出
-  if (!layerRect.width || !layerRect.height) return
-
-  // 将选区的每个 ClientRect 转换为相对于 textLayer 的百分比坐标与尺寸
-  const rects = Array.from(range.getClientRects())
-    .map((rect) => ({
-      // left/top/width/height 都改为相对比例（相对于 textLayer 的宽高）
-      left: (rect.left - layerRect.left) / layerRect.width,
-      top: (rect.top - layerRect.top) / layerRect.height,
-      width: rect.width / layerRect.width,
-      height: rect.height / layerRect.height,
-    }))
-    // 过滤掉无效的矩形（宽或高为 0 的情况）
-    .filter((rect) => rect.width > 0 && rect.height > 0)
-
-  // 如果没有有效的矩形（例如只包含不可见字符），则退出
-  if (!rects.length) return
-
-  // IoU 去重
-  const dedupedRects: typeof rects = []
-  rects.forEach((rect) => {
-    // 如果与已有的某个矩形重叠度过高，则认为是重复
-    const isDuplicate = dedupedRects.some((existing) => IoU(rect, existing) > 0.3)
-    if (!isDuplicate) {
-      dedupedRects.push(rect)
-    }
-  })
-
-  // 获取选区的边界矩形（用于在屏幕上定位工具提示的位置）
-  const selectionRect = range.getBoundingClientRect() // 选区位置矩形
-
-  // 将选中的文本与提示位置保存到 store，提示位置为选区中心 x 以及稍高于选区顶部的 y
-  pdfStore.setSelectedText(text, {
-    x: selectionRect.left + selectionRect.width / 2,
-    y: selectionRect.top - 10
-  })
-  // 保存选区信息（所在页和去重后的矩形数组）到 store
-  pdfStore.setSelectionInfo({ page: pageNumber, rects: dedupedRects })
-
-  // 同步本地 tooltip 的位置状态（用于组件内显示）
-  tooltipPosition.value = {
-    x: selectionRect.left + selectionRect.width / 2,
-    y: selectionRect.top - 10
-  }
-  // 打开提示菜单（例如显示高亮/注释等操作）
-  showTooltip.value = true // 打开提示
-}
-
-function handleClickOutside(forceClose: boolean = false) {
-  const selection = window.getSelection()
-  // 如果不是强制关闭，且有选中文本，则不关闭
-  if (!forceClose && selection && selection.toString().trim()) return
-
-  selection?.removeAllRanges()
-
-  showTooltip.value = false // 隐藏提示
-  pdfStore.clearSelection() // 清空选中文本
-  pdfStore.clearHighlightSelection() // 清空高亮选择
-  pdfStore.closeNotePreviewCard() // 关闭笔记预览卡片
-  highlightsAtCurrentPoint.value = []
-  currentHighlightIndex.value = 0
-}
-
-function closeTooltip() {
-  showTooltip.value = false
-  pdfStore.clearSelection()
-  pdfStore.clearHighlightSelection()
-  highlightsAtCurrentPoint.value = []
-  currentHighlightIndex.value = 0
-}
-
-// ------------------------- 笔记缓存与快捷查找 (Ctrl+点击) -------------------------
-// 加载当前文档的笔记缓存
-async function loadNotesCache() {
-  const docId = libraryStore.currentDocument?.id
-  if (!docId) {
-    notesCache.value = []
-    return
-  }
-
-  isLoadingNotes.value = true
-  try {
-    const response = await notesApi.getNotes(docId)
-    notesCache.value = response.notes || []
-  } catch (error) {
-    console.error('Failed to load notes for cache:', error)
-    notesCache.value = []
-  } finally {
-    isLoadingNotes.value = false
-  }
-}
-
-// 获取点击位置的单词
-function getWordAtPoint(x: number, y: number): string | null {
-  let range: Range | null = null
-
-  // 获取点击位置 (Chrome, Edge, Safari 版本)
-  if (typeof (document as any).caretRangeFromPoint === 'function') {
-    range = (document as any).caretRangeFromPoint(x, y)
-  }
-  // 获取点击位置 (Firefox 版本)
-  else if (typeof (document as any).caretPositionFromPoint === 'function') {
-    const pos = (document as any).caretPositionFromPoint(x, y)
-    if (pos && pos.offsetNode) {
-      const newRange = document.createRange()
-      newRange.setStart(pos.offsetNode, pos.offset)
-      newRange.setEnd(pos.offsetNode, pos.offset)
-      range = newRange
-    }
-  }
-
-  if (!range) return null
-
-  const node = range.startContainer
-  if (node.nodeType !== Node.TEXT_NODE) return null
-
-  const text = node.textContent || ''
-  const offset = range.startOffset
-
-  // 查找单词边界
-  let start = offset
-  let end = offset
-
-  // 向前找单词开始
-  while (start > 0 && /[\w\u4e00-\u9fa5]/.test(text[start - 1] || '')) {
-    start--
-  }
-
-  // 向后找单词结束
-  while (end < text.length && /[\w\u4e00-\u9fa5]/.test(text[end] || '')) {
-    end++
-  }
-
-  if (start === end) return null
-
-  return text.slice(start, end).trim()
-}
-
-// 查找匹配的笔记（模糊匹配标题）
-function findMatchingNote(word: string): Note | null {
-  if (!word || word.length < 2) return null
-
-  const wordLower = word.toLowerCase()
-
-  // 精确匹配优先
-  for (const note of notesCache.value) {
-    if (note.title && note.title.toLowerCase() === wordLower) {
-      return note
-    }
-  }
-
-  // 标题包含该词
-  for (const note of notesCache.value) {
-    if (note.title && note.title.toLowerCase().includes(wordLower)) {
-      return note
-    }
-  }
-
-  // 该词包含标题（标题较短时）
-  for (const note of notesCache.value) {
-    if (note.title && note.title.length >= 2 && wordLower.includes(note.title.toLowerCase())) {
-      return note
-    }
-  }
-
-  return null
-}
-
-// 处理 Ctrl+点击（查找笔记）
-function handleCtrlClick(event: MouseEvent) {
-  // 关闭其他弹出内容
-  pdfStore.closeNotePreviewCard()
-
-  const word = getWordAtPoint(event.clientX, event.clientY)
-  if (!word) return
-
-  const matchedNote = findMatchingNote(word)
-  if (matchedNote) {
-    // 计算卡片显示位置
-    const cardX = Math.min(event.clientX + 10, window.innerWidth - 340)
-    const cardY = Math.min(event.clientY + 10, window.innerHeight - 400)
-
-    pdfStore.openNotePreviewCard(
-      {
-        id: matchedNote.id,
-        title: matchedNote.title,
-        content: matchedNote.content
-      },
-      { x: Math.max(0, cardX), y: Math.max(0, cardY) }
-    )
-  }
-}
-
-// ------------------------- 段落翻译与辅助函数 -------------------------
-// 点击段落光标，打开翻译面板
-function handleParagraphMarkerClick(event: MouseEvent, paragraphId: string, originalText: string) {
-  event.stopPropagation()
-  event.preventDefault()
-  
-  // 获取光标元素位置，计算翻译面板位置（显示在右侧）
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  
-  // 默认显示在段落右边
-  const panelX = rect.right + 10
-  const panelY = rect.top
-  
-  // 如果右边空间不足，显示在左边
-  const panelWidth = 320
-  const finalX = (panelX + panelWidth > window.innerWidth) ? (rect.left - panelWidth - 10) : panelX
-  
-  pdfStore.openTranslationPanel(paragraphId, { x: Math.max(0, finalX), y: Math.max(0, panelY) }, originalText)
-}
-
-// 计算段落光标在页面中的位置（考虑缩放）
-function getParagraphMarkerStyle(paragraph: { bbox: { x0: number; y0: number } }, pageNumber: number) {
-  const size = getPageSize(pageNumber)
-  if (!size) return { display: 'none' }
-  
-  // 光标显示在段落左上角
-  const left = (paragraph.bbox.x0 / size.width) * 100
-  const top = (paragraph.bbox.y0 / size.height) * 100
-  
-  return {
-    left: `${left}%`,
-    top: `${top}%`,
-    transform: 'translate(-100%, -50%)'
-  }
-}
-
-function findPageElement(node: Node | null): HTMLElement | null {
-  let current: Node | null = node
-  while (current) {
-    if (current instanceof HTMLElement && current.classList.contains('pdf-page')) {
-      return current
-    }
-    current = current.parentElement || current.parentNode
-  }
-  return null
-}
-
-function hexToRgba(color: string, alpha = 0.35) {
-  const hex = color.replace('#', '')
-  const fallback = `rgba(246, 224, 94, ${alpha})`
-
-  if (hex.length !== 3 && hex.length !== 6) return fallback
-
-  const normalized = hex.length === 3
-    ? hex.split('').map(ch => ch + ch).join('')
-    : hex
-
-  const intVal = Number.parseInt(normalized, 16)
-  if (Number.isNaN(intVal)) return fallback
-
-  const r = (intVal >> 16) & 255
-  const g = (intVal >> 8) & 255
-  const b = intVal & 255
-
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
-function getHighlightColor(color: string) {
-  return hexToRgba(color, 0.35)
-}
-
-function getBoundingBoxStyle(rects: { left: number, top: number, width: number, height: number }[]) {
-  if (!rects || rects.length === 0) return {}
-
-  let minLeft = Infinity
-  let minTop = Infinity
-  let maxRight = -Infinity
-  let maxBottom = -Infinity
-
-  rects.forEach(rect => {
-    minLeft = Math.min(minLeft, rect.left)
-    minTop = Math.min(minTop, rect.top)
-    maxRight = Math.max(maxRight, rect.left + rect.width)
-    maxBottom = Math.max(maxBottom, rect.top + rect.height)
-  })
-
-  // 稍微扩展一点边距，让框看起来更像“包含”
-  // 但既然是百分比，这里直接用计算出的边界
-  return {
-    left: `${minLeft * 100}%`,
-    top: `${minTop * 100}%`,
-    width: `${(maxRight - minLeft) * 100}%`,
-    height: `${(maxBottom - minTop) * 100}%`
-  }
-}
-
-function scrollToPage(page: number, instant: boolean = false) {
-  if (!containerRef.value) return // 无容器则返回
-  const refs = pageRefs.get(page) // 获取目标页引用
-  const behavior = instant ? 'instant' : 'smooth'
-
-  if (refs) {
-    containerRef.value.scrollTo({
-      top: Math.round(refs.container.offsetTop - 12),
-      behavior: behavior as ScrollBehavior
-    })
-    return
-  }
-
-  // 如果页面引用尚未准备好，等待下一次 DOM 更新后再尝试
-  nextTick(() => {
-    const retryRefs = pageRefs.get(page)
-    if (retryRefs) {
-      containerRef.value?.scrollTo({
-        top: Math.round(retryRefs.container.offsetTop - 12),
-        behavior: behavior as ScrollBehavior
-      })
-    }
-  })
-}
-
-// 设置容器尺寸变化监听器
+// 监听内部链接跳转事件
+window.addEventListener('pdf-internal-link', ((event: CustomEvent<{ page: number }>) => {
+  pdfStore.goToPage(event.detail.page)
+}) as EventListener)
+
+// ------------------------- 生命周期 -------------------------
 onMounted(() => {
-  // 等待DOM渲染完成后设置ResizeObserver
   nextTick(() => {
     if (!containerRef.value) return
 
     resizeObserver = new ResizeObserver(() => {
-      // 容器尺寸变化时，标记为正在resize
       if (!isResizing.value && pdfDoc.value) {
         isResizing.value = true
       }
 
-      // 清除之前的timeout
-      if (resizeTimeout) {
-        clearTimeout(resizeTimeout)
-      }
-
-      // 延迟后更新可见页面渲染
+      if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
         if (isResizing.value) {
           updateVisiblePages()
@@ -1645,7 +711,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  // 清理ResizeObserver
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -1654,14 +719,12 @@ onBeforeUnmount(() => {
     clearTimeout(resizeTimeout)
     resizeTimeout = null
   }
-  cleanup() // 组件卸载前清理资源
+  cleanup()
 })
 </script>
 
 <template>
-  <!-- 组件根容器，纵向排列，占满可用高度 -->
   <div class="pdf-viewer-root flex flex-col h-full bg-gray-100 dark:bg-[#0b1220] relative">
-    <!-- 主内容区，显示 PDF 页面的滚动容器 -->
     <div
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
@@ -1675,21 +738,18 @@ onBeforeUnmount(() => {
       @wheel="handleWheel"
       @scroll="handleScroll"
     >
-      <!-- 居中内容区，控制最大宽度与行间距 -->
       <div class="space-y-4 flex flex-col items-center w-fit min-w-full mx-auto">
-        <!-- 遍历所有页码生成页面容器 -->
         <div
           v-for="page in pageNumbers"
           :key="page"
           class="pdf-page relative bg-white dark:bg-[#111827] shadow-lg dark:shadow-[0_10px_30px_rgba(0,0,0,0.45)] outline outline-1 outline-gray-200 dark:outline-[#1f2937] overflow-hidden shrink-0"
-          :ref="(el, refs) => handlePageContainerRef(page, el, refs)"
+          :ref="(el) => handlePageContainerRef(page, el)"
           :data-page="page"
           :style="{
-            width: getScaledPageSize(page).width + 'px',
-            height: getScaledPageSize(page).height + 'px'
+            width: getScaledPageSize(page, pdfStore.scale, pageSizesConstant, pageSizesArray).width + 'px',
+            height: getScaledPageSize(page, pdfStore.scale, pageSizesConstant, pageSizesArray).height + 'px'
           }"
         >
-          <!-- 加载中占位符 -->
           <div
             v-if="!isPageRendered(page)"
             class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 dark:bg-[#0f172a] z-10"
@@ -1712,7 +772,6 @@ onBeforeUnmount(() => {
                   backgroundColor: getHighlightColor(hl.color)
                 }"
               />
-              <!-- 选中的高亮显示整体外包框 -->
               <div
                 v-if="pdfStore.selectedHighlight?.id === hl.id"
                 class="highlight-selected-box absolute pointer-events-none"
@@ -1720,21 +779,19 @@ onBeforeUnmount(() => {
               />
             </template>
           </div>
-          <div class="textLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" /> 
-          <div class="linkLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" /> <!--  Link Layer允许点击内部链接 -->
+          <div class="textLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" />
+          <div class="linkLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" />
           
-          <!-- 段落光标层 -->
           <div class="paragraphMarkerLayer absolute inset-0 pointer-events-none z-10" :class="{ 'zooming-layer': isZooming }">
             <div
               v-for="paragraph in pdfStore.getParagraphsByPage(page)"
               :key="paragraph.id"
               :data-paragraph-id="paragraph.id"
               class="paragraph-marker absolute pointer-events-auto cursor-pointer"
-              :style="getParagraphMarkerStyle(paragraph, page)"
+              :style="getParagraphMarkerStyle(paragraph, getPageSize(page, pageSizesConstant, pageSizesArray))"
               @click="handleParagraphMarkerClick($event, paragraph.id, paragraph.content)"
               :title="'点击翻译此段落'"
             >
-              <!-- 极简小光标：小矩形指示器 -->
               <div class="marker-icon">
                 <span class="marker-chevron">›</span>
               </div>
@@ -1744,19 +801,17 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 当没有选择 PDF 时的占位提示 -->
     <div
       v-else
       class="flex-1 flex flex-col items-center justify-center text-gray-400"
     >
-      <svg class="w-24 h-24 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <!-- 图标占位 -->
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /> <!-- 文档图标路径 -->
+      <svg class="w-24 h-24 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
       </svg>
-      <h2 class="text-xl font-medium mb-2">开始阅读</h2> <!-- 标题文案 -->
-      <p class="text-sm">从左侧上传 PDF 文件开始您的阅读之旅</p> <!-- 副标题提示 -->
+      <h2 class="text-xl font-medium mb-2">开始阅读</h2>
+      <p class="text-sm">从左侧上传 PDF 文件开始您的阅读之旅</p>
     </div>
 
-    <!-- 文字选中后的工具提示组件 -->
     <TextSelectionTooltip
       v-if="showTooltip && pdfStore.selectedText"
       :position="tooltipPosition"
@@ -1766,33 +821,30 @@ onBeforeUnmount(() => {
       @close="closeTooltip"
     />
     
-    <!-- 多窗口翻译面板（可拖动，位于最上层） -->
-    <TranslationPanelMulti />
-
-    <!-- 笔记预览卡片（Ctrl+点击触发） -->
+    <TranslationPanel />
     <NotePreviewCard />
   </div>
 </template>
 
 <style scoped>
 .pdf-page {
-  border-radius: 0.75rem; /* 单页容器圆角 */
+  border-radius: 0.75rem;
 }
 
 .highlightLayer {
-  z-index: 4; /* ensure highlight stays above link overlays */
+  z-index: 4;
   pointer-events: none;
 }
 
 .linkLayer {
   z-index: 3;
-  pointer-events: none; /* 让非链接区域透传，文本仍可选中 */
+  pointer-events: none;
 }
 
 .links-disabled :deep(.linkLayer),
 .links-disabled :deep(.linkLayer a),
 .links-disabled :deep(.linkLayer .internal-link) {
-  pointer-events: none !important; /* 拖拽选中时关闭链接事件，避免 selection 落在 linkLayer */
+  pointer-events: none !important;
 }
 
 .highlight-rect {
@@ -1801,18 +853,17 @@ onBeforeUnmount(() => {
 }
 
 .highlight-selected-box {
-  border: 2px dashed #4a5568; /* 选中时显示的大框虚线边框 */
+  border: 2px dashed #4a5568;
   box-shadow: 0 0 4px rgba(0,0,0,0.1);
   background-color: transparent;
-  z-index: 2; /* 确保在普通高亮之上 */
+  z-index: 2;
 }
 
 :deep(.linkLayer a),
 :deep(.linkLayer .internal-link) {
-  pointer-events: auto; /* 仅链接可点击，其他区域透传 */
+  pointer-events: auto;
 }
 
-/* 加载动画 */
 .loading-spinner {
   width: 32px;
   height: 32px;
@@ -1828,12 +879,10 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 段落光标层 */
 .paragraphMarkerLayer {
   z-index: 5;
 }
 
-/* 段落光标样式 - 发光 > 符号 */
 .paragraph-marker {
   z-index: 6;
 }
@@ -1866,7 +915,6 @@ onBeforeUnmount(() => {
   color: rgba(80, 140, 255, 1);
 }
 
-/* 夜间模式段落光标 */
 :global(.dark) .paragraph-marker .marker-chevron {
   color: rgba(140, 180, 255, 0.7);
 }
@@ -1880,7 +928,6 @@ onBeforeUnmount(() => {
   transition: opacity 0.15s ease;
 }
 
-/* Dark mode adjustments: dark canvas and white text for comfortable reading */
 :global(.dark .pdf-viewer-root) {
   background: #0b1220;
 }
@@ -1898,8 +945,6 @@ onBeforeUnmount(() => {
   filter: invert(0.92) hue-rotate(180deg) brightness(1.05);
 }
 
-
-
 :global(.dark .highlight-selected-box) {
   border-color: #cbd5ff;
 }
@@ -1909,7 +954,6 @@ onBeforeUnmount(() => {
   border-top-color: #9ca3af;
 }
 
-/* Dark mode scrollbar for the PDF scroller */
 :global(.dark .pdf-scroll-container::-webkit-scrollbar) {
   width: 10px;
 }
@@ -1928,10 +972,9 @@ onBeforeUnmount(() => {
 }
 
 .textLayer {
-  pointer-events: auto; /* 允许 Text Layer 响应鼠标事件 */
+  pointer-events: auto;
 }
 
-/* Fix for PDF text layer alignment and font matching (ICML / Times New Roman) */
 :deep(.textLayer) {
   opacity: 1;
 }
