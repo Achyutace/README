@@ -95,6 +95,9 @@ export function usePageRender(
 
     const preserveContent = !!options?.preserveContent && renderedPages.value.has(pageNumber)
 
+    // 记录渲染开始时的 scale，用于后续检查 scale 是否已变化
+    const renderStartScale = scale.value
+
     const page = await pdf.getPage(pageNumber)
 
     const targetCanvas = preserveContent
@@ -186,6 +189,13 @@ export function usePageRender(
       )
     } catch (err) {
       console.error('Error rendering Link Layer:', err)
+    }
+
+    // 检查 scale 是否在渲染过程中已变化，如果变化则跳过样式更新
+    // 避免过时的渲染结果覆盖当前正确的 canvas 尺寸
+    if (scale.value !== renderStartScale) {
+      renderTasks.delete(pageNumber)
+      return
     }
 
     if (preserveContent) {

@@ -90,6 +90,11 @@ const isResizing = ref(false)
 
 const notesCache = ref<Note[]>([])
 
+// Zoom 节流相关
+let zoomRafId: number | null = null
+let pendingZoomDelta = 0
+let lastZoomEvent: WheelEvent | null = null
+
 // ------------------------- 初始化 composables -------------------------
 const scaleRef = computed(() => pdfStore.scale)
 const {
@@ -377,6 +382,14 @@ function cleanup() {
   lastRenderedScale.clear()
   isZooming.value = false
   pdfDoc.value = null
+
+  // 清理 zoom RAF
+  if (zoomRafId) {
+    cancelAnimationFrame(zoomRafId)
+    zoomRafId = null
+  }
+  pendingZoomDelta = 0
+  lastZoomEvent = null
 }
 
 // ------------------------- 交互处理 -------------------------
@@ -414,18 +427,30 @@ function handleWheel(event: WheelEvent) {
     event.preventDefault()
     event.stopPropagation()
 
-    const isHorizontalOverflow = container.scrollWidth > container.clientWidth + 1
+    // 累积 delta，使用 RAF 节流
+    pendingZoomDelta += event.deltaY
+    lastZoomEvent = event
 
-    if (isHorizontalOverflow) {
-      setPendingAnchor(captureCenterAnchor({ x: event.clientX, y: event.clientY }))
-    } else {
-      setPendingAnchor(captureCenterAnchor())
-    }
+    if (zoomRafId) return // 已有待执行的帧，直接返回
 
-    const delta = event.deltaY
-    const step = clamp(Math.abs(delta) / 100, 0.05, 0.25)
-    const nextScale = delta < 0 ? pdfStore.scale + step : pdfStore.scale - step
-    pdfStore.setScale(nextScale)
+    zoomRafId = requestAnimationFrame(() => {
+      zoomRafId = null
+
+      const isHorizontalOverflow = container.scrollWidth > container.clientWidth + 1
+
+      if (isHorizontalOverflow && lastZoomEvent) {
+        setPendingAnchor(captureCenterAnchor({ x: lastZoomEvent.clientX, y: lastZoomEvent.clientY }))
+      } else {
+        setPendingAnchor(captureCenterAnchor())
+      }
+
+      const step = clamp(Math.abs(pendingZoomDelta) / 100, 0.05, 0.25)
+      const nextScale = pendingZoomDelta < 0 ? pdfStore.scale + step : pdfStore.scale - step
+      pdfStore.setScale(nextScale)
+
+      pendingZoomDelta = 0
+      lastZoomEvent = null
+    })
     return
   }
 
