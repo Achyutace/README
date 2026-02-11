@@ -49,6 +49,23 @@ function handleSidebarMouseLeave() {
   isHovering.value = false
 }
 
+// ------------------------- 预翻译对话框状态 -------------------------
+const showPreTranslateDialog = ref(false)
+const pendingPreTranslateDocId = ref<string | null>(null)
+
+function confirmPreTranslate() {
+  if (pendingPreTranslateDocId.value) {
+    pdfStore.startPreTranslation(pendingPreTranslateDocId.value)
+  }
+  showPreTranslateDialog.value = false
+  pendingPreTranslateDocId.value = null
+}
+
+function cancelPreTranslate() {
+  showPreTranslateDialog.value = false
+  pendingPreTranslateDocId.value = null
+}
+
 // ------------------------- 文件上传流程 -------------------------
 // 点击上传PDF按钮
 function triggerFileUpload() {
@@ -84,6 +101,10 @@ async function handleFileUpload(event: Event) {
 
         // 上传成功后自动收起左侧边栏
         isCollapsed.value = true
+
+        // 弹出预翻译对话框
+        pendingPreTranslateDocId.value = doc.id
+        showPreTranslateDialog.value = true
 
       } catch (error) {
         alert('上传失败，请确保后端服务已启动')
@@ -241,5 +262,54 @@ function removeDocument(id: string, event: Event) {
         </div>
       </div>
     </aside>
+
+    <!-- 全文预翻译确认对话框 -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showPreTranslateDialog" class="fixed inset-0 z-[9998] flex items-center justify-center">
+          <!-- 遮罩层 -->
+          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="cancelPreTranslate"></div>
+          <!-- 对话框 -->
+          <div class="relative bg-white dark:bg-[#2d2d30] rounded-xl shadow-2xl p-6 max-w-md mx-4 border border-gray-200/60 dark:border-gray-700/60">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">全文预翻译</h3>
+            </div>
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
+              是否对整篇论文进行预翻译？启用后将按顺序翻译每个段落并缓存结果，之后点击段落即可直接查看翻译。
+            </p>
+            <div class="flex justify-end gap-3">
+              <button
+                @click="cancelPreTranslate"
+                class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                跳过
+              </button>
+              <button
+                @click="confirmPreTranslate"
+                class="px-4 py-2 text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors font-medium"
+              >
+                开始预翻译
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

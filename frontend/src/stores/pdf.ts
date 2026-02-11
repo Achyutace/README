@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { PdfParagraph, TranslationPanelState, TranslationPanelInstance } from '../types'
+import { aiApi } from '../api'
 
 const DEFAULT_SCALE = 1.5 // 实际缩放 150%，显示为 100%
 const HIGHLIGHTS_STORAGE_KEY = 'pdf-highlights'
@@ -79,6 +80,17 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 翻译缓存（paragraphId -> translation）
   const translationCache = ref<Record<string, string>>({})
+
+  // 全文预翻译状态
+  const isPreTranslating = ref(false)
+  const preTranslateQueue = ref<string[]>([])
+  const preTranslateTotal = ref(0)
+  const preTranslateCompleted = ref(0)
+  const preTranslatePdfId = ref<string | null>(null)
+  const preTranslateProgress = computed(() => {
+    if (preTranslateTotal.value === 0) return 0
+    return Math.round((preTranslateCompleted.value / preTranslateTotal.value) * 100)
+  })
 
   // 显示的缩放百分比：实际缩放的 2/3（1.5 显示为 100%）
   const scalePercent = computed(() => Math.round((scale.value / 1.5) * 100))
@@ -282,6 +294,11 @@ export const usePdfStore = defineStore('pdf', () => {
   function openTranslationPanel(paragraphId: string, position: { x: number; y: number }, originalText: string) {
     // 检查缓存
     const cached = translationCache.value[paragraphId]
+
+    // 如果正在预翻译且该段落未缓存，优先翻译它
+    if (isPreTranslating.value && !cached) {
+      prioritizeParagraph(paragraphId)
+    }
     
     // 检查是否已存在该段落的翻译窗口
     const existingPanel = translationPanels.value.find(p => p.paragraphId === paragraphId)
@@ -420,6 +437,74 @@ export const usePdfStore = defineStore('pdf', () => {
     }
   }
 
+  // 全文预翻译：启动
+  async function startPreTranslation(pdfId: string) {
+    const docParagraphs = allParagraphs.value[pdfId]
+    if (!docParagraphs || docParagraphs.length === 0) return
+
+    isPreTranslating.value = true
+    preTranslatePdfId.value = pdfId
+    preTranslateQueue.value = docParagraphs.map(p => p.id)
+    preTranslateTotal.value = docParagraphs.length
+    preTranslateCompleted.value = 0
+
+    await processPreTranslateQueue()
+  }
+
+  // 全文预翻译：逐个处理队列
+  async function processPreTranslateQueue() {
+    while (preTranslateQueue.value.length > 0 && isPreTranslating.value) {
+      const paragraphId = preTranslateQueue.value[0] as string
+
+      // 已缓存则跳过
+      if (translationCache.value[paragraphId]) {
+        preTranslateQueue.value.shift()
+        preTranslateCompleted.value++
+        continue
+      }
+
+      try {
+        const pdfId = preTranslatePdfId.value
+        if (pdfId) {
+          const result = await aiApi.translateParagraph(pdfId, paragraphId)
+          if (result.success) {
+            setTranslation(paragraphId, result.translation)
+          }
+        }
+      } catch (error) {
+        console.error(`Pre-translate failed for ${paragraphId}:`, error)
+      }
+
+      // 按值移除（防止队列被 prioritize 重排后误删）
+      const idx = preTranslateQueue.value.indexOf(paragraphId)
+      if (idx !== -1) {
+        preTranslateQueue.value.splice(idx, 1)
+      }
+      preTranslateCompleted.value++
+    }
+
+    // 完成
+    isPreTranslating.value = false
+    preTranslatePdfId.value = null
+  }
+
+  // 全文预翻译：停止
+  function stopPreTranslation() {
+    isPreTranslating.value = false
+    preTranslateQueue.value = []
+    preTranslatePdfId.value = null
+  }
+
+  // 全文预翻译：优先翻译指定段落（移到队列最前面）
+  function prioritizeParagraph(paragraphId: string) {
+    if (!isPreTranslating.value) return
+    const index = preTranslateQueue.value.indexOf(paragraphId)
+    if (index > 0) {
+      preTranslateQueue.value.splice(index, 1)
+      preTranslateQueue.value.unshift(paragraphId)
+    }
+  }
+
   // 笔记预览卡片状态
   const notePreviewCard = ref<{
     isVisible: boolean
@@ -548,6 +633,15 @@ export const usePdfStore = defineStore('pdf', () => {
     setPanelSnapMode,
     setPanelLoading,
     bringPanelToFront,
+    // 全文预翻译
+    isPreTranslating,
+    preTranslateQueue,
+    preTranslateTotal,
+    preTranslateCompleted,
+    preTranslateProgress,
+    startPreTranslation,
+    stopPreTranslation,
+    prioritizeParagraph,
     // 笔记预览卡片
     notePreviewCard,
     openNotePreviewCard,
