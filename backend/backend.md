@@ -19,7 +19,7 @@ readme/
 │   │   |   ├── library.py      # 文献管理路由：上传，删除，分组
 │   │   |   ├── user.py         # 用户管理相关路由
 │   │   |   ├── keyword.py      # 关键词相关路由
-│   │   |   └── roadmap.py      # 知识图谱相关路由：获取结点，添加节点，删除节点  
+│   │   |   ├── roadmap.py      # 知识图谱相关路由：获取结点，添加节点，删除节点  
 │   │   └── routers.py              # 统一注册所有路由
 │   ├── model/                      # 模型层：定义数据长什么样
 │   │   ├── db/                     # SQLAlchemy ORM 模型 (对应数据库表)
@@ -43,6 +43,7 @@ readme/
 │   │   └── user_service.py         # 用户管理服务：登录，注册等
 │   ├── tasks/                      # 异步任务
 │   │   ├── pdf_tasks.py            # pdf段落+图片解析+向量化的异步处理
+│   │   └── chat_task.py            # 聊天框的异步任务：标题异步生成
 │   ├── workflows/                  # Agent服务层：过于重了，单独列出来 
 │   │   ├── state.py                # 定义 AgentState (Messages, Context, Keys)
 │   │   ├── nodes/                  # 图节点逻辑
@@ -54,6 +55,7 @@ readme/
 │   │   ├── embedding_utils.py      # 向量化封装 (OpenAI 等 API 调用)
 │   │   ├── search_utils.py         # 联网搜索封装 (搜索 API 请求与清洗)
 │   │   ├── text_splitter.py        # 文本切片 (RecursiveCharacterTextSplitter)
-│   │   └── graph_algo.py           # NetworkX 纯算法 (roadmap可能用到的一些算法)
+│   │   ├── graph_algo.py           # NetworkX 纯算法 (roadmap可能用到的一些算法)
+│   │   └── ...
 └── config.yaml             # 所有的配置都在这里
 

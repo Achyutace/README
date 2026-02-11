@@ -34,7 +34,6 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 BASE_DIR = Path(__file__).resolve().parent.parent  
 STORAGE_ROOT = BASE_DIR / 'storage'  # README/storage
 USERS_DIR = STORAGE_ROOT / 'users'
-CHROMA_DIR = STORAGE_ROOT / 'chroma_db'
 
 # 初始化磁盘目录结构
 def init_storage_directories():
@@ -44,7 +43,6 @@ def init_storage_directories():
         STORAGE_ROOT / 'images',      # 图片存储目录
         STORAGE_ROOT / 'uploads',     # PDF上传目录
         USERS_DIR,                     # 用户数据目录
-        CHROMA_DIR,                    # 向量数据库目录
     ]
     
     for directory in directories:
@@ -62,7 +60,7 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 限制上传大小为 10
 # ==================== 4. 初始化全局服务 (单例) ====================
 
 # (1) RAG 服务：负责向量检索
-rag_service = RAGService(chroma_dir=str(CHROMA_DIR))
+rag_service = RAGService()
 app.rag_service = rag_service
 
 # (2) 翻译服务：负责调用 LLM 进行翻译

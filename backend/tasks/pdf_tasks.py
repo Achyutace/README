@@ -67,7 +67,7 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 @shared_task(bind=True, name="tasks.pdf_tasks.process_pdf",
              max_retries=3, default_retry_delay=60)
 
-def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int):
+def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: str = None):
     """
     PDF 全流程异步处理任务。
 
@@ -76,9 +76,10 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
         upload_folder: 用户上传目录绝对路径
         filename:      原始文件名
         page_count:    页数 
+        user_id:       用户 ID (字符串)
     """
     task_id = self.request.id
-    logger.info(f"[Task {task_id}] Start processing PDF {filename} ({file_hash}), pages={page_count}")
+    logger.info(f"[Task {task_id}] Start processing PDF {filename} ({file_hash}), pages={page_count}, user={user_id}")
 
     try:
         filepath = _resolve_filepath(file_hash, upload_folder)
@@ -149,8 +150,26 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
             "phase": "vectorizing",
         })
         
-        # TODO
-        pass
+        # 从数据库加载段落并建立索引
+        try:
+            target_user_uuid = None
+            if user_id:
+                try:
+                    target_user_uuid = uuid.UUID(str(user_id))
+                except (ValueError, TypeError):
+                    logger.error(f"[Task {task_id}] Invalid user_id format: {user_id}. RAG indexing might fail or be assigned to public.")
+                    pass 
+            else:
+                 logger.warning(f"[Task {task_id}] Missing user_id for PDF processing.")
+
+            if target_user_uuid:
+                _run_rag_indexing_from_db(file_hash, task_id, target_user_uuid)
+            else:
+                logger.error(f"[Task {task_id}] Skipped RAG indexing due to invalid/missing user_id.")
+
+        except Exception as e:
+            logger.error(f"[Task {task_id}] RAG indexing failed: {e}")
+            # 不阻断流程，RAG 不可用
 
         # ====================== 完成 ======================
         _update_status(file_hash, STATUS_COMPLETED)
@@ -211,33 +230,41 @@ def _update_progress(file_hash: str, current_page: int):
         db.close()
 
 
-def _run_rag_indexing(file_hash: str, filepath: str, user_id: str, task_id: str):
+
+def _run_rag_indexing_from_db(file_hash: str, task_id: str, user_id: uuid.UUID):
     """
-    执行 RAG 向量索引。
-    延迟导入以避免循环依赖。
+    使用数据库中的已解析段落执行 RAG 向量索引。
+    这比重新解析 PDF 更高效且一致。
     """
+    db, repo = _get_repo()
     try:
+        # 1. 获取已解析的段落
+        paragraphs = repo.get_paragraphs(file_hash)
+        if not paragraphs:
+            logger.warning(f"[Task {task_id}] No paragraphs found in DB for {file_hash}, skipping RAG.")
+            return
+
+        # 2. 初始化 RAG 服务 (延迟导入以避免循环依赖)
         from services.rag_service import RAGService
-        from pathlib import Path
-        from core.config import settings
-
-        chroma_dir = str(Path(filepath).resolve().parent.parent.parent / "storage" / "chroma_db")
-        rag_service = RAGService(chroma_dir=chroma_dir)
-
-        if not rag_service.check_exists(file_hash):
-            logger.info(f"[Task {task_id}] Starting RAG indexing...")
-            result = rag_service.index_paper(
-                pdf_path=filepath,
-                paper_id=file_hash,
-                user_id=user_id,
-            )
-            if result.get("success"):
-                logger.info(f"[Task {task_id}] RAG indexing done. Chunks: {result.get('chunks_created')}")
-            else:
-                logger.warning(f"[Task {task_id}] RAG indexing failed: {result.get('message')}")
+        rag_service = RAGService() 
+        
+        # 3. 索引
+        logger.info(f"[Task {task_id}] Starting RAG indexing from DB for user {user_id}...")
+        
+        result = rag_service.index_paper_from_db(
+            file_hash=file_hash,
+            paragraphs=paragraphs,
+            user_id=user_id
+        )
+        
+        if result.get("success"):
+            logger.info(f"[Task {task_id}] RAG indexing done. Chunks: {result.get('chunks_created')}")
         else:
-            logger.info(f"[Task {task_id}] RAG index already exists, skipped.")
+            logger.warning(f"[Task {task_id}] RAG indexing failed: {result.get('message')}")
+            
     except ImportError as e:
         logger.warning(f"[Task {task_id}] RAG service not available: {e}")
     except Exception as e:
-        raise
+        logger.error(f"[Task {task_id}] Error in RAG indexing: {e}")
+    finally:
+        db.close()

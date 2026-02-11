@@ -46,7 +46,7 @@ class VectorDBClient:
                 try:
                     self.qdrant = QdrantClient(
                         url=settings.vector_store.qdrant_url,
-                        api_key=settings.vector_store.qdrant_api_key,
+                        api_key=settings.vector_store.qdrant_api_key or None,
                         prefer_grpc=settings.vector_store.qdrant_prefer_grpc
                     )
                     logger.info(f"Qdrant initialized at {settings.vector_store.qdrant_url}")

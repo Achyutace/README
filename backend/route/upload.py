@@ -53,6 +53,7 @@ def upload_pdf():
         result = pdf_service.ingest_file(
             file_obj=file,
             filename=file.filename,
+            user_id=user_id_str
         )
 
         pdf_id = result['pdf_id']

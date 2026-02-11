@@ -9,7 +9,8 @@ Agent Service - 学术论文阅读助手 Agent [对话用]
 """
 
 import json
-from typing import Dict, List, Optional, TypedDict, Annotated
+import uuid
+from typing import Dict, List, Optional, TypedDict, Annotated, Union
 from datetime import datetime
 
 # LangChain 核心组件 (LangChain 0.3 适配: 使用 langchain_core)
@@ -24,11 +25,12 @@ from services.rag_service import RAGService  # RAG服务
 from services.storage_service import StorageService
 from utils.web_search_tool import WebSearchTool  # 网络搜索工具
 from utils.paper_discovery_tool import PaperDiscoveryTool  # 论文搜索工具
+
 class AgentState(TypedDict):
     """ Agent 状态定义 """
     user_query: str  
     retrieval_query: str  
-    user_id: str
+    user_id: uuid.UUID
     paper_id: str
     
     is_general_chat: bool  # 标记是否为通用问题
@@ -275,7 +277,7 @@ Agent:
         paper_id = state['paper_id']
         
         # 执行检索
-        results = self.rag_service.retrieve(query=query_to_use, file_hash=paper_id, top_k=5)
+        results = self.rag_service.retrieve(query=query_to_use, file_hash=paper_id, user_id=user_id, top_k=5)
         
         # 格式化为文本
         context_parts = []
@@ -404,7 +406,7 @@ Agent:
         external_context = []
         is_sufficient = True
         current_step_desc = "信息充足，无需外部检索"
-
+        
         try:
             # 1. 调用 LLM 做决策
             response = self.llm.invoke([HumanMessage(content=prompt)])
@@ -753,7 +755,7 @@ Agent:
         
     def chat(self, 
              user_query: str,
-             user_id: str = "default",
+             user_id: Optional[uuid.UUID] = None,
              paper_id: str = None,
              chat_history: Optional[List[Dict]] = None) -> Dict:
         """
@@ -807,7 +809,7 @@ Agent:
     
     def stream_chat(self, 
                     user_query: str,
-                    user_id: str = "default",
+                    user_id: Optional[uuid.UUID] = None,
                     paper_id: Optional[str] = None,
                     chat_history: Optional[List[Dict]] = None):
         """
@@ -876,7 +878,7 @@ Agent:
         - 用户需要快速回答
         - 问题相对简单，不需要外部工具
         - 希望基于整篇文档内容进行对话
-
+        
         Args:
             user_query: 用户问题
             context_text: 上下文文本（如文档全文，由路由层提供）

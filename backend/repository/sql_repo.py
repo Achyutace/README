@@ -248,7 +248,6 @@ class SQLRepository:
                 if py <= y_coord <= (py + ph):
                     return p.original_text
         return None
-
     # ==================== PDF 图片 ====================
 
     def save_images(self, file_hash: str, images: List[Dict]):

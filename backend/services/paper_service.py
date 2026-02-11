@@ -80,7 +80,7 @@ class PdfService:
         raise FileNotFoundError(f"PDF file not found locally or in storage: {pdf_id}")
 
     # ===================== 文件处理异步 =====================
-    def ingest_file(self, file_obj, filename: str) -> dict:
+    def ingest_file(self, file_obj, filename: str, user_id: str = None) -> dict:
         """
         摄入文件：负责查重、存储、更新GlobalFile、触发Celery。
         
@@ -203,10 +203,10 @@ class PdfService:
         # 7. 启动 Celery 异步处理
         try:
             process_pdf.apply_async(
-                args=[pdf_id, self.upload_folder, safe_filename, page_count],
+                args=[pdf_id, self.upload_folder, safe_filename, page_count, user_id],
                 task_id=new_task_id,
             )
-            logger.info(f"[Ingest] Dispatched Celery task {new_task_id} for {pdf_id}")
+            logger.info(f"[Ingest] Dispatched Celery task {new_task_id} for {pdf_id} (user={user_id})")
         except Exception as e:
             logger.error(f"[Ingest] Failed to dispatch Celery task for {pdf_id}: {e}")
             # 如果分发失败，更新状态为 failed
