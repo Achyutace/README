@@ -6,6 +6,7 @@
 import { ref } from 'vue'
 import { getDocument, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist'
 import type { PageSize, PageRef } from '../types/pdf'
+import { usePdfStore } from '../stores/pdf'
 
 export interface UsePdfLoaderOptions {
   onLoadComplete?: (pdf: PDFDocumentProxy) => void
@@ -103,6 +104,10 @@ export function usePdfLoader(
       pageSizesArray.value = tempSizes
       pageHeightAccumulator.value = tempAccumulator
     }
+
+    // 更新到 store，供其他组件使用
+    const pdfStore = usePdfStore()
+    pdfStore.setPageSizes(pageSizesConstant.value, pageSizesArray.value)
   }
 
   /**

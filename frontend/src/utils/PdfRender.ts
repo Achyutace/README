@@ -5,6 +5,7 @@
 
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { LinkOverlayRect, PageRef } from '../types/pdf'
+import type { PdfParagraph } from '../types'
 
 /**
  * 添加外部链接覆盖层
@@ -33,17 +34,18 @@ export function appendLinkOverlay(
 
 /**
  * 添加内部链接覆盖层
+ * 点击时才解析目标坐标（延迟解析以优化性能）
  */
 export function appendInternalLinkOverlay(
   container: HTMLElement,
   rect: LinkOverlayRect,
-  destCoords: DestinationCoords,
-  onClick: (dest: DestinationCoords, clickX: number, clickY: number) => void,
+  rawDest: unknown,
+  pdfDoc: PDFDocumentProxy,
+  onClick: (destCoords: DestinationCoords, clickX: number, clickY: number) => void,
   title?: string
 ): void {
   const link = document.createElement('div')
-  link.dataset.destPage = String(destCoords.page)
-  link.title = title || `跳转到第 ${destCoords.page} 页`
+  link.title = title || '内部链接'
   link.style.display = 'block'
   link.style.left = `${rect.left}px`
   link.style.top = `${rect.top}px`
@@ -57,10 +59,14 @@ export function appendInternalLinkOverlay(
     e.stopPropagation()
   })
 
-  link.addEventListener('click', (e) => {
+  link.addEventListener('click', async (e) => {
     e.preventDefault()
     e.stopPropagation()
-    onClick(destCoords, e.clientX, e.clientY)
+    // 点击时才解析目标坐标
+    const destCoords = await resolveDestination(pdfDoc, rawDest)
+    if (destCoords) {
+      onClick(destCoords, e.clientX, e.clientY)
+    }
   })
   container.appendChild(link)
 }
@@ -85,6 +91,65 @@ export type DestinationCoords = {
 }
 
 /**
+ * 根据页码和坐标获取对应的自然段
+ * 注意：传入的坐标是 PDF 坐标系（原点在左下角，Y 轴向上）
+ * 但 paragraph.bbox 存储的是 CSS 坐标系（原点在左上角，Y 轴向下）
+ * @param page - 页码（1-based）
+ * @param x - X 坐标（PDF 用户空间单位，从左向右）
+ * @param y - Y 坐标（PDF 用户空间单位，从下向上）
+ * @param paragraphs - 段落数组
+ * @param pageHeight - 页面高度（PDF 单位），用于坐标转换，必须提供
+ * @returns 匹配的 PdfParagraph 或 null
+ */
+export function getParagraphByCoords(
+  page: number,
+  x: number | null,
+  y: number | null,
+  paragraphs: PdfParagraph[],
+): PdfParagraph | null {
+  if (!paragraphs || paragraphs.length === 0) return null
+  if (x === null || y === null) return null
+
+  // 筛选出目标页面的段落
+  const pageParagraphs = paragraphs.filter(p => p.page === page)
+  if (pageParagraphs.length === 0) return null
+
+  // 找到包含该坐标的段落
+  // bbox 格式: { x0, y0, x1, y1, width, height }
+  // 在前端存储的 bbox 中，y0 和 y1 是 CSS 坐标系（原点在左上角，y 向下增长）
+  // paragraphs 已按 y0 排序，利用相邻段落 y0 的中点来确定归属范围
+  const n = pageParagraphs.length
+  if (n === 1) {
+    return pageParagraphs[0]!
+  }
+
+  for (let i = 0; i < n; i++) {
+    const paragraph = pageParagraphs[i]!
+    const y0 = paragraph.bbox.y0
+
+    if (i === 0) {
+      // 第一个段落：y < (y0[0] + y0[1]) / 2
+      const mid = (y0 + pageParagraphs[1]!.bbox.y0) / 2
+      if (y < mid) {
+        return paragraph
+      }
+    } else if (i === n - 1) {
+      // 最后一个段落：y >= (y0[n-2] + y0[n-1]) / 2
+      return paragraph
+    } else {
+      // 中间段落：(y0[i-1] + y0[i]) / 2 <= y < (y0[i] + y0[i+1]) / 2
+      const prevMid = (pageParagraphs[i - 1]!.bbox.y0 + y0) / 2
+      const nextMid = (y0 + pageParagraphs[i + 1]!.bbox.y0) / 2
+      if (y >= prevMid && y < nextMid) {
+        return paragraph
+      }
+    }
+  }
+
+  return null
+}
+
+/**
  * 解析 PDF 内部链接目标页码和坐标
  */
 export async function resolveDestination(
@@ -95,6 +160,7 @@ export async function resolveDestination(
 
   try {
     let destArray = dest
+    console.log('Resolving destination:', dest)
 
     // 如果目标是 String，需要先解析
     if (typeof dest === 'string') {
@@ -110,6 +176,12 @@ export async function resolveDestination(
 
     // 获取页码
     const pageIndex = await pdfDoc.getPageIndex(pageRef)
+    const pageNumber = pageIndex + 1 // 页码从 1 开始
+
+    // 获取页面尺寸（直接从 PDF 文档获取，不依赖 store）
+    const page = await pdfDoc.getPage(pageNumber)
+    const viewport = page.getViewport({ scale: 1 })
+    const pageHeight = viewport.height
 
     // 解析目标类型和坐标
     // destArray[1] 可能是字符串或 {name: string} 对象
@@ -153,9 +225,9 @@ export async function resolveDestination(
     }
 
     return {
-      page: pageIndex + 1, // 页码从 1 开始
+      page: pageNumber,
       x,
-      y,
+      y: pageHeight - (y ?? 0),
       zoom,
       type: destType || 'Fit'
     }
@@ -204,29 +276,25 @@ export async function renderLinkLayer(
       // 外部链接
       appendLinkOverlay(container, overlayRect, annot.url, annot.url || 'External Link')
     } else if (annot.dest) {
-      // 内部链接（如论文引用）
-      const destCoords = await resolveDestination(pdfDoc, annot.dest)
-      if (destCoords) {
-        appendInternalLinkOverlay(
-          container,
-          overlayRect,
-          destCoords,
-          onInternalLinkClick,
-          `跳转到第 ${destCoords.page} 页`
-        )
-      }
+      // 内部链接（如论文引用）- 延迟解析目标坐标到点击时
+      appendInternalLinkOverlay(
+        container,
+        overlayRect,
+        annot.dest,
+        pdfDoc,
+        onInternalLinkClick,
+        '点击跳转到引用位置'
+      )
     } else if (annot.action?.dest) {
-      // 带 action 的内部链接
-      const destCoords = await resolveDestination(pdfDoc, annot.action.dest)
-      if (destCoords) {
-        appendInternalLinkOverlay(
-          container,
-          overlayRect,
-          destCoords,
-          onInternalLinkClick,
-          `跳转到第 ${destCoords.page} 页`
-        )
-      }
+      // 带 action 的内部链接 - 延迟解析目标坐标到点击时
+      appendInternalLinkOverlay(
+        container,
+        overlayRect,
+        annot.action.dest,
+        pdfDoc,
+        onInternalLinkClick,
+        '点击跳转到引用位置'
+      )
     }
   }
 }

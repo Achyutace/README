@@ -6,6 +6,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { PdfParagraph } from '../types'
+import type { PageSize } from '../types/pdf'
 
  // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
@@ -74,6 +75,10 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 所有文档的段落数据（用于翻译/定位等功能）
   const allParagraphs = ref<Record<string, PdfParagraph[]>>({})
+
+  // 页面尺寸数据（用于坐标转换等）
+  const pageSizesConstant = ref<PageSize | null>(null)
+  const pageSizesArray = ref<PageSize[] | null>(null)
 
   // 当前文档的段落（计算属性）
   const paragraphs = computed(() => {
@@ -311,6 +316,12 @@ export const usePdfStore = defineStore('pdf', () => {
     return paragraphs.value.filter(p => p.page === page)
   }
 
+  // 设置页面尺寸数据
+  function setPageSizes(constant: PageSize | null, array: PageSize[] | null) {
+    pageSizesConstant.value = constant
+    pageSizesArray.value = array
+  }
+
   // ---------------------- 笔记预览卡片（小悬浮卡片） ----------------------
   const notePreviewCard = ref<{
     isVisible: boolean
@@ -461,6 +472,10 @@ export const usePdfStore = defineStore('pdf', () => {
     paragraphs,
     setParagraphs,
     getParagraphsByPage,
+    // 页面尺寸
+    pageSizesConstant,
+    pageSizesArray,
+    setPageSizes,
     // 笔记预览卡片
     notePreviewCard,
     openNotePreviewCard,

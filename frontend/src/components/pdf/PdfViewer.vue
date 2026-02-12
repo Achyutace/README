@@ -302,6 +302,7 @@ async function preloadPageSizes(pdf: PDFDocumentProxy) {
   }
 
   if (allSameSize && firstSize) {
+    console.log(`All pages have the same size: ${firstSize.width}x${firstSize.height}. Using constant size optimization.`)
     pageSizesConstant.value = firstSize
     pageSizesArray.value = null
     pageHeightAccumulator.value = []
