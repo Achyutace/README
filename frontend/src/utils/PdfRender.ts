@@ -33,8 +33,23 @@ export function appendLinkOverlay(
 }
 
 /**
+ * 检查目标是否为直接跳转类型
+ * 以 "cite:" 开头的按论文引用处理（弹窗），其他一律直接跳转
+ */
+function isDirectJumpDestination(dest: unknown): boolean {
+  if (typeof dest === 'string') {
+    const lowerDest = dest.toLowerCase()
+    // 以 cite: 开头的按论文处理（不直接跳转）
+    return !lowerDest.startsWith('cite.')
+  }
+  // 非字符串类型的目标也直接跳转
+  return true
+}
+
+/**
  * 添加内部链接覆盖层
  * 点击时才解析目标坐标（延迟解析以优化性能）
+ * 对于 table, section, figure, appendix 开头的链接直接跳转
  */
 export function appendInternalLinkOverlay(
   container: HTMLElement,
@@ -42,6 +57,7 @@ export function appendInternalLinkOverlay(
   rawDest: unknown,
   pdfDoc: PDFDocumentProxy,
   onClick: (destCoords: DestinationCoords, clickX: number, clickY: number) => void,
+  onDirectJump?: (destCoords: DestinationCoords) => void,
   title?: string
 ): void {
   const link = document.createElement('div')
@@ -54,6 +70,9 @@ export function appendInternalLinkOverlay(
   link.style.position = 'absolute'
   link.className = 'hover:bg-blue-200/30 cursor-pointer internal-link'
 
+  // 判断是否为直接跳转类型
+  const isDirectJump = isDirectJumpDestination(rawDest)
+
   // 防止与容器的点击处理冲突
   link.addEventListener('mousedown', (e) => {
     e.stopPropagation()
@@ -65,7 +84,13 @@ export function appendInternalLinkOverlay(
     // 点击时才解析目标坐标
     const destCoords = await resolveDestination(pdfDoc, rawDest)
     if (destCoords) {
-      onClick(destCoords, e.clientX, e.clientY)
+      if (isDirectJump && onDirectJump) {
+        // 直接跳转到目标位置
+        onDirectJump(destCoords)
+      } else {
+        // 显示弹窗
+        onClick(destCoords, e.clientX, e.clientY)
+      }
     }
   })
   container.appendChild(link)
@@ -246,7 +271,8 @@ export async function renderLinkLayer(
   viewport: { convertToViewportRectangle: (rect: number[]) => number[] },
   container: HTMLElement,
   pdfDoc: PDFDocumentProxy,
-  onInternalLinkClick: (dest: DestinationCoords, clickX: number, clickY: number) => void
+  onInternalLinkClick: (dest: DestinationCoords, clickX: number, clickY: number) => void,
+  onDirectJump?: (dest: DestinationCoords) => void
 ): Promise<void> {
   container.innerHTML = ''
 
@@ -283,6 +309,7 @@ export async function renderLinkLayer(
         annot.dest,
         pdfDoc,
         onInternalLinkClick,
+        onDirectJump,
         '点击跳转到引用位置'
       )
     } else if (annot.action?.dest) {
@@ -293,6 +320,7 @@ export async function renderLinkLayer(
         annot.action.dest,
         pdfDoc,
         onInternalLinkClick,
+        onDirectJump,
         '点击跳转到引用位置'
       )
     }

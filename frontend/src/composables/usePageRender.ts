@@ -187,6 +187,10 @@ export function usePageRender(
             detail: { destCoords, clickX, clickY } 
           })
           window.dispatchEvent(event)
+        },
+        (destCoords) => {
+          // 直接跳转到目标位置（table, section, figure, appendix 等）
+          scrollToPage(destCoords.page, true)
         }
       )
     } catch (err) {
