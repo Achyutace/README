@@ -6,6 +6,28 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { LinkOverlayRect, PageRef } from '../types/pdf'
 import type { PdfParagraph } from '../types'
+import { linkApi, type InternalLinkData } from '../api'
+
+/**
+ * 获取内部链接数据
+ * 根据目标坐标获取段落并向后端发送请求获取论文信息
+ */
+export async function fetchInternalLinkData(
+  pdfId: string,
+  destCoords: { page: number; x: number | null; y: number | null },
+  paragraphs: PdfParagraph[]
+): Promise<InternalLinkData | null> {
+  const targetParagraph = getParagraphByCoords(destCoords.page, destCoords.x, destCoords.y, paragraphs)
+  if (targetParagraph) {
+    try {
+      return await linkApi.getLinkData(pdfId, targetParagraph.id)
+    } catch (err) {
+      console.error('Failed to fetch internal link data:', err)
+      return null
+    }
+  }
+  return null
+}
 
 /**
  * 添加外部链接覆盖层
@@ -132,12 +154,21 @@ export function getParagraphByCoords(
   y: number | null,
   paragraphs: PdfParagraph[],
 ): PdfParagraph | null {
-  if (!paragraphs || paragraphs.length === 0) return null
-  if (x === null || y === null) return null
+  if (!paragraphs || paragraphs.length === 0) {
+    console.warn(`No paragraphs available for page ${page}`)
+    return null
+  }
+  if (x === null || y === null) {
+    console.warn(`Invalid coordinates for getParagraphByCoords: x=${x}, y=${y}`)
+    return null
+  }
 
   // 筛选出目标页面的段落
   const pageParagraphs = paragraphs.filter(p => p.page === page)
-  if (pageParagraphs.length === 0) return null
+  if (pageParagraphs.length === 0) {
+    console.warn(`No paragraphs found on page ${page}`)
+    return null
+  }
 
   // 找到包含该坐标的段落
   // bbox 格式: { x0, y0, x1, y1, width, height }
@@ -171,6 +202,7 @@ export function getParagraphByCoords(
     }
   }
 
+  console.warn(`No matching paragraph found at page ${page}, coordinates (${x}, ${y})`)
   return null
 }
 

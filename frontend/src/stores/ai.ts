@@ -281,6 +281,8 @@ export const useAiStore = defineStore('ai', () => {
         // 有本地消息则直接赋值给 chatMessages（更新界面）
         chatMessages.value = [...session.messages]
       }
+    } else {
+      console.warn(`Session ${sessionId} not found in local cache`)
     }
   }
   

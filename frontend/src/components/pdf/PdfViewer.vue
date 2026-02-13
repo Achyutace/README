@@ -37,7 +37,7 @@ import {
   CLICK_TIME_THRESHOLD,
   DRAG_DISTANCE_THRESHOLD
 } from '../../utils/PdfHelper'
-import { applyInterimScaleToPage } from '../../utils/PdfRender'
+import { applyInterimScaleToPage, fetchInternalLinkData } from '../../utils/PdfRender'
 import { useZoomAnchor } from '../../composables/useZoomAnchor'
 import { usePageRender } from '../../composables/usePageRender'
 import { usePdfSelection } from '../../composables/usePdfSelection'
@@ -209,6 +209,11 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
       linkLayer,
       highlightLayer
     })
+  } else {
+    console.warn(
+      `Failed to set page ref for page ${pageNumber}: missing required elements. ` +
+      `canvas: ${!!canvas}, textLayer: ${!!textLayer}, linkLayer: ${!!linkLayer}, highlightLayer: ${!!highlightLayer}`
+    )
   }
 }
 
@@ -695,6 +700,22 @@ window.addEventListener('pdf-internal-link', ((event: CustomEvent<{
   const popupX = Math.min(clickX + 10, window.innerWidth - 280)
   const popupY = Math.min(clickY + 10, window.innerHeight - 200)
   pdfStore.openInternalLinkPopup(destCoords, { x: popupX, y: popupY })
+  
+  // 获取内部链接数据并更新弹窗
+  if (pdfStore.currentDocumentId) {
+    pdfStore.setInternalLinkLoading(true)
+    fetchInternalLinkData(pdfStore.currentDocumentId, destCoords, pdfStore.paragraphs)
+      .then((data) => {
+        pdfStore.setInternalLinkData(data, data ? undefined : '获取数据失败')
+      })
+      .catch((err) => {
+        console.error('Failed to fetch internal link data:', err)
+        pdfStore.setInternalLinkData(null, '获取数据失败')
+      })
+      .finally(() => {
+        pdfStore.setInternalLinkLoading(false)
+      })
+  }
 }) as EventListener)
 
 // ------------------------- 生命周期 -------------------------

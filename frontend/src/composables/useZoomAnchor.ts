@@ -96,10 +96,14 @@ export function useZoomAnchor(
    */
   function restoreAnchor(anchor: ZoomAnchor): void {
     const container = containerRef.value
-    if (!container) return
+    if (!container) {
+      console.warn('Cannot restore anchor: container not found')
+      return
+    }
 
     const refs = pageRefs.get(anchor.page)
     if (!refs) {
+      console.warn(`Cannot restore anchor: page ${anchor.page} refs not found, will retry`)
       nextTick(() => {
         if (pendingAnchor.value) {
           restoreAnchor(pendingAnchor.value)

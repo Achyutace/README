@@ -89,9 +89,16 @@ export function usePageRender(
   async function renderPage(pageNumber: number, options?: RenderPageOptions): Promise<void> {
     const pdf = pdfDoc.value
     const refs = pageRefs.get(pageNumber)
-    if (!pdf || !refs) return
+    if (!pdf || !refs) {
+      if (!pdf) console.warn(`Cannot render page ${pageNumber}: PDF document not loaded`)
+      if (!refs) console.warn(`Cannot render page ${pageNumber}: page refs not found`)
+      return
+    }
 
-    if (renderTasks.has(pageNumber)) return
+    if (renderTasks.has(pageNumber)) {
+      console.warn(`Render task already in progress for page ${pageNumber}`)
+      return
+    }
 
     const preserveContent = !!options?.preserveContent && renderedPages.value.has(pageNumber)
 
@@ -108,7 +115,10 @@ export function usePageRender(
       alpha: false,
       willReadFrequently: false
     })
-    if (!context) return
+    if (!context) {
+      console.warn(`Failed to get 2D context for page ${pageNumber} canvas`)
+      return
+    }
 
     const outputScale = window.devicePixelRatio || 1
     const cssViewport = page.getViewport({ scale: scale.value })

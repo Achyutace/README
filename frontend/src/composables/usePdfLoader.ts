@@ -47,21 +47,27 @@ export function usePdfLoader(
   async function loadPdf(url: string): Promise<void> {
     cleanup()
 
-    const loadingTask = getDocument({
-      url,
-      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-      cMapPacked: true
-    })
+    try {
+      const loadingTask = getDocument({
+        url,
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+        cMapPacked: true
+      })
 
-    const pdf = await loadingTask.promise
-    pdfDoc.value = pdf
+      const pdf = await loadingTask.promise
+      pdfDoc.value = pdf
 
-    // 预加载所有页面的尺寸信息
-    await preloadPageSizes(pdf)
+      // 预加载所有页面的尺寸信息
+      await preloadPageSizes(pdf)
 
-    pageNumbers.value = Array.from({ length: pdf.numPages }, (_, index) => index + 1)
+      pageNumbers.value = Array.from({ length: pdf.numPages }, (_, index) => index + 1)
 
-    options.onLoadComplete?.(pdf)
+      options.onLoadComplete?.(pdf)
+    } catch (error) {
+      console.warn('Failed to load PDF:', error)
+      options.onLoadError?.(error as Error)
+      throw error
+    }
   }
 
   /**

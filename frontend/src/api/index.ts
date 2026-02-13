@@ -91,6 +91,16 @@ export interface UpdateNoteRequest {
   color?: string
 }
 
+// 内部链接数据返回类型
+export interface InternalLinkData {
+  title: string
+  url: string
+  snippet: string
+  published_date: string
+  authors: string[]
+  source: string
+}
+
 // -----------------------------
 // PDF 相关 API
 // 对应后端： router/upload.py
@@ -279,6 +289,21 @@ export const chatSessionApi = {
     })
     return data
   },
+}
+
+// -----------------------------
+// 内部链接数据 API
+// -----------------------------
+
+export const linkApi = {
+  // 获取内部链接数据（发送 pdfId 和 paragraphId，返回论文信息）
+  getLinkData: async (pdfId: string, targetParagraphId: string): Promise<InternalLinkData> => {
+    const { data } = await api.post<InternalLinkData>('/link/data', {
+      pdfId,
+      targetParagraphId
+    })
+    return data
+  }
 }
 
 // -----------------------------

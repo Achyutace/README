@@ -2,7 +2,6 @@
 // ------------------------- 导入依赖与状态 -------------------------
 import { ref, computed, watch } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
-import { getParagraphByCoords } from '../../utils/PdfRender'
 import { clamp } from '@vueuse/core'
 
 // 初始化 PDF store 实例
@@ -14,30 +13,22 @@ const dragOffset = ref({ x: 0, y: 0 })
 
 // 从 store 获取数据
 const isVisible = computed(() => pdfStore.internalLinkPopup.isVisible)
-const destCoords = computed(() => pdfStore.internalLinkPopup.destCoords)
 const position = computed(() => pdfStore.internalLinkPopup.position)
-const paragraphs = computed(() => pdfStore.paragraphs)
+const linkData = computed(() => pdfStore.internalLinkPopup.linkData)
+const isLoading = computed(() => pdfStore.internalLinkPopup.isLoading)
+const error = computed(() => pdfStore.internalLinkPopup.error)
 
-// 根据坐标获取对应的段落
-const targetParagraph = computed(() => {
-  if (!destCoords.value) return null
-  const { page, x, y } = destCoords.value
-  return getParagraphByCoords(page, x, y, paragraphs.value)
+// 格式化的 JSON 数据
+const formattedJson = computed(() => {
+  if (!linkData.value) return ''
+  return JSON.stringify(linkData.value, null, 2)
 })
 
-// 格式化位置信息文本
-const positionText = computed(() => {
-  if (!destCoords.value) return ''
-  return `第 ${destCoords.value.page} 页`
-})
-
-// 格式化坐标信息
-const coordinateText = computed(() => {
-  if (!destCoords.value) return ''
-  const { x, y } = destCoords.value
-  const xStr = x !== null ? x.toFixed(1) : '-'
-  const yStr = y !== null ? y.toFixed(1) : '-'
-  return `X: ${xStr}, Y: ${yStr}`
+// 关闭弹窗时清理
+watch(isVisible, (visible) => {
+  if (!visible) {
+    isDragging.value = false
+  }
 })
 
 // 拖动开始函数
@@ -57,7 +48,7 @@ function onDrag(e: MouseEvent) {
   if (!isDragging.value) return
   const newX = e.clientX - dragOffset.value.x
   const newY = e.clientY - dragOffset.value.y
-  const clampedX = clamp(newX, 0, window.innerWidth - 280)
+  const clampedX = clamp(newX, 0, window.innerWidth - 380)
   const clampedY = clamp(newY, 0, window.innerHeight - 100)
   pdfStore.updateInternalLinkPopupPosition({ x: clampedX, y: clampedY })
 }
@@ -73,20 +64,13 @@ function stopDrag() {
 function closePopup() {
   pdfStore.closeInternalLinkPopup()
 }
-
-// 组件卸载时清理
-watch(isVisible, (visible) => {
-  if (!visible) {
-    isDragging.value = false
-  }
-})
 </script>
 
 <template>
   <Teleport to="body">
     <div
       v-if="isVisible"
-      class="internal-link-popup fixed z-[9999] w-[320px] bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+      class="internal-link-popup fixed z-[9999] w-[380px] bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
       :style="{ left: position.x + 'px', top: position.y + 'px' }"
     >
       <!-- 拖动头部 -->
@@ -106,23 +90,26 @@ watch(isVisible, (visible) => {
       </div>
 
       <!-- 内容区域 -->
-      <div class="p-3 space-y-3">
-        <!-- 段落 ID -->
-        <div class="space-y-1">
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-gray-500 dark:text-gray-400">引用段落</span>
-            <span class="text-xs text-blue-600 dark:text-blue-400">{{ positionText }}</span>
-          </div>
-          <div 
-            class="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 px-3 py-2.5 rounded max-h-[200px] overflow-y-auto leading-relaxed"
-            :class="{ 'italic text-gray-400': !targetParagraph }"
-          >
-            {{ targetParagraph?.content || '无法定位到具体段落内容' }}
-          </div>
-          <!-- 坐标信息 -->
-          <div class="text-xs font-mono text-gray-500 dark:text-gray-500 mt-1.5">
-            {{ coordinateText }}
-          </div>
+      <div class="p-3">
+        <!-- 加载状态 -->
+        <div v-if="isLoading" class="flex items-center justify-center py-8">
+          <div class="loading-spinner mr-2"></div>
+          <span class="text-sm text-gray-500">加载中...</span>
+        </div>
+
+        <!-- 错误状态 -->
+        <div v-else-if="error" class="text-sm text-red-500 text-center py-4">
+          {{ error }}
+        </div>
+
+        <!-- JSON 数据展示 -->
+        <div v-else-if="linkData" class="bg-gray-900 rounded overflow-hidden">
+          <pre class="text-xs text-green-400 p-3 overflow-x-auto whitespace-pre-wrap break-all font-mono leading-relaxed">{{ formattedJson }}</pre>
+        </div>
+
+        <!-- 无数据状态 -->
+        <div v-else class="text-sm text-gray-400 text-center py-4">
+          暂无数据
         </div>
       </div>
     </div>
@@ -145,9 +132,26 @@ watch(isVisible, (visible) => {
   }
 }
 
+/* 加载动画 */
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
