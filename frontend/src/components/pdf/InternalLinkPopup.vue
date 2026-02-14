@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // ------------------------- 导入依赖与状态 -------------------------
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { usePdfStore } from '../../stores/pdf'
 import { clamp } from '@vueuse/core'
 
@@ -11,6 +11,7 @@ const pdfStore = usePdfStore()
 const isDragging = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
 const copied = ref(false)
+const popupRef = ref<HTMLElement | null>(null)
 
 // 从 store 获取数据
 const isVisible = computed(() => pdfStore.internalLinkPopup.isVisible)
@@ -19,12 +20,31 @@ const linkData = computed(() => pdfStore.internalLinkPopup.linkData)
 const isLoading = computed(() => pdfStore.internalLinkPopup.isLoading)
 const error = computed(() => pdfStore.internalLinkPopup.error)
 
-// 关闭弹窗时清理
+// 点击外部关闭弹窗的处理函数
+function handleClickOutside(e: MouseEvent) {
+  if (popupRef.value && !popupRef.value.contains(e.target as Node)) {
+    closePopup()
+  }
+}
+
+// 监听弹窗显示状态，只在显示时添加点击外部监听
 watch(isVisible, (visible) => {
-  if (!visible) {
+  if (visible) {
+    // 弹窗显示时，延迟一点再添加监听，避免立即触发
+    setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside)
+    }, 0)
+  } else {
+    // 弹窗关闭时清理状态和监听
     isDragging.value = false
     copied.value = false
+    document.removeEventListener('mousedown', handleClickOutside)
   }
+})
+
+// 组件卸载时确保移除监听
+onUnmounted(() => {
+  document.removeEventListener('mousedown', handleClickOutside)
 })
 
 // 拖动开始函数
@@ -85,6 +105,7 @@ function openUrl() {
 <template>
   <Teleport to="body">
     <div
+      ref="popupRef"
       v-if="isVisible"
       class="internal-link-popup fixed z-[9999] w-[400px] bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
       :style="{ left: position.x + 'px', top: position.y + 'px' }"
@@ -212,6 +233,7 @@ function openUrl() {
 .line-clamp-4 {
   display: -webkit-box;
   -webkit-line-clamp: 4;
+  line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
