@@ -426,6 +426,7 @@ export const usePdfStore = defineStore('pdf', () => {
     destCoords: DestinationCoords | null
     position: { x: number; y: number }
     linkData: InternalLinkData | null
+    paragraphContent: string | null
     isLoading: boolean
     error: string | null
   }>({
@@ -433,6 +434,7 @@ export const usePdfStore = defineStore('pdf', () => {
     destCoords: null,
     position: { x: 0, y: 0 },
     linkData: null,
+    paragraphContent: null,
     isLoading: false,
     error: null
   })
@@ -443,6 +445,7 @@ export const usePdfStore = defineStore('pdf', () => {
       destCoords,
       position,
       linkData: null,
+      paragraphContent: null,
       isLoading: false,
       error: null
     }
@@ -456,8 +459,9 @@ export const usePdfStore = defineStore('pdf', () => {
     internalLinkPopup.value.position = position
   }
 
-  function setInternalLinkData(data: InternalLinkData | null, error?: string) {
+  function setInternalLinkData(data: InternalLinkData | null, paragraphContent?: string, error?: string) {
     internalLinkPopup.value.linkData = data
+    internalLinkPopup.value.paragraphContent = paragraphContent || null
     internalLinkPopup.value.error = error || null
   }
 

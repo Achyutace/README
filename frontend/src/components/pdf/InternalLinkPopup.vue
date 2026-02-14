@@ -17,8 +17,18 @@ const popupRef = ref<HTMLElement | null>(null)
 const isVisible = computed(() => pdfStore.internalLinkPopup.isVisible)
 const position = computed(() => pdfStore.internalLinkPopup.position)
 const linkData = computed(() => pdfStore.internalLinkPopup.linkData)
+const paragraphContent = computed(() => pdfStore.internalLinkPopup.paragraphContent)
 const isLoading = computed(() => pdfStore.internalLinkPopup.isLoading)
 const error = computed(() => pdfStore.internalLinkPopup.error)
+
+// 是否为有效数据（valid === 1）
+const isValidData = computed(() => linkData.value?.valid === 1)
+
+// 是否为 Google 搜索链接
+const isGoogleSearchUrl = computed(() => {
+  if (!linkData.value?.url) return false
+  return linkData.value.url.includes('google.com/search')
+})
 
 // 点击外部关闭弹窗的处理函数
 function handleClickOutside(e: MouseEvent) {
@@ -141,49 +151,64 @@ function openUrl() {
 
         <!-- 论文信息卡片 -->
         <div v-else-if="linkData" class="relative pr-12">
-          <!-- 标题行：标题 + 复制按钮 -->
-          <div class="flex items-start gap-2 mb-2">
-            <h3 class="text-base font-semibold text-blue-600 dark:text-blue-400 leading-tight flex-1">
-              {{ linkData.title }}
-            </h3>
-            <button
-              @click="copyTitle"
-              class="flex-shrink-0 p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full transition-all"
-              :class="{ 'text-green-500 bg-green-50 dark:bg-green-900/20': copied }"
-              :title="copied ? '已复制' : '复制标题'"
-            >
-              <svg v-if="!copied" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-              </svg>
-            </button>
-          </div>
+          <!-- valid === 1 时显示完整信息 -->
+          <template v-if="isValidData">
+            <!-- 标题行：标题 + 复制按钮 -->
+            <div class="flex items-start gap-2 mb-2">
+              <h3 class="text-base font-semibold text-blue-600 dark:text-blue-400 leading-tight flex-1">
+                {{ linkData.title }}
+              </h3>
+              <button
+                @click="copyTitle"
+                class="flex-shrink-0 p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full transition-all"
+                :class="{ 'text-green-500 bg-green-50 dark:bg-green-900/20': copied }"
+                :title="copied ? '已复制' : '复制标题'"
+              >
+                <svg v-if="!copied" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            </div>
 
-          <!-- 作者 -->
-          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1.5">
-            {{ linkData.authors?.join(', ') || '未知作者' }}
-          </div>
+            <!-- 作者 -->
+            <div class="text-sm text-gray-600 dark:text-gray-400 mb-1.5">
+              {{ linkData.authors?.join(', ') || '未知作者' }}
+            </div>
 
-          <!-- 来源 -->
-          <div class="text-sm text-gray-500 dark:text-gray-500 mb-3">
-            {{ linkData.source || '未知来源' }}
-          </div>
+            <!-- 来源 -->
+            <div class="text-sm text-gray-500 dark:text-gray-500 mb-3">
+              {{ linkData.source || '未知来源' }}
+            </div>
 
-          <!-- 概要 -->
-          <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-4">
-            {{ linkData.snippet || '暂无概要' }}
-          </div>
+            <!-- 概要 -->
+            <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-4">
+              {{ linkData.snippet || '暂无概要' }}
+            </div>
+          </template>
+
+          <!-- valid !== 1 时只显示段落内容 -->
+          <template v-else>
+            <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-6">
+              {{ paragraphContent || linkData.snippet || '暂无内容' }}
+            </div>
+          </template>
 
           <!-- 右下角跳转按钮 -->
           <button
             @click="openUrl"
             class="absolute right-0 bottom-0 w-10 h-10 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center shadow-md hover:shadow-lg transition-all transform hover:scale-105"
-            title="打开链接"
+            :title="isGoogleSearchUrl ? '在 Google 上搜索' : '打开链接'"
           >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <!-- 外部链接图标 -->
+            <svg v-if="!isGoogleSearchUrl" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+            <!-- Google 搜索图标 -->
+            <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </button>
         </div>

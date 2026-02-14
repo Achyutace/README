@@ -704,13 +704,19 @@ window.addEventListener('pdf-internal-link', ((event: CustomEvent<{
   // 获取内部链接数据并更新弹窗
   if (pdfStore.currentDocumentId) {
     pdfStore.setInternalLinkLoading(true)
-    fetchInternalLinkData(pdfStore.currentDocumentId, destCoords, pdfStore.paragraphs)
-      .then((data) => {
-        pdfStore.setInternalLinkData(data, data ? undefined : '获取数据失败')
+    // 提供 getLinkLayer 函数用于在 valid=0 时搜索段落内的链接
+    const getLinkLayer = (page: number) => pageRefs.get(page)?.linkLayer ?? null
+    fetchInternalLinkData(pdfStore.currentDocumentId, destCoords, pdfStore.paragraphs, getLinkLayer)
+      .then((result) => {
+        if (result) {
+          pdfStore.setInternalLinkData(result.linkData, result.paragraphContent || undefined)
+        } else {
+          pdfStore.setInternalLinkData(null, undefined, '获取数据失败')
+        }
       })
       .catch((err) => {
         console.error('Failed to fetch internal link data:', err)
-        pdfStore.setInternalLinkData(null, '获取数据失败')
+        pdfStore.setInternalLinkData(null, undefined, '获取数据失败')
       })
       .finally(() => {
         pdfStore.setInternalLinkLoading(false)

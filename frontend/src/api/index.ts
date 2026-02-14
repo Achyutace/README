@@ -99,6 +99,7 @@ export interface InternalLinkData {
   published_date: string
   authors: string[]
   source: string
+  valid: number  // 1 表示内容完整，0 表示有缺失项
 }
 
 // -----------------------------
@@ -298,13 +299,23 @@ export const chatSessionApi = {
 export const linkApi = {
   // 获取内部链接数据（发送 pdfId 和 paragraphId，返回论文信息）
   getLinkData: async (pdfId: string, targetParagraphId: string): Promise<InternalLinkData> => {
+    // const defaultData: InternalLinkData = {
+    //   title: 'Attention Is All You Need',
+    //   url: 'https://arxiv.org/abs/1706.03762',
+    //   snippet: '这是一个示例论文的摘要片段，用于展示内部链接数据的结构。',
+    //   published_date: '2024-01-01',
+    //   authors: ['作者 A', '作者 B'],
+    //   source: 'arXiv',
+    //   valid: 1
+    // }
     const defaultData: InternalLinkData = {
-      title: 'Attention Is All You Need',
+      title: "",
       url: 'https://arxiv.org/abs/1706.03762',
-      snippet: '这是一个示例论文的摘要片段，用于展示内部链接数据的结构。',
-      published_date: '2024-01-01',
-      authors: ['作者 A', '作者 B'],
-      source: 'arXiv'
+      snippet: '',
+      published_date: '',
+      authors: [],
+      source: '',
+      valid: 0
     }
     try {
       const { data } = await api.post<InternalLinkData>('/link/data', {
