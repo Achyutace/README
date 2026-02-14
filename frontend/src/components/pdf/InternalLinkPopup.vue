@@ -10,6 +10,7 @@ const pdfStore = usePdfStore()
 // 拖拽相关状态
 const isDragging = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
+const copied = ref(false)
 
 // 从 store 获取数据
 const isVisible = computed(() => pdfStore.internalLinkPopup.isVisible)
@@ -18,16 +19,11 @@ const linkData = computed(() => pdfStore.internalLinkPopup.linkData)
 const isLoading = computed(() => pdfStore.internalLinkPopup.isLoading)
 const error = computed(() => pdfStore.internalLinkPopup.error)
 
-// 格式化的 JSON 数据
-const formattedJson = computed(() => {
-  if (!linkData.value) return ''
-  return JSON.stringify(linkData.value, null, 2)
-})
-
 // 关闭弹窗时清理
 watch(isVisible, (visible) => {
   if (!visible) {
     isDragging.value = false
+    copied.value = false
   }
 })
 
@@ -48,7 +44,7 @@ function onDrag(e: MouseEvent) {
   if (!isDragging.value) return
   const newX = e.clientX - dragOffset.value.x
   const newY = e.clientY - dragOffset.value.y
-  const clampedX = clamp(newX, 0, window.innerWidth - 380)
+  const clampedX = clamp(newX, 0, window.innerWidth - 420)
   const clampedY = clamp(newY, 0, window.innerHeight - 100)
   pdfStore.updateInternalLinkPopupPosition({ x: clampedX, y: clampedY })
 }
@@ -64,13 +60,33 @@ function stopDrag() {
 function closePopup() {
   pdfStore.closeInternalLinkPopup()
 }
+
+// 复制标题
+async function copyTitle() {
+  if (!linkData.value?.title) return
+  try {
+    await navigator.clipboard.writeText(linkData.value.title)
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('复制失败:', err)
+  }
+}
+
+// 跳转到 URL
+function openUrl() {
+  if (!linkData.value?.url) return
+  window.open(linkData.value.url, '_blank')
+}
 </script>
 
 <template>
   <Teleport to="body">
     <div
       v-if="isVisible"
-      class="internal-link-popup fixed z-[9999] w-[380px] bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+      class="internal-link-popup fixed z-[9999] w-[400px] bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
       :style="{ left: position.x + 'px', top: position.y + 'px' }"
     >
       <!-- 拖动头部 -->
@@ -90,7 +106,7 @@ function closePopup() {
       </div>
 
       <!-- 内容区域 -->
-      <div class="p-3">
+      <div class="p-4 relative">
         <!-- 加载状态 -->
         <div v-if="isLoading" class="flex items-center justify-center py-8">
           <div class="loading-spinner mr-2"></div>
@@ -102,9 +118,53 @@ function closePopup() {
           {{ error }}
         </div>
 
-        <!-- JSON 数据展示 -->
-        <div v-else-if="linkData" class="bg-gray-900 rounded overflow-hidden">
-          <pre class="text-xs text-green-400 p-3 overflow-x-auto whitespace-pre-wrap break-all font-mono leading-relaxed">{{ formattedJson }}</pre>
+        <!-- 论文信息卡片 -->
+        <div v-else-if="linkData" class="relative pr-12">
+          <!-- 标题行：标题 + 复制按钮 -->
+          <div class="flex items-start gap-2 mb-2">
+            <h3 class="text-base font-semibold text-blue-600 dark:text-blue-400 leading-tight flex-1">
+              {{ linkData.title }}
+            </h3>
+            <button
+              @click="copyTitle"
+              class="flex-shrink-0 p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full transition-all"
+              :class="{ 'text-green-500 bg-green-50 dark:bg-green-900/20': copied }"
+              :title="copied ? '已复制' : '复制标题'"
+            >
+              <svg v-if="!copied" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- 作者 -->
+          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1.5">
+            {{ linkData.authors?.join(', ') || '未知作者' }}
+          </div>
+
+          <!-- 来源 -->
+          <div class="text-sm text-gray-500 dark:text-gray-500 mb-3">
+            {{ linkData.source || '未知来源' }}
+          </div>
+
+          <!-- 概要 -->
+          <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-4">
+            {{ linkData.snippet || '暂无概要' }}
+          </div>
+
+          <!-- 右下角跳转按钮 -->
+          <button
+            @click="openUrl"
+            class="absolute right-0 bottom-0 w-10 h-10 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+            title="打开链接"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </button>
         </div>
 
         <!-- 无数据状态 -->
@@ -148,25 +208,11 @@ function closePopup() {
   }
 }
 
-/* 自定义滚动条 */
-::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 2px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: #4b5563;
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+/* 多行文本截断 */
+.line-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>

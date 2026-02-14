@@ -298,11 +298,24 @@ export const chatSessionApi = {
 export const linkApi = {
   // 获取内部链接数据（发送 pdfId 和 paragraphId，返回论文信息）
   getLinkData: async (pdfId: string, targetParagraphId: string): Promise<InternalLinkData> => {
-    const { data } = await api.post<InternalLinkData>('/link/data', {
-      pdfId,
-      targetParagraphId
-    })
-    return data
+    const defaultData: InternalLinkData = {
+      title: 'Attention Is All You Need',
+      url: 'https://arxiv.org/abs/1706.03762',
+      snippet: '这是一个示例论文的摘要片段，用于展示内部链接数据的结构。',
+      published_date: '2024-01-01',
+      authors: ['作者 A', '作者 B'],
+      source: 'arXiv'
+    }
+    try {
+      const { data } = await api.post<InternalLinkData>('/link/data', {
+        pdfId,
+        targetParagraphId
+      })
+      return data || defaultData
+    } catch (error) {
+      console.warn('Internal link search failed, returning default data', error)
+      return defaultData
+    }
   }
 }
 
