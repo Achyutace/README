@@ -310,7 +310,7 @@ export const linkApi = {
     // }
     const defaultData: InternalLinkData = {
       title: "",
-      url: 'https://arxiv.org/abs/1706.03762',
+      url: '',
       snippet: '',
       published_date: '',
       authors: [],

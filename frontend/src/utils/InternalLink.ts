@@ -16,7 +16,8 @@ import { linkApi, type InternalLinkData } from '../api'
  */
 function findLinkInParagraph(
   linkLayer: HTMLElement,
-  paragraph: PdfParagraph
+  paragraph: PdfParagraph,
+  scale: number = 1
 ): string | null {
   // 获取 linkLayer 中所有的链接元素
   const links = linkLayer.querySelectorAll('a[href]')
@@ -34,19 +35,31 @@ function findLinkInParagraph(
     const scaleX = linkLayer.offsetWidth / linkLayerRect.width
     const scaleY = linkLayer.offsetHeight / linkLayerRect.height
     
+    // 这些是相对于 linkLayer 元素自身的像素坐标 (Scaled Units)
     const relativeLeft = (rect.left - linkLayerRect.left) * scaleX
     const relativeTop = (rect.top - linkLayerRect.top) * scaleY
     const relativeRight = relativeLeft + rect.width * scaleX
     const relativeBottom = relativeTop + rect.height * scaleY
     
-    // 检查链接是否在段落 bbox 内
-    // paragraph.bbox: { x0, y0, x1, y1 } - CSS 坐标系，原点在左上角，y 向下
-    const isInside =
-      relativeLeft >= paragraph.bbox.x0 &&
-      relativeRight <= paragraph.bbox.x1 &&
-      relativeTop >= paragraph.bbox.y0 &&
-      relativeBottom <= paragraph.bbox.y1
+    // 转换为未缩放的 PDF 点坐标 (Unscaled Units)
+    // paragraph.bbox 是未缩放的 (scale=1)
+    const normalizedLeft = relativeLeft / scale
+    const normalizedTop = relativeTop / scale
+    const normalizedRight = relativeRight / scale
+    const normalizedBottom = relativeBottom / scale
     
+    // 检查链接是否在段落 bbox 内（添加 10px 容错范围）
+    // paragraph.bbox: { x0, y0, x1, y1 } - CSS 坐标系，原点在左上角，y 向下
+    const tolerance = 10
+    const isInside =
+      normalizedLeft >= paragraph.bbox.x0 - tolerance &&
+      normalizedRight <= paragraph.bbox.x1 + tolerance &&
+      normalizedTop >= paragraph.bbox.y0 - tolerance &&
+      normalizedBottom <= paragraph.bbox.y1 + tolerance
+    
+    // console.log(`Checking link "${href}" (normalized) at [${normalizedLeft.toFixed(1)}, ${normalizedTop.toFixed(1)}, ${normalizedRight.toFixed(1)}, ${normalizedBottom.toFixed(1)}] against paragraph bbox [${paragraph.bbox.x0}, ${paragraph.bbox.y0}, ${paragraph.bbox.x1}, ${paragraph.bbox.y1}], scale=${scale}, isInside: ${isInside}`)
+    console.log(`Checking link "${href}" (normalized) at [${normalizedLeft.toFixed(1)}, ${normalizedTop.toFixed(1)}, ${normalizedRight.toFixed(1)}, ${normalizedBottom.toFixed(1)}] against paragraph bbox [${paragraph.bbox.x0}, ${paragraph.bbox.y0}, ${paragraph.bbox.x1}, ${paragraph.bbox.y1}], scale=${scale}, isInside: ${isInside}`)
+
     if (isInside && href) {
       return href
     }
@@ -82,7 +95,8 @@ export async function fetchInternalLinkData(
   pdfId: string,
   destCoords: { page: number; x: number | null; y: number | null },
   paragraphs: PdfParagraph[],
-  getLinkLayer?: (page: number) => HTMLElement | null
+  getLinkLayer?: (page: number) => HTMLElement | null,
+  pdfDoc?: PDFDocumentProxy
 ): Promise<InternalLinkResult | null> {
   const targetParagraph = getParagraphByCoords(destCoords.page, destCoords.x, destCoords.y, paragraphs)
   if (!targetParagraph) {
@@ -90,16 +104,35 @@ export async function fetchInternalLinkData(
   }
   
   try {
+    console.log(`Fetching internal link data for pdf ${pdfId}, paragraph ${targetParagraph.id}`)
     const data = await linkApi.getLinkData(pdfId, targetParagraph.id)
+    console.log('Link data received:', data)
     
     // 如果 valid 不为 1，表示内容有缺失，需要从 linkLayer 搜索
     if (data.valid !== 1) {
+      console.log('internal link data invalid (valid != 1), fallback to search in linkLayer')
       // 获取目标页的 linkLayer
       const linkLayer = getLinkLayer?.(destCoords.page)
       
       if (linkLayer) {
+        console.log('LinkLayer found for page', destCoords.page)
+        // 计算缩放比例
+        let scale = 1
+        if (pdfDoc) {
+          try {
+            const page = await pdfDoc.getPage(destCoords.page)
+            const viewport = page.getViewport({ scale: 1 })
+            if (viewport.width > 0 && linkLayer.offsetWidth > 0) {
+              scale = linkLayer.offsetWidth / viewport.width
+            }
+          } catch (e) {
+            console.warn('Failed to calculate scale for findLinkInParagraph:', e)
+          }
+        }
+
         // 在 linkLayer 中搜索包含在段落内的链接
-        const foundUrl = findLinkInParagraph(linkLayer, targetParagraph)
+        const foundUrl = findLinkInParagraph(linkLayer, targetParagraph, scale)
+        console.log('Search result in linkLayer:', foundUrl)
         
         if (foundUrl) {
           // 找到链接，使用这个链接
@@ -111,6 +144,8 @@ export async function fetchInternalLinkData(
             paragraphContent: targetParagraph.content
           }
         }
+      } else {
+        console.warn('LinkLayer NOT found for page', destCoords.page)
       }
       
       // 没有找到链接，生成 Google 搜索 URL

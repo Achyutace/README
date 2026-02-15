@@ -706,7 +706,7 @@ window.addEventListener('pdf-internal-link', ((event: CustomEvent<{
     pdfStore.setInternalLinkLoading(true)
     // 提供 getLinkLayer 函数用于在 valid=0 时搜索段落内的链接
     const getLinkLayer = (page: number) => pageRefs.get(page)?.linkLayer ?? null
-    fetchInternalLinkData(pdfStore.currentDocumentId, destCoords, pdfStore.paragraphs, getLinkLayer)
+    fetchInternalLinkData(pdfStore.currentDocumentId, destCoords, pdfStore.paragraphs, getLinkLayer, pdfDoc.value || undefined)
       .then((result) => {
         if (result) {
           pdfStore.setInternalLinkData(result.linkData, result.paragraphContent || undefined)
