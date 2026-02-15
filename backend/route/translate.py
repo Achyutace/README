@@ -38,8 +38,8 @@ def translate_paragraph():
 
         # 3. 从 paper_service (DB) 获取原文
         pdf_service = g.pdf_service
-        paragraph_data = pdf_service.get_paragraph(pdf_id, page_number=page, paragraph_index=index)
-        original_text = paragraph_data.get('text', '').strip() if paragraph_data else ''
+        paragraphs = pdf_service.get_paragraph(pdf_id, pagenumber=page, paraid=index)
+        original_text = paragraphs[0].get('original_text', '').strip() if paragraphs else ''
         if not original_text:
             return jsonify({'error': 'Original text not found for this paragraph'}), 404
 
@@ -141,10 +141,9 @@ def translate_service_build_context(pdf_id: str, max_paragraphs: int = 3) -> str
     """
     try:
         pdf_service = g.pdf_service
-        paragraph_data = pdf_service.get_paragraph(pdf_id)
-        blocks = paragraph_data.get('blocks', []) if paragraph_data else []
-        if blocks:
-            context_parts = [b['text'] for b in blocks[:max_paragraphs]]
+        paragraphs = pdf_service.get_paragraph(pdf_id)
+        if paragraphs:
+            context_parts = [p.get('original_text', '') for p in paragraphs[:max_paragraphs]]
             return '\n\n'.join(context_parts)
     except Exception as e:
         current_app.logger.warning(f"Failed to build context for {pdf_id}: {e}")

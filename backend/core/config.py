@@ -39,6 +39,23 @@ class CeleryConfig(BaseModel):
     broker_url: str = "redis://localhost:6379/0"
     result_backend: str = "redis://localhost:6379/1"
 
+class DatabaseConfig(BaseModel):
+    url: str
+
+class ProxyConfig(BaseModel):
+    http: Optional[str] = None
+    https: Optional[str] = None
+
+class TavilyConfig(BaseModel):
+    api_key: Optional[str] = None
+
+class ScientificConfig(BaseModel):
+    semantic_scholar_api_key: Optional[str] = None
+
+class TranslateConfig(BaseModel):
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+
 class JWTConfig(BaseModel):
     secret: str = "change-me-in-config-yaml"
     access_expire_minutes: int = 30
@@ -46,8 +63,39 @@ class JWTConfig(BaseModel):
 
 class AppConfig:
     def __init__(self, raw: Dict[str, Any]):
-        self.DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/paper_agent_db")
-        
+        # Database
+        db_conf = raw.get("database", {})
+        self.database = DatabaseConfig(
+            url=db_conf.get("url", "postgresql://user:password@localhost:5432/paper_agent_db")
+        )
+        self.DATABASE_URL = self.database.url
+
+        # Proxy
+        proxy_conf = raw.get("proxy", {})
+        self.proxy = ProxyConfig(
+            http=proxy_conf.get("http"),
+            https=proxy_conf.get("https")
+        )
+
+        # Tavily
+        tavily_conf = raw.get("tavily", {})
+        self.tavily = TavilyConfig(
+            api_key=tavily_conf.get("api_key")
+        )
+
+        # Scientific
+        scientific_conf = raw.get("scientific", {})
+        self.scientific = ScientificConfig(
+            semantic_scholar_api_key=scientific_conf.get("semantic_scholar_api_key")
+        )
+
+        # Translate
+        trans_conf = raw.get("translate", {})
+        self.translate = TranslateConfig(
+            api_key=trans_conf.get("api_key"),
+            api_base=trans_conf.get("api_base")
+        )
+
         # OpenAI
         oa_conf = raw.get("openai", {})
         self.openai = OpenAIConfig(**oa_conf) if oa_conf else None
@@ -88,6 +136,14 @@ class AppConfig:
         )
         # 便捷属性
         self.jwt_secret = self.jwt.secret
+
+    @property
+    def has_openai_key(self) -> bool:
+        return self.openai is not None and bool(self.openai.api_key)
+
+    @property
+    def has_translate_key(self) -> bool:
+        return self.translate is not None and bool(self.translate.api_key)
 
 # Global Instance
 settings = AppConfig(_raw_config)

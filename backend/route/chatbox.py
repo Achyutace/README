@@ -136,8 +136,8 @@ def simple_chat():
         history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
         # 4. 获取 PDF 全文
-        paragraph_data = pdf_service.get_paragraph(pdf_id) if pdf_id else None
-        context_text = paragraph_data.get('text', '') if paragraph_data else ''
+        paragraphs = pdf_service.get_paragraph(pdf_id) if pdf_id else []
+        context_text = "\n\n".join([p.get('original_text', '') for p in paragraphs]) if paragraphs else ''
 
         # 5. 调用 Agent simple_chat
         result = agent_service.simple_chat(

@@ -143,8 +143,8 @@ def get_pdf_paragraphs(pdf_id):
     """获取 PDF 已解析的段落 (从 DB 读取)"""
     page = request.args.get('page', type=int)
     try:
-        result = g.pdf_service.get_paragraph(pdf_id, page_number=page)
-        return jsonify({'paragraphs': result.get('blocks', []) if result else []})
+        result = g.pdf_service.get_paragraph(pdf_id, pagenumber=page)
+        return jsonify({'paragraphs': result})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

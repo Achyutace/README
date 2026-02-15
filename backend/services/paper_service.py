@@ -336,66 +336,33 @@ class PdfService:
             logger.error(f"Failed to get info for {pdf_id}: {e}")
             raise e
 
-    def get_paragraph(self, pdf_id: str, page_number: int = None, paragraph_index: int = None) -> dict:
+    def get_paragraph(self, pdf_id: str, pagenumber: int = None, paraid: int = None) -> list[dict]:
         """
-        获取段落文本
+        从数据库获取段落文本信息
         """
         paragraphs = []
         
-        # 1. 尝试从数据库获取
         db, repo = self._get_repo()
         try:
-            db_paras = repo.get_paragraphs(pdf_id, page_number, paragraph_index)
+            db_paras = repo.get_paragraphs(pdf_id, pagenumber, paraid)
             if db_paras:
                 for p in db_paras:
-                    paragraphs.append({
-                        'index': p.paragraph_index,
-                        'page': p.page_number,
-                        'bbox': p.bbox,
-                        'content': p.original_text
-                    })
+                    # TODO 根据schema修改返回内容
+                    para_data = {
+                        "id": p.id,
+                        "file_hash": p.file_hash,
+                        "page_number": p.page_number,
+                        "paragraph_index": p.paragraph_index,
+                        "original_text": p.original_text,
+                        "bbox": p.bbox
+                    }
+                    paragraphs.append(para_data)
         except Exception as e:
             logger.warning(f"DB lookup paragraphs failed for {pdf_id}: {e}")
         finally:
             db.close()
 
-        # 2. 如果数据库没有数据，回退到实时解析
-        if not paragraphs:
-            try:
-                filepath = self.get_filepath(pdf_id)
-                
-                page_numbers = [page_number] if page_number else None
-                parsed_paras = pdf_engine.parse_paragraphs(filepath, pdf_id, page_numbers=page_numbers)
-                
-                if paragraph_index is not None:
-                    parsed_paras = [p for p in parsed_paras if p['index'] == paragraph_index]
-                
-                paragraphs.extend(parsed_paras)
-            except Exception as e:
-                logger.error(f"Failed to parse paragraphs for {pdf_id}: {e}")
-        # 3. 组装返回结果
-        full_text = "\n\n".join([p.get('content', '') for p in paragraphs])
-
-        blocks = []
-        for p in paragraphs:
-            # bbox: [x, y, w, h]
-            bbox = p.get('bbox') or [0, 0, 0, 0]
-            if len(bbox) >= 4:
-                x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
-                display_bbox = [x, y, x + w, y + h]
-            else:
-                display_bbox = [0, 0, 0, 0]
-
-            blocks.append({
-                'text': p.get('content', ''),
-                'pageNumber': p.get('page', 0),
-                'bbox': display_bbox
-            })
-
-        return {
-            'text': full_text,
-            'blocks': blocks
-        }
+        return paragraphs
 
     def get_file_obj(self, pdf_id: str):
         """

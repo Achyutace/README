@@ -35,13 +35,13 @@ def get_link_data():
         if not hasattr(g, 'pdf_service'):
              return jsonify({"error": "Service not initialized"}), 500
 
-        para_data = g.pdf_service.get_paragraph(
+        paragraphs = g.pdf_service.get_paragraph(
             pdf_id=pdf_id, 
-            page_number=para_info['page_number'], 
-            paragraph_index=para_info['index']
+            pagenumber=para_info['page_number'], 
+            paraid=para_info['index']
         )
         
-        query_text = para_data.get('text', '')
+        query_text = paragraphs[0].get('original_text', '') if paragraphs else ''
         if not query_text:
             return jsonify({"error": "Paragraph content empty"}), 404
             

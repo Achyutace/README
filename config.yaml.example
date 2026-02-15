@@ -15,9 +15,22 @@ translate:
   api_key: "sk-or-v1-xxxxxxxxxxxxxxxx"
   api_base: "https://openrouter.ai/api/v1"
 
+# Scientific Literature APIs
+scientific:
+  semantic_scholar_api_key: ""
+
+# Database Configuration (PostgreSQL)
+database:
+  url: "postgresql://user:password@localhost:5432/paper_agent_db"
+
+# HTTP Proxy Configuration (Optional)
+proxy:
+  http: ""
+  https: ""
+
+# Tavily Search API (for web search tool)
 tavily:
-  # Tavily 搜索 API Key (可选，用于联网搜索功能)
-  api_key: ""
+  api_key: "tvly-dev-..."
 
 # 向量数据库配置
 vector_store:

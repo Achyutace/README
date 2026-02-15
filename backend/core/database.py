@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # 1. PostgreSQL (SQLAlchemy)
 # ==========================================
-# 从环境变量获取数据库连接
+# 从配置获取数据库连接
 DATABASE_URL = settings.DATABASE_URL
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
