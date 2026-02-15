@@ -1,0 +1,89 @@
+# Notes 相关 Schema
+
+Note:
+  type: object
+  properties:
+    id:
+      type: integer
+      description: 笔记ID
+    title:
+      type: string
+      description: 笔记标题
+      example: "Transformer 架构要点"
+    content:
+      type: string
+      description: 笔记内容（Markdown 或 JSON）
+      example: "## 核心思想\nSelf-Attention 机制..."
+    keywords:
+      type: array
+      items:
+        type: string
+      description: 关键词列表
+      example: ["transformer", "attention"]
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+CreateNoteRequest:
+  type: object
+  required:
+    - pdfId
+  properties:
+    pdfId:
+      type: string
+      description: 关联的 PDF 文件 Hash
+    title:
+      type: string
+      description: 笔记标题（可选）
+    content:
+      type: string
+      description: 笔记内容，Markdown 或 JSON（可选）
+    keywords:
+      type: array
+      items:
+        type: string
+      description: 关键词列表（可选）
+
+UpdateNoteRequest:
+  type: object
+  description: 至少需要提供 title、content、keywords 中的一个字段，也就是至少更新一个
+  properties:
+    title:
+      type: string
+    content:
+      type: string
+    keywords:
+      type: array
+      items:
+        type: string
+
+NoteListResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    notes:
+      type: array
+      items:
+        $ref: '#/Note'
+    total:
+      type: integer
+
+NoteActionResponse:
+  type: object
+  description: 创建/更新/删除笔记的通用成功响应
+  required:
+    - success
+    - message
+  properties:
+    success:
+      type: boolean
+    id:
+      type: integer
+      description: 笔记ID，仅创建时返回，更新和删除时为空
+    message:
+      type: string
+      example: "Note created"

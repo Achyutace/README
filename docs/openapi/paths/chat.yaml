@@ -1,0 +1,252 @@
+# 所有接口需要 JWT 认证 (require_auth)
+new:
+  post:
+    tags: [Chat]
+    summary: 创建新会话
+    description: 仅生成前端会话ID，不写库。实际会话在第一次发送消息时懒创建。
+    responses:
+      200:
+        description: 新会话信息
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/NewSessionResponse'
+
+message:
+  post:
+    tags: [Chat]
+    summary: 发送消息（非流式）
+    description: 基于 RAG Agent 的完整对话，包含意图识别、检索、生成等步骤
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/chat.yaml#/MessageRequest'
+    responses:
+      200:
+        description: AI 回答
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/ChatResponse'
+      400:
+        description: 缺少 message 或 sessionId
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+simple-chat:
+  post:
+    tags: [Chat]
+    summary: 简单对话（基于PDF全文，非流式）
+    description: 不走 RAG 检索，直接把 PDF 全文作为上下文交给 LLM
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/chat.yaml#/MessageRequest'
+    responses:
+      200:
+        description: AI 回答
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/ChatResponse'
+      400:
+        description: 缺少 message 或 sessionId
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+stream:
+  post:
+    tags: [Chat]
+    summary: 发送消息（流式 SSE）
+    description: |
+      通过 Server-Sent Events 流式返回中间步骤和最终结果。
+      简单来说，每个agent的中间步骤都会返回一个事件，让前端可以先处理，实时展示出来。
+    headers:
+      - name: X-Accel-Buffering
+        in: header
+        required: true
+        description: 缓冲区大小
+        schema:
+          type: string
+          default: "no"
+      - name: Connection
+        in: header
+        required: true
+        description: 连接类型
+        schema:
+          type: string
+          default: "keep-alive"
+      - name: Cache-Control
+        in: header
+        required: true
+        description: 缓存控制
+        schema:
+          type: string
+          default: "no-cache"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/chat.yaml#/MessageRequest'
+    responses:
+      200:
+        description: SSE 事件流
+        content:
+          text/event-stream:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/StreamEvent'
+      400:
+        description: 缺少 message 或 sessionId
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+sessions:
+  get:
+    tags: [Chat]
+    summary: 获取会话列表
+    parameters:
+      - name: pdfId
+        in: query
+        required: false
+        description: 按 PDF 文件 Hash 过滤，不传则返回全部会话
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: 单词显示的对话数量上限，但是总的数据库并没有这个限制
+        schema:
+          type: integer
+          default: 50
+    responses:
+      200:
+        description: 会话列表
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/SessionListResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+delete-session:
+  delete:
+    tags: [Chat]
+    summary: 删除会话
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        description: 会话UUID
+        schema:
+          type: string
+          format: uuid
+    responses:
+      200:
+        description: 删除成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/DeleteSessionResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+session-messages:
+  get:
+    tags: [Chat]
+    summary: 获取会话的所有消息
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        description: 会话UUID
+        schema:
+          type: string
+          format: uuid
+    responses:
+      200:
+        description: 消息列表
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/SessionMessagesResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+update-title:
+  put:
+    tags: [Chat]
+    summary: 更新会话标题
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        description: 会话UUID
+        schema:
+          type: string
+          format: uuid
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - title
+            properties:
+              title:
+                type: string
+                description: 新标题
+    responses:
+      200:
+        description: 更新成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/chat.yaml#/UpdateTitleResponse'
+      400:
+        description: 标题为空
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      404:
+        description: 会话不存在
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

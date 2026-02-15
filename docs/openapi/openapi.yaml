@@ -19,3 +19,21 @@ paths:
     $ref: "./paths/pdf.yaml#/paragraphs"
   "/pdf/{pdf_id}/source":
     $ref: "./paths/pdf.yaml#/source"
+
+  # --- Chat 相关 API ---
+  /chatbox/new:
+    $ref: "./paths/chat.yaml#/new"
+  /chatbox/message:
+    $ref: "./paths/chat.yaml#/message"
+  /chatbox/simple-chat:
+    $ref: "./paths/chat.yaml#/simple-chat"
+  /chatbox/stream:
+    $ref: "./paths/chat.yaml#/stream"
+  /chatbox/sessions:
+    $ref: "./paths/chat.yaml#/sessions"
+  "/chatbox/session/{session_id}":
+    $ref: "./paths/chat.yaml#/delete-session"
+  "/chatbox/session/{session_id}/messages":
+    $ref: "./paths/chat.yaml#/session-messages"
+  "/chatbox/session/{session_id}/title":
+    $ref: "./paths/chat.yaml#/update-title"

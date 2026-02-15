@@ -82,6 +82,17 @@ def send_message():
         history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
         # 4. 调用 Agent
+        '''
+            return {
+                'response': final_state['final_response'],  # 最终答案
+                'citations': final_state['citations'],  # 引用来源
+                'steps': final_state['steps'],  # 执行步骤记录
+                'context_used': {
+                    'local_chunks': len(final_state['local_context']),
+                    'external_sources': len(final_state['external_context'])
+                }
+            }
+        '''
         result = agent_service.chat(
             user_query=user_query,
             user_id=user_id,
