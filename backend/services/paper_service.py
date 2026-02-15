@@ -161,10 +161,13 @@ class PdfService:
             except Exception as e:
                 logger.error(f"[Ingest] COS upload failed (continuing): {e}")
 
-        # 5. 获取页数 
+        # 5. 获取页数和元数据
         page_count = 0
+        metadata = {}
         try:
-            page_count = pdf_engine.get_page_count(filepath)
+            pdf_info = pdf_engine.get_pdf_info(pdf_id, filepath)
+            page_count = pdf_info.get('pageCount', 0)
+            metadata = pdf_info.get('metadata', {})
         except Exception:
             pass
             
@@ -190,6 +193,7 @@ class PdfService:
                     file_path=pdf_id,
                     file_size=file_size,
                     total_pages=page_count,
+                    metadata=metadata,
                 )
                 gf.task_id = new_task_id
             db.commit()

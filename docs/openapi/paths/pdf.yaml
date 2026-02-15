@@ -48,6 +48,20 @@ components:
       description: 从from_page ~ currentPage 的段落列表
       items:
         $ref: '#/components/schemas/Paragraph'
+    Metadata:
+      type: object
+      description: PDF文件的元数据，这些字段由 fitz.Document.metadata（PyMuPDF）从 PDF 文件自身的元数据中提取。
+      example:
+        "title": "Attention Is All You Need"
+        "author": "Ashish Vaswani et al."
+        "subject": ""
+        "keywords": ""
+        "creator": "LaTeX"
+        "producer": "pdfTeX-1.40.17"
+        "creationDate": "D:20170612..."
+        "modDate": "D:20170612..."
+        "format": "PDF 1.5"
+
     # 下面是请求/响应的schema
     ErrorResponse:
       type: object
@@ -125,9 +139,9 @@ components:
           description: PDF文件的页数
         metadata:
           type: object
-          description: PDF文件的元数据
-          properties:
-            title:
+          description: PDF文件的元数据,这些字段由 fitz.Document.metadata（PyMuPDF）从 PDF 文件自身的元数据中提取。
+          schema:
+            $ref: '#/components/schemas/Metadata'
 
           
 
