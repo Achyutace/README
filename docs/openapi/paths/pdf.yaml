@@ -1,0 +1,222 @@
+tags: [PDF]
+description: PDF相关API
+
+components:
+  schemas:
+    # 一些公共的schema，待移到components/schemas目录下
+    Paragraph:
+      type: object
+      description: 解析后的PDF段落对象
+      required:
+        - id
+        - page
+        - index
+        - bbox
+        - content
+        - wordCount
+      properties:
+        id:
+          type: string
+          description: 段落ID段落唯一标识符 (格式：pdf_chk_{pdf_id前8位}_{页码}_{块号})
+          example: "pdf_chk_11451419_198_10"
+        page:
+          type: integer
+          description: 页数
+          minimum: 1
+        index:
+          type: integer
+          description: 当前页面的文本块索引(PyMuPDF block_no)
+          minimum: 1
+        bbox:
+          type: array
+          description: 段落在PDF页面中的坐标，[x0, y0, x1, y1]（单位：PDF points）
+          items:
+            type: number
+            format: float
+          example: [100.0, 100.0, 200.0, 200.0]
+        content:
+          type: string
+          description: '清洗后的文本内容，如果文本块完全位于顶部或底部区域，视为噪音；忽略len<5的非实质性文本碎片'
+          example: "This is a test paragraph."
+        wordCount:
+          type: integer
+          description: 段落中单词数量
+          minimum: 1
+          example: 10
+    ParagraphList:
+      type: array
+      description: 从from_page ~ currentPage 的段落列表
+      items:
+        $ref: '#/components/schemas/Paragraph'
+    # 下面是请求/响应的schema
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: 错误信息
+          example: "Invalid file type"
+    UploadResponse:
+      type: object
+      properties:
+        pdfId:
+          type: string
+          description: 文件Hash，作为PDF的全局唯一标识
+        taskId:
+          type: string
+          description: Celery异步任务ID，用于轮询处理进度
+        status:
+          type: string
+          description: 任务状态，包括pending, processing, completed, failed
+        pageCount:
+          type: integer
+          description: PDF文件的页数
+        filename:
+          type: string
+          description: 上传时的原始文件名
+        userId:
+          type: string
+          description: 当前用户UUID
+        isNewUpload:
+          type: boolean
+          description: 用file_hash查globalfile表，true 表示文件不存在，需要重新上传；false 表示文件已存在（秒传）
+    
+    StatusResponse:
+      type: object
+      required:
+        - status
+        - currentPage
+        - totalPages
+        - error
+        - paragraphs
+      properties:
+        status:
+          type: string
+          description: 任务状态，包括pending, processing, completed, failed
+        currentPage:
+          type: integer
+          description: 当前处理到的页数
+        totalPages:
+          type: integer
+          description: PDF文件的总页数
+        error:
+          type: string
+          description: 错误信息
+          example: "Invalid file type"
+        paragraphs:
+          $ref: '#/components/schemas/ParagraphList'
+          description: 从from_page ~ currentPage 的段落列表
+
+
+    InfoResponse:
+      type: object
+      required:
+        - id
+        - pageCount
+        - metadata
+      properties:
+        id:
+          type: string
+          description: PDF文件Hash
+        pageCount:
+          type: integer
+          description: PDF文件的页数
+        metadata:
+          type: object
+          description: PDF文件的元数据
+          properties:
+            title:
+
+          
+
+upload:
+  post:
+    summary: 上传PDF文件
+    requestBody:
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              file:
+                type: string
+                format: binary
+                description: 仅支持上传PDF文件
+            required:
+              - file
+    responses:
+      200:
+        description: 上传成功
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadResponse'
+      400:
+        description: 请求参数错误 (文件缺失、文件名为空或格式非 PDF)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse' # 400是请求参数错误，500是服务器错误
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+
+<pdf_id>/status:
+  get:
+    summary: 获取PDF处理状态
+    description: 获取PDF处理状态，包括任务状态、处理进度等。目前前端代码还没用这个接口，还没加异步轮询。
+    parameters:
+      - name: pdf_id
+        in: path # 参数写在URL路径中
+        required: true
+        description: PDF文件Hash
+      - name: from_page
+        in: query # 参数写在URL查询参数中
+        required: false
+        description: 从第几页开始返回段落，默认从第一页开始
+        schema:
+          type: integer
+          default: 1
+          description: 从第几页开始返回段落
+          example: 1
+    responses:
+      200:
+        description: 获取成功
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusResponse'
+      400:
+        description: 请求参数错误 (PDF文件Hash不存在)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+
+<pdf_id>/info:
+  get:
+    summary: 获取PDF信息
+    description: 获取PDF信息，包括文件名、页数、文件大小等
+    parameters:
+      - name: pdf_id
+        in: path
+        required: true
+        description: PDF文件Hash
+    responses:
+      200:
+        description: 获取成功
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InfoResponse'
