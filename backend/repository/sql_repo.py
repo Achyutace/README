@@ -54,7 +54,7 @@ class SQLRepository:
         stmt = select(GlobalFile).where(GlobalFile.file_hash == file_hash)
         return self.db.execute(stmt).scalar_one_or_none()
         
-    def create_global_file(self, file_hash: str, file_path: str, file_size: int = 0, total_pages: int = 0, metadata: Dict = None) -> GlobalFile:
+    def create_global_file(self, file_hash: str, file_path: str, file_size: int = 0, total_pages: int = 0, metadata: Dict = None, dimensions: List[Dict] = None) -> GlobalFile:
         """创建全局文件记录（如果已存在则返回现有记录）"""
         existing = self.get_global_file(file_hash)
         if existing:
@@ -66,6 +66,7 @@ class SQLRepository:
             file_size=file_size,
             total_pages=total_pages,
             metadata_info=metadata or {},
+            dimensions=dimensions or [],
             process_status="pending" 
         )
         self.db.add(global_file)

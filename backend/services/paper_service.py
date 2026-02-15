@@ -164,10 +164,12 @@ class PdfService:
         # 5. 获取页数和元数据
         page_count = 0
         metadata = {}
+        dimensions = []
         try:
             pdf_info = pdf_engine.get_pdf_info(pdf_id, filepath)
             page_count = pdf_info.get('pageCount', 0)
             metadata = pdf_info.get('metadata', {})
+            dimensions = pdf_info.get('dimensions', [])
         except Exception:
             pass
             
@@ -184,6 +186,8 @@ class PdfService:
                 gf.error_message = None
                 gf.total_pages = page_count
                 gf.current_page = 0
+                gf.metadata_info = metadata
+                gf.dimensions = dimensions
                 gf.updated_at = datetime.now()
                 gf.task_id = new_task_id
             else:
@@ -194,6 +198,7 @@ class PdfService:
                     file_size=file_size,
                     total_pages=page_count,
                     metadata=metadata,
+                    dimensions=dimensions,
                 )
                 gf.task_id = new_task_id
             db.commit()
@@ -309,11 +314,12 @@ class PdfService:
         db, repo = self._get_repo()
         try:
             gf = repo.get_global_file(pdf_id)
-            if gf and gf.metadata_info:
+            if gf:
                 return {
                     'id': gf.file_hash,
                     'pageCount': gf.total_pages,
-                    'metadata': gf.metadata_info
+                    'metadata': gf.metadata_info or {},
+                    'dimensions': gf.dimensions or []
                 }
         except Exception as e:
             logger.warning(f"DB lookup failed for {pdf_id}: {e}")

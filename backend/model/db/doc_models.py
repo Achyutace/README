@@ -34,6 +34,7 @@ class GlobalFile(Base):
     
     # 元数据
     metadata_info = Column(JSONB, default={}, comment="PDF原生元数据: author, publish_date, doi")
+    dimensions = Column(JSONB, default=[], comment="每页的物理尺寸 [{'width': w, 'height': h}]")
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_accessed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="最后被访问/引用的时间 (用于GC)")
