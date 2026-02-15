@@ -137,6 +137,7 @@ class UserNote(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_paper_id = Column(UUID(as_uuid=True), ForeignKey("user_papers.id"), nullable=False, index=True)
     
+    title = Column(String(255), nullable=True, comment="笔记标题")
     content = Column(Text, nullable=False) # 笔记内容(Markdown)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())

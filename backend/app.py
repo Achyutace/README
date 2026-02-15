@@ -1,6 +1,7 @@
 from pathlib import Path
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, send_from_directory
 from flask_cors import CORS
+from flask_swagger_ui import get_swaggerui_blueprint
 
 from core.config import settings
 # TODO：自动化测试
@@ -20,6 +21,9 @@ from route.chatbox import chatbox_bp
 from route.highlight import highlight_bp
 from route.translate import translate_bp
 from route.notes import notes_bp
+from route.auth import auth_bp
+from route.link import link_bp
+from route.roadmap import roadmap_bp
 
 # ==================== 2.1 Celery ====================
 from celery_app import celery  # noqa: F401  (确保 Worker 能发现任务)
@@ -98,87 +102,64 @@ app.note_service = None   # 占位, 由 before_request 初始化
 def before_request():
     """
     在每个请求处理之前执行：
-    1. 解析用户标识 → 确保数据库中有对应 User 记录 → 得到 UUID
+    1. 尝试从 JWT 解析 user_id（若 Authorization 头存在）
     2. 初始化该用户的 PdfService (因为上传路径依赖用户 ID)
+    3. 初始化 per-request 的 DB 服务
+
+    注意：
+    - 公开接口 (auth/register, auth/login, health, smartref 等)
+      不携带 JWT, 此时 g.user_id 不设置, 由各路由自行判断
+    - 受保护接口由 @require_auth 装饰器确保 g.user_id 存在
     """
     import uuid as _uuid
     from core.database import SessionLocal
     from repository.sql_repo import SQLRepository
+    from utils.jwt_handler import decode_token
+    from route.utils import get_jwt_secret
+    import jwt as pyjwt
 
     # 跳过 OPTIONS 请求 (CORS 预检)
     if request.method == 'OPTIONS':
         return
 
-    # 1. 获取用户标识
-    # 支持两种形式:
-    #   a) UUID 字符串 → 直接当 user.id 使用
-    #   b) 普通用户名   → 通过 get_or_create_user 获得 UUID
-    raw_user_id = (
-        request.headers.get('X-User-Id')
-        or request.form.get('userId')
-        or request.args.get('userId')
-        or 'default_user'
-    )
+    # ---------- 1. 从 JWT 提取用户身份 (可选) ----------
+    user_uuid = None
+    auth_header = request.headers.get('Authorization', '')
 
-    # 尝试解析为 UUID
-    try:
-        user_uuid = _uuid.UUID(raw_user_id)
-        # 是合法 UUID, 用作磁盘目录名时取前 16 位
-        user_dir_name = str(user_uuid)
-    except ValueError:
-        # 不是 UUID → 当作 username, 在数据库中 get_or_create
-        user_dir_name = raw_user_id
-        user_uuid = None
-
-    # 确保 DB 中有用户记录
-    if user_uuid is None:
-        db = SessionLocal()
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
         try:
-            repo = SQLRepository(db)
-            user_obj = repo.get_or_create_user(raw_user_id)
-            user_uuid = user_obj.id
-        finally:
-            db.close()
+            secret = get_jwt_secret()
+            payload = decode_token(token, secret=secret, expected_type='access')
+            user_uuid = _uuid.UUID(payload['sub'])
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError, ValueError, KeyError):
+            # token 无效时不中断请求; @require_auth 会在需要鉴权的路由中拦截
+            pass
+
+    # 挂载到 g（如果解析成功）
+    if user_uuid:
+        g.user_id = user_uuid
+        g.user_id_str = str(user_uuid)
+
+        # 2. 准备用户目录
+        user_path = USERS_DIR / g.user_id_str
+        upload_folder = user_path / 'uploads'
+        upload_folder.mkdir(parents=True, exist_ok=True)
+
+        # 3. 初始化 PdfService
+        g.pdf_service = PdfService(upload_folder=str(upload_folder))
+
+        # 4. 初始化 per-request 服务 (需要 SQLRepository)
+        req_db = SessionLocal()
+        req_repo = SQLRepository(req_db)
+        g._req_db = req_db
+
+        app.chat_service = ChatService(db_repo=req_repo)
+        app.note_service = NoteService(db_repo=req_repo)
     else:
-        # UUID 形式: 验证用户存在 (不存在就自动创建)
-        db = SessionLocal()
-        try:
-            repo = SQLRepository(db)
-            user_obj = repo.get_user_by_id(user_uuid)
-            if not user_obj:
-                # UUID 不存在 → 用 raw_user_id 作 username 创建
-                user_obj = repo.get_or_create_user(raw_user_id)
-                user_uuid = user_obj.id
-        finally:
-            db.close()
-
-    # 挂载到 g (统一为 UUID 类型)
-    g.user_id = user_uuid  # uuid.UUID
-    g.user_id_str = str(user_uuid)  # 字符串形式，方便日志/路径
-
-    # 2. 准备用户目录 (用 UUID 字符串作目录名)
-    user_path = USERS_DIR / g.user_id_str
-    upload_folder = user_path / 'uploads'
-
-    # 确保目录存在
-    upload_folder.mkdir(parents=True, exist_ok=True)
-
-    # 3. 初始化 PdfService 并挂载到 g
-    g.pdf_service = PdfService(
-        upload_folder=str(upload_folder),
-    )
-
-    # 4. 初始化 per-request 服务 (需要 SQLRepository)
-    from core.database import SessionLocal as _SessionLocal
-    from repository.sql_repo import SQLRepository as _SQLRepo
-
-    req_db = _SessionLocal()
-    req_repo = _SQLRepo(req_db)
-    g._req_db = req_db       # 挂到 g 上，供 teardown 关闭
-
-    # ChatService & NoteService 需要注入 repo (per-request)
-    app.chat_service = ChatService(db_repo=req_repo)
-    app.note_service = NoteService(db_repo=req_repo)
+        # 未认证请求 — 不初始化用户相关服务
+        # 公开接口不需要这些，受保护接口会被 @require_auth 拦截
+        g._req_db = None
 
 @app.teardown_request
 def teardown_request_db(exc):
@@ -190,6 +171,22 @@ def teardown_request_db(exc):
         except Exception:
             pass
 
+# ==================== 5.5 Swagger UI ====================
+# 只有在开发模式下才注册 Swagger
+if settings.debug:  # 假设你的 settings 中有 debug 开关
+    SWAGGER_URL = '/api/docs'
+    API_URL = '/api/openapi.yaml'
+    swaggerui_blueprint = get_swaggerui_blueprint(
+        SWAGGER_URL,
+        API_URL,
+        config={'app_name': "Paper Agent API"}
+    )
+    app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+
+    @app.route('/api/openapi.yaml')
+    def send_openapi():
+        return send_from_directory('.', 'openapi.yaml')
+
 # ==================== 6. 注册蓝图 ====================
 
 app.register_blueprint(upload_bp)      # URL 前缀: /api/pdf
@@ -197,15 +194,17 @@ app.register_blueprint(chatbox_bp)     # URL 前缀: /api/chatbox
 app.register_blueprint(highlight_bp)   # URL 前缀: /api/highlight
 app.register_blueprint(translate_bp)   # URL 前缀: /api/translate
 app.register_blueprint(notes_bp)       # URL 前缀: /api/notes
+app.register_blueprint(auth_bp)        # URL 前缀: /api/auth
+app.register_blueprint(roadmap_bp)     # URL 前缀: /api/roadmap
+app.register_blueprint(link_bp)        # URL 前缀: /api/link
 
 # ==================== 7. 健康检查接口 ====================
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """用于前端检测后端是否存活"""
+    """用于前端检测后端是否存活（公开接口，不需要认证）"""
     return jsonify({
         'status': 'ok',
-        'user_id': g.user_id,
         'services': {
             'celery': True,
             'rag': hasattr(app, 'rag_service'),

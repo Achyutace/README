@@ -28,3 +28,12 @@ vector_store:
     url: "http://localhost:6333"
     api_key: ""
     prefer_grpc: true
+
+# JWT 认证配置
+jwt:
+  # 生产环境务必修改为高强度随机字符串！
+  secret: "your-jwt-secret-key-change-me-in-production"
+  # Access Token 有效期（分钟）
+  access_expire_minutes: 30
+  # Refresh Token 有效期（天）
+  refresh_expire_days: 7

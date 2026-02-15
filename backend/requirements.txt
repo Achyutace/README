@@ -3,6 +3,10 @@ flask==3.0.0
 flask-cors==4.0.0
 werkzeug==3.0.1
 
+# Authentication
+PyJWT==2.8.0
+bcrypt==4.1.2
+
 # Utilities & File Processing
 python-dotenv==1.0.0
 PyMuPDF==1.23.7
@@ -36,6 +40,9 @@ httpx==0.27.0
 psycopg2-binary==2.9.9
 SQLAlchemy==2.0.25
 alembic==1.13.1
+
+# Swagger UI
+flask-swagger-ui==4.11.9
 
 # Object Storage
 cos-python-sdk-v5==1.9.30
