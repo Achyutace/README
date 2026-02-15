@@ -14,27 +14,20 @@ class NoteService:
     def __init__(self, db_repo: SQLRepository):
         self.repo = db_repo
 
-    def add_note(self, user_id: str, file_hash: str, content: str, title: str = None, 
+    def add_note(self, user_id: uuid.UUID, file_hash: str, content: str, title: str = None, 
                  keywords: List[str] = None, meta_data: Dict = None) -> int:
         """
         添加笔记
-        :param user_id: 用户ID (str)
+        :param user_id: 用户ID (UUID)
         :param file_hash: 全局文件Hash
-        :param content: 笔记内容 (Markdown 或 JSON字符串)
+        :param content: 笔记内容
         :param title: 笔记标题
         :param keywords: 关键词
-        :param meta_data: 额外元数据 (如 color, position, type)
-        :return: 笔记的唯一 ID (int)
+        :param meta_data: 额外元数据
+        :return: 笔记的唯一 ID
         """
-        # 1. 处理 User ID
-        try:
-            if user_id == 'default':
-                u_uuid = uuid.UUID('00000000-0000-0000-0000-000000000000')
-            else:
-                u_uuid = uuid.UUID(user_id)
-        except ValueError:
-            logger.error(f"Invalid user_id format: {user_id}")
-            raise ValueError("Invalid user_id format")
+        # 1. User ID
+        u_uuid = user_id
 
         # 2. 确保 UserPaper 存在
         # 笔记必须关联到一个 UserPaper (用户书架上的书)
@@ -82,19 +75,13 @@ class NoteService:
         self.repo.update_note(note_id, title=title, content=content, keywords=keywords)
         return True
 
-    def get_notes(self, user_id: str, file_hash: str) -> List[Dict]:
+    def get_notes(self, user_id: uuid.UUID, file_hash: str) -> List[Dict]:
         """
         获取用户针对某文件的所有笔记
         :return: 笔记字典列表
         """
-        try:
-            if user_id == 'default':
-                u_uuid = uuid.UUID('00000000-0000-0000-0000-000000000000')
-            else:
-                u_uuid = uuid.UUID(user_id)
-        except ValueError:
-            return []
-
+        u_uuid = user_id
+        
         user_paper = self.repo.get_user_paper(u_uuid, file_hash)
         if not user_paper:
             return []
@@ -135,33 +122,27 @@ class NoteService:
         }
     # ==================== 高亮 ====================
 
-    def _resolve_user_paper_id(self, user_id: str, file_hash: str):
-        """内部辅助：解析 user_id → UUID，查找 UserPaper 关联 ID"""
-        try:
-            if user_id == 'default':
-                u_uuid = uuid.UUID('00000000-0000-0000-0000-000000000000')
-            else:
-                u_uuid = uuid.UUID(user_id)
-        except ValueError:
-            return None
-
+    def _resolve_user_paper_id(self, user_id: uuid.UUID, file_hash: str):
+        """内部辅助：解析 user_id (UUID)，查找 UserPaper 关联 ID"""
+        u_uuid = user_id
+        
         user_paper = self.repo.get_user_paper(u_uuid, file_hash)
         if not user_paper:
             return None
         return user_paper.id
 
-    def add_highlight(self, user_id: str, file_hash: str,
+    def add_highlight(self, user_id: uuid.UUID, file_hash: str,
                       page_number: int, rects: List[Dict],
                       selected_text: str = '', color: str = '#FFFF00') -> Optional[int]:
         """
         添加高亮
-        :param user_id:   用户 ID (str)
+        :param user_id:   用户 ID (UUID)
         :param file_hash: PDF 文件哈希
         :param page_number: 页码
-        :param rects:     归一化坐标列表 [{x0,y0,x1,y1}, ...]
+        :param rects:     归一化坐标列表
         :param selected_text: 选中文本
         :param color:     高亮颜色
-        :return: 高亮记录 ID (int) 或 None
+        :return: 高亮记录 ID
         """
         user_paper_id = self._resolve_user_paper_id(user_id, file_hash)
         if not user_paper_id:
@@ -178,7 +159,7 @@ class NoteService:
         logger.info(f"Highlight created: id={highlight.id}")
         return highlight.id
 
-    def get_highlights(self, user_id: str, file_hash: str,
+    def get_highlights(self, user_id: uuid.UUID, file_hash: str,
                        page_number: Optional[int] = None) -> List[Dict]:
         """
         获取高亮列表

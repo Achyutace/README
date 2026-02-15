@@ -88,7 +88,7 @@
 | `status` | String | 处理状态：`"pending"` / `"processing"` / `"completed"` / `"failed"` |
 | `pageCount` | Integer | PDF 总页数 |
 | `filename` | String | 上传时的原始文件名 |
-| `userId` | String | 当前用户 UUID |
+| `userId` | String (UUID) | 当前用户 UUID |
 | `isNewUpload` | Boolean | `true` 表示新上传；`false` 表示文件已存在（秒传） |
 
 - **错误响应**:
@@ -273,7 +273,7 @@
   "message": "这篇论文的主要贡献是什么？",
   "sessionId": "uuid-...",
   "pdfId": "a1b2c3...",
-  "userId": "user_123"
+  "userId": "123e4567-e89b-12d3-a456-426614174000"
 }
 ```
 

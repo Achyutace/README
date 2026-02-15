@@ -67,7 +67,7 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 @shared_task(bind=True, name="tasks.pdf_tasks.process_pdf",
              max_retries=3, default_retry_delay=60)
 
-def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: str = None):
+def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: uuid.UUID = None):
     """
     PDF 全流程异步处理任务。
 
@@ -76,7 +76,7 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
         upload_folder: 用户上传目录绝对路径
         filename:      原始文件名
         page_count:    页数 
-        user_id:       用户 ID (字符串)
+        user_id:       用户 ID (UUID)
     """
     task_id = self.request.id
     logger.info(f"[Task {task_id}] Start processing PDF {filename} ({file_hash}), pages={page_count}, user={user_id}")
@@ -154,11 +154,14 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
         try:
             target_user_uuid = None
             if user_id:
-                try:
-                    target_user_uuid = uuid.UUID(str(user_id))
-                except (ValueError, TypeError):
-                    logger.error(f"[Task {task_id}] Invalid user_id format: {user_id}. RAG indexing might fail or be assigned to public.")
-                    pass 
+                if isinstance(user_id, uuid.UUID):
+                    target_user_uuid = user_id
+                else:
+                    try:
+                        target_user_uuid = uuid.UUID(str(user_id))
+                    except (ValueError, TypeError):
+                        logger.error(f"[Task {task_id}] Invalid user_id format: {user_id}. RAG indexing might fail or be assigned to public.")
+                        pass 
             else:
                  logger.warning(f"[Task {task_id}] Missing user_id for PDF processing.")
 

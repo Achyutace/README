@@ -40,7 +40,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # ==================== Token 工具 ====================
 
 def create_access_token(
-    user_id: str,
+    user_id: uuid.UUID,
     secret: str = _DEFAULT_SECRET,
     expires_minutes: int = _DEFAULT_ACCESS_EXPIRE_MINUTES,
     extra_claims: Optional[Dict[str, Any]] = None,
@@ -70,7 +70,7 @@ def create_access_token(
 
 
 def create_refresh_token(
-    user_id: str,
+    user_id: uuid.UUID,
     secret: str = _DEFAULT_SECRET,
     expires_days: int = _DEFAULT_REFRESH_EXPIRE_DAYS,
 ) -> str:

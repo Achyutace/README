@@ -13,7 +13,7 @@ readme/
 │   │   |   ├── chat_box.py     # 聊天框相关路由：聊天记录添加、获取、删除；信息发送，获取回答
 │   │   |   ├── highlight.py    # 高亮路由：添加，删除，改颜色         
 │   │   |   ├── notes.py        # 笔记相关路由：添加，删除  
-│   │   |   ├── link.py         # 引用相关路由：请求引用相关内容      1                                      
+│   │   |   ├── link.py         # 引用相关路由：请求引用相关内容                                         
 │   │   |   ├── translate.py    # 翻译相关路由：段落翻译+划词翻译
 │   │   |   ├── upload.py       # pdf上传路由  
 │   │   |   ├── library.py      # 文献管理路由：上传，删除，分组
@@ -44,10 +44,12 @@ readme/
 │   ├── tasks/                      # 异步任务
 │   │   ├── pdf_tasks.py            # pdf段落+图片解析+向量化的异步处理
 │   │   └── chat_task.py            # 聊天框的异步任务：标题异步生成
-│   ├── workflows/                  # Agent服务层：过于重了，单独列出来 
+│   ├── agent/                      # Agent服务层：过于重了，单独列出来 
 │   │   ├── state.py                # 定义 AgentState (Messages, Context, Keys)
-│   │   ├── nodes/                  # 图节点逻辑
-│   │   │   └── ...                 # LangGraph节点
+│   │   ├── nodes/                  # LangGraph节点
+│   │   │   ├── router.py           # 路由节点        
+│   │   │   ├── paper_expert.py     # 单论文细读节点：RAG补充上下文      
+│   │   │   └── search_expert.py    # 外部检索路由节点：检索用户关联的文献库+联网搜索                
 │   |   └── main_graph.py           # 构建 Workflow, 编译 StateGraph
 │   ├── utils/                      # 纯工具箱： 无业务状态、纯函数，从原来的service模块中提取
 │   │   ├── pdf_engine.py           # PDF 解析 (PyPDF), 文本清洗

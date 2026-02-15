@@ -19,35 +19,35 @@ class ChatService:
 
     # ==================== 业务逻辑 ====================
 
-    def add_user_message(self, session_id: str, user_id: str, content: str) -> Dict:
+    def add_user_message(self, session_id: str, user_id: uuid.UUID, content: str) -> Dict:
         """添加用户消息"""
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         msg = self.repo.add_chat_message(
-            session_id=uuid.UUID(session_id),
-            user_id=u_uuid,
+            session_id=s_uuid,
+            user_id=user_id,
             role="user",
             content=content
         )
         return self._model_to_dict(msg)
 
-    def add_ai_message(self, session_id: str, user_id: str, content: str, citations: List[Dict] = None) -> Dict:
+    def add_ai_message(self, session_id: str, user_id: uuid.UUID, content: str, citations: List[Dict] = None) -> Dict:
         """添加 AI 回复"""
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         msg = self.repo.add_chat_message(
-            session_id=uuid.UUID(session_id),
-            user_id=u_uuid,
+            session_id=s_uuid,
+            user_id=user_id,
             role="assistant",
             content=content,
             citations=citations
         )
         return self._model_to_dict(msg)
 
-    def get_formatted_history(self, session_id: str, user_id: str, limit: int = 10) -> List[Dict]:
+    def get_formatted_history(self, session_id: str, user_id: uuid.UUID, limit: int = 10) -> List[Dict]:
         """
         获取格式化后的历史记录
         """
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
-        raw_msgs = self.repo.get_chat_history(uuid.UUID(session_id), u_uuid)
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        raw_msgs = self.repo.get_chat_history(s_uuid, user_id)
         # 取最后 N 条
         selected_msgs = raw_msgs[-limit:] if limit else raw_msgs
         
@@ -56,26 +56,24 @@ class ChatService:
             for m in selected_msgs
         ]
 
-    def get_session_messages_for_ui(self, session_id: str, user_id: str) -> List[Dict]:
+    def get_session_messages_for_ui(self, session_id: str, user_id: uuid.UUID) -> List[Dict]:
         """获取用于前端展示的所有消息"""
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
-        raw_msgs = self.repo.get_chat_history(uuid.UUID(session_id), u_uuid)
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        raw_msgs = self.repo.get_chat_history(s_uuid, user_id)
         return self.format_messages(raw_msgs)
 
-    def list_user_sessions(self, user_id: str, file_hash: str = None, limit: int = 50) -> List[Dict]:
+    def list_user_sessions(self, user_id: uuid.UUID, file_hash: str = None, limit: int = 50) -> List[Dict]:
         """列出用户会话"""
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
-        sessions = self.repo.list_chat_sessions(u_uuid, file_hash=file_hash, limit=limit)
+        sessions = self.repo.list_chat_sessions(user_id, file_hash=file_hash, limit=limit)
         return self.format_session_list(sessions)
 
-    def create_session(self, user_id: str, file_hash: str = None, title: str = "New Chat") -> Dict:
+    def create_session(self, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat") -> Dict:
         """创建新会话"""
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
         session_id = uuid.uuid4()
         
         session = self.repo.create_chat_session(
             session_id=session_id,
-            user_id=u_uuid,
+            user_id=user_id,
             file_hash=file_hash,
             title=title
         )
@@ -104,13 +102,13 @@ class ChatService:
             'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
         }
 
-    def delete_session(self, session_id: str, user_id: str) -> int:
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
-        return self.repo.delete_chat_session(uuid.UUID(session_id), u_uuid)
+    def delete_session(self, session_id: str, user_id: uuid.UUID) -> int:
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        return self.repo.delete_chat_session(s_uuid, user_id)
 
-    def update_title(self, session_id: str, user_id: str, title: str) -> bool:
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
-        return self.repo.update_chat_session_title(uuid.UUID(session_id), u_uuid, title)
+    def update_title(self, session_id: str, user_id: uuid.UUID, title: str) -> bool:
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        return self.repo.update_chat_session_title(s_uuid, user_id, title)
 
     # ==================== 格式化工具 ====================
 

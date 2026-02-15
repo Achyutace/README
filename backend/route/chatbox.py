@@ -63,7 +63,7 @@ def send_message():
     user_query = data.get('message')
     session_id = data.get('sessionId')
     pdf_id = data.get('pdfId')
-    user_id = g.user_id_str          # ← 鉴权：统一从 g 获取
+    user_id = g.user_id
 
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
@@ -116,7 +116,7 @@ def simple_chat():
     user_query = data.get('message')
     session_id = data.get('sessionId')
     pdf_id = data.get('pdfId')
-    user_id = g.user_id_str
+    user_id = g.user_id
 
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
@@ -173,7 +173,7 @@ def stream_message():
     user_query = data.get('message')
     session_id = data.get('sessionId')
     pdf_id = data.get('pdfId')
-    user_id = g.user_id_str
+    user_id = g.user_id
 
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
@@ -238,7 +238,7 @@ def delete_session(session_id):
     """
     try:
         chat_service = current_app.chat_service
-        user_id = g.user_id_str
+        user_id = g.user_id
 
         chat_service.delete_session(session_id, user_id)
 
@@ -261,7 +261,7 @@ def list_sessions():
     """
     try:
         chat_service = current_app.chat_service
-        user_id = g.user_id_str
+        user_id = g.user_id
 
         pdf_id = request.args.get('pdfId')
         limit = request.args.get('limit', type=int, default=50)
@@ -287,7 +287,7 @@ def get_session_messages(session_id):
     """
     try:
         chat_service = current_app.chat_service
-        user_id = g.user_id_str
+        user_id = g.user_id
 
         messages = chat_service.get_session_messages_for_ui(session_id, user_id)
 
@@ -312,7 +312,7 @@ def update_session_title(session_id):
     try:
         data = request.get_json()
         new_title = data.get('title')
-        user_id = g.user_id_str
+        user_id = g.user_id
 
         if not new_title or not new_title.strip():
             return jsonify({'error': 'Title is required'}), 400

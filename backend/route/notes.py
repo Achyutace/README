@@ -34,7 +34,7 @@ def create_note():
 
     try:
         pdf_id = data['pdfId']          # pdf_id == file_hash
-        user_id = g.user_id_str
+        user_id = g.user_id
         title = data.get('title', '')
         content = data.get('content', '')
         keywords = data.get('keywords', [])
@@ -66,7 +66,7 @@ def get_notes(pdf_id):
     获取某 PDF 的所有笔记
     """
     try:
-        user_id = g.user_id_str
+        user_id = g.user_id
         note_service = current_app.note_service
 
         notes = note_service.get_notes(user_id=user_id, file_hash=pdf_id)

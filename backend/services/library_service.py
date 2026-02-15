@@ -22,7 +22,7 @@ class LibraryService:
         db = SessionLocal()
         return db, SQLRepository(db)
 
-    def bind_paper(self, user_id: str, pdf_id: str, title: str) -> bool:
+    def bind_paper(self, user_id: uuid.UUID, pdf_id: str, title: str) -> bool:
         """
         将GlobalFile中注册好的PDF绑定到用户库中。
         """

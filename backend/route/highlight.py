@@ -47,7 +47,7 @@ def create_highlight():
         # 3. 持久化
         note_svc = current_app.note_service
         highlight_id = note_svc.add_highlight(
-            user_id=g.user_id_str,
+            user_id=g.user_id,
             file_hash=pdf_id,
             page_number=data['page'],
             rects=normalized_rects,
@@ -85,7 +85,7 @@ def get_highlights(pdf_id):
 
         note_svc = current_app.note_service
         highlights = note_svc.get_highlights(
-            user_id=g.user_id_str,
+            user_id=g.user_id,
             file_hash=pdf_id,
             page_number=page
         )

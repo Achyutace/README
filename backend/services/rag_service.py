@@ -286,8 +286,100 @@ class RAGService:
                 'metadata': {'file_hash': 'demo', 'page': 1, 'section': 'content'}
             }
         ]
-    
-    
+
+
+    def retrieve_related_papers(
+        self,
+        query: str,
+        user_id: Optional[uuid.UUID] = None,
+        exclude_file_hash: Optional[str] = None,
+        top_k: int = 6,
+    ) -> List[Dict]:
+        """
+        在用户文献库的 **abstract** 段落中做相似度检索，
+        返回与 query 最相关的论文列表（按论文去重，每篇只保留最高匹配）。
+
+        适用于 Agent 跨文献库 RAG：快速定位相关论文，而非全文检索。
+
+        Args:
+            query:              查询文本
+            user_id:            用户 ID（限定检索范围）
+            exclude_file_hash:  需排除的 file_hash（如当前正在阅读的论文）
+            top_k:              向量检索返回的最大数量（去重前）
+
+        Returns:
+            List[Dict]: 按相似度降序，每篇论文一条记录::
+
+                {
+                    "file_hash":        str,
+                    "abstract_snippet": str,   # 匹配到的摘要片段
+                    "score":            float, # 余弦相似度
+                    "page":             int,
+                    "metadata":         dict   # 完整 payload
+                }
+        """
+        if not self.has_embeddings or not vector_repo.is_available:
+            return []
+
+        # 1. 生成查询向量
+        try:
+            query_vector = self.embeddings.embed_query(query)
+        except Exception as e:
+            print(f"[retrieve_related_papers] Embedding error: {e}")
+            return []
+
+        # 2. 构建过滤条件：仅 abstract 段落 + 用户范围 + 排除当前论文
+        search_filters: Dict[str, Any] = {"section": "abstract"}
+        if user_id:
+            search_filters["user_ids"] = str(user_id)
+        if exclude_file_hash:
+            search_filters["exclude_file_hash"] = exclude_file_hash
+
+        try:
+            results = vector_repo.search(
+                collection_name=self.COLLECTION_NAME,
+                query_vector=query_vector,
+                limit=top_k,
+                filters=search_filters,
+            )
+
+            # 如果 abstract 检索没搜到，尝试全库搜索
+            if not results:
+                fallback_filters = {"user_ids": str(user_id)} if user_id else {}
+                if exclude_file_hash:
+                    fallback_filters["exclude_file_hash"] = exclude_file_hash
+                    
+                results = vector_repo.search(
+                    collection_name=self.COLLECTION_NAME,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    filters=fallback_filters,
+                )
+        except Exception as e:
+            print(f"[retrieve_related_papers] search error: {e}")
+            return []
+
+        # 3. 按 file_hash 去重，只保留每篇论文的最高分结果
+        best_per_paper: Dict[str, Dict] = {}
+        for point in results:
+            payload = point.payload or {}
+            fh = payload.get("file_hash", "")
+
+            # 同一篇论文只保留 score 最高的 chunk
+            if fh in best_per_paper and point.score <= best_per_paper[fh]["score"]:
+                continue
+
+            best_per_paper[fh] = {
+                "file_hash": fh,
+                "abstract_snippet": payload.get("page_content", ""),
+                "score": point.score,
+                "page": payload.get("page", 0),
+                "metadata": payload,
+            }
+
+        # 4. 按 score 降序排列返回
+        return sorted(best_per_paper.values(), key=lambda x: x["score"], reverse=True)
+
     def delete_paper(self, file_hash: str, user_id: Optional[uuid.UUID] = None) -> bool:
         """
         取消论文关联或执行物理清理

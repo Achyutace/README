@@ -80,7 +80,7 @@ class PdfService:
         raise FileNotFoundError(f"PDF file not found locally or in storage: {pdf_id}")
 
     # ===================== 文件处理异步 =====================
-    def ingest_file(self, file_obj, filename: str, user_id: str = None) -> dict:
+    def ingest_file(self, file_obj, filename: str, user_id: uuid.UUID = None) -> dict:
         """
         摄入文件：负责查重、存储、更新GlobalFile、触发Celery。
         

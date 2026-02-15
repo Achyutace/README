@@ -46,14 +46,13 @@ def upload_pdf():
 
     try:
         pdf_service = g.pdf_service
-        user_id = g.user_id          # uuid.UUID, 已在 before_request 中鉴权
-        user_id_str = g.user_id_str
+        user_id = g.user_id
 
         # 2. 摄入文件 (Hash + 存盘 + COS + DB + Celery)
         result = pdf_service.ingest_file(
             file_obj=file,
             filename=file.filename,
-            user_id=user_id_str
+            user_id=user_id
         )
 
         pdf_id = result['pdf_id']
@@ -61,7 +60,7 @@ def upload_pdf():
         # 3. 绑定到用户书架
         library_service = current_app.library_service
         library_service.bind_paper(
-            user_id=user_id_str,
+            user_id=user_id,
             pdf_id=pdf_id,
             title=file.filename
         )
@@ -73,7 +72,7 @@ def upload_pdf():
             'status': result['status'],
             'pageCount': result.get('pageCount', 0),
             'filename': file.filename,
-            'userId': user_id_str,
+            'userId': str(user_id),
             'isNewUpload': result.get('is_new', True),
         }
 

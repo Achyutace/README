@@ -10,7 +10,7 @@ from core.config import settings
 from services.paper_service import PdfService
 from services.rag_service import RAGService
 from services.translate_service import TranslateService
-from services.agent_service import AcademicAgentService
+from agent import AcademicAgentService
 from services.chat_service import ChatService
 from services.library_service import LibraryService
 from services.note_service import NoteService

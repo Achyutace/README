@@ -16,7 +16,7 @@ from utils.jwt_handler import (
 )
 from route.utils import require_auth, get_jwt_secret, get_jwt_config
 
-import jwt as pyjwt   # 用于捕获异常类型
+import jwt as pyjwt   
 
 # 定义蓝图
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
@@ -74,12 +74,12 @@ def register():
         # 签发令牌
         jwt_conf = get_jwt_config()
         access_token = create_access_token(
-            user_id=str(user.id),
+            user_id=user.id,
             secret=jwt_conf['secret'],
             expires_minutes=jwt_conf['access_expire_minutes'],
         )
         refresh_token = create_refresh_token(
-            user_id=str(user.id),
+            user_id=user.id,
             secret=jwt_conf['secret'],
             expires_days=jwt_conf['refresh_expire_days'],
         )
@@ -139,12 +139,12 @@ def login():
         # 签发令牌
         jwt_conf = get_jwt_config()
         access_token = create_access_token(
-            user_id=str(user.id),
+            user_id=user.id,
             secret=jwt_conf['secret'],
             expires_minutes=jwt_conf['access_expire_minutes'],
         )
         refresh_token = create_refresh_token(
-            user_id=str(user.id),
+            user_id=user.id,
             secret=jwt_conf['secret'],
             expires_days=jwt_conf['refresh_expire_days'],
         )
@@ -207,7 +207,7 @@ def refresh():
 
         # 签发新的 Access Token
         new_access_token = create_access_token(
-            user_id=user_id,
+            user_id=user.id,
             secret=secret,
             expires_minutes=jwt_conf['access_expire_minutes'],
         )

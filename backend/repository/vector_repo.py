@@ -25,15 +25,24 @@ class VectorRepository:
     # --- 过滤器构建 ---
     
     def _to_filter(self, filters: Optional[Dict]) -> Optional[Any]:
-        """将 Python 字典转换为 Qdrant 过滤对象。"""
+        """将 Python 字典转换为 Qdrant 过滤对象。支持 'exclude_' 前缀表示 must_not。"""
         if not filters or not models:
             return None
         
-        conditions = [
-            models.FieldCondition(key=k, match=models.MatchValue(value=v)) 
-            for k, v in filters.items()
-        ]
-        return models.Filter(must=conditions)
+        must_conditions = []
+        must_not_conditions = []
+
+        for k, v in filters.items():
+            if k.startswith("exclude_"):
+                must_not_conditions.append(
+                    models.FieldCondition(key=k[len("exclude_"):], match=models.MatchValue(value=v))
+                )
+            else:
+                must_conditions.append(
+                    models.FieldCondition(key=k, match=models.MatchValue(value=v))
+                )
+        
+        return models.Filter(must=must_conditions, must_not=must_not_conditions)
 
     # --- 集合管理 (Management) ---
 

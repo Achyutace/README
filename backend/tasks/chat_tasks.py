@@ -9,6 +9,7 @@
 """
 # TODO：添加轻量化llm组件
 import logging
+import uuid
 from celery import shared_task
 
 from core.database import SessionLocal
@@ -63,13 +64,13 @@ def _generate_title_via_llm(user_query: str) -> str:
 # ==================== Celery Task ====================
 
 @shared_task(ignore_result=True, name="tasks.chat_tasks.generate_session_title")
-def generate_session_title_task(session_id: str, user_id: str, user_query: str):
+def generate_session_title_task(session_id: uuid.UUID, user_id: uuid.UUID, user_query: str):
     """
     异步生成会话标题并更新数据库。
 
     Args:
-        session_id: 会话 UUID (str)
-        user_id:    用户 ID (str)
+        session_id: 会话 UUID
+        user_id:    用户 ID (UUID)
         user_query: 用户的第一句提问
     """
     db = SessionLocal()
