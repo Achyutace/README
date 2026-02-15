@@ -69,8 +69,9 @@ export interface Note {
   note_type: string
   color: string
   position: any | null
-  created_time: string
-  updated_time: string
+  keywords: string[]  // 笔记关键词列表
+  createdAt: string
+  updatedAt: string
 }
 
 // 创建笔记请求体（前端调用时使用）
@@ -78,6 +79,7 @@ export interface CreateNoteRequest {
   pdfId: string
   title?: string
   content: string
+  keywords?: string[]  // 笔记关键词列表
   pageNumber?: number
   noteType?: string
   color?: string
@@ -88,6 +90,7 @@ export interface CreateNoteRequest {
 export interface UpdateNoteRequest {
   title?: string
   content: string
+  keywords?: string[]  // 笔记关键词列表
   color?: string
 }
 
