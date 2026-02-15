@@ -22,7 +22,8 @@ from route.highlight import highlight_bp
 from route.translate import translate_bp
 from route.notes import notes_bp
 from route.auth import auth_bp
-from route.smartref import smartref_bp
+from route.link import link_bp
+from route.roadmap import roadmap_bp
 
 # ==================== 2.1 Celery ====================
 from celery_app import celery  # noqa: F401  (确保 Worker 能发现任务)
@@ -194,7 +195,8 @@ app.register_blueprint(highlight_bp)   # URL 前缀: /api/highlight
 app.register_blueprint(translate_bp)   # URL 前缀: /api/translate
 app.register_blueprint(notes_bp)       # URL 前缀: /api/notes
 app.register_blueprint(auth_bp)        # URL 前缀: /api/auth
-app.register_blueprint(smartref_bp)    # URL 前缀: /api/smartref
+app.register_blueprint(roadmap_bp)     # URL 前缀: /api/roadmap
+app.register_blueprint(link_bp)        # URL 前缀: /api/link
 
 # ==================== 7. 健康检查接口 ====================
 

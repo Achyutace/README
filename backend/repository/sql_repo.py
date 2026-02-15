@@ -288,10 +288,11 @@ class SQLRepository:
 
     # ==================== 笔记 ====================
 
-    def add_note(self, user_paper_id: uuid.UUID, content: str, keywords: List[str] = None) -> UserNote:
+    def add_note(self, user_paper_id: uuid.UUID, content: str, title: str = None, keywords: List[str] = None) -> UserNote:
         """添加用户笔记"""
         note = UserNote(
             user_paper_id=user_paper_id,
+            title=title,
             content=content,
             keywords=keywords or []
         )
@@ -306,10 +307,12 @@ class SQLRepository:
         stmt = stmt.order_by(UserNote.created_at)
         return self.db.execute(stmt).scalars().all()
 
-    def update_note(self, note_id: int, content: str = None, keywords: List[str] = None):
-        """更新笔记内容或关键词"""
+    def update_note(self, note_id: int, title: str = None, content: str = None, keywords: List[str] = None):
+        """更新笔记标题、内容或关键词"""
         stmt = update(UserNote).where(UserNote.id == note_id)
         values = {}
+        if title is not None:
+            values['title'] = title
         if content is not None:
             values['content'] = content
         if keywords is not None:

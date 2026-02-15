@@ -5,7 +5,7 @@ import arxiv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from typing import List, Dict, Any, Optional, Literal
-from utils.paper_utils import clean_title, format_paper_response
+from utils.search_refine import clean_title, format_paper_response
 from config import settings
 
 try:
@@ -133,32 +133,9 @@ class WebSearchService:
             
             except Exception as e:
                 logger.error(f"Tavily search error: {e}")
-                return self._demo_search(query)
+                return None
         
-        return self._demo_search(query)
-    
-    def _demo_search(self, query: str) -> List[Dict]:
-        """Return demo search results."""
-        return [
-            {
-                'title': f'Search Result 1: {query}',
-                'url': 'https://example.com/1',
-                'snippet': f'This is the latest info about "{query}". According to recent studies...',
-                'source': 'web_demo'
-            },
-            {
-                'title': f'Search Result 2: {query} Details',
-                'url': 'https://example.com/2',
-                'snippet': f'In-depth analysis of "{query}" background and applications...',
-                'source': 'web_demo'
-            },
-            {
-                'title': f'{query} - Wikipedia',
-                'url': 'https://en.wikipedia.org/wiki/' + query.replace(' ', '_'),
-                'snippet': f'{query} is an important concept involving multiple fields...',
-                'source': 'web_demo'
-            }
-        ]
+        return None
 
     # -------------------------------------------------------------------------
     # Academic Paper Search Methods (ArXiv & Semantic Scholar)
@@ -270,116 +247,69 @@ class WebSearchService:
 
         except Exception as e:
             logger.error(f"Semantic Scholar search error: {e}")
-            return []
-    
-    def get_paper_by_doi(self, doi: str) -> Optional[Dict]:
-        """Fetch paper info by DOI using Semantic Scholar"""
-        try:
-            url = f"{self.SEMANTIC_SCHOLAR_API}/paper/DOI:{doi}"
-            params = {"fields": self.S2_SEARCH_FIELDS}
-            response = self.s2_session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Semantic Scholar DOI lookup error: {e}")
-            return None
+            return []  
 
-    def get_paper_by_arxiv(self, arxiv_id: str) -> Optional[Dict]:
-        """Fetch paper info by arXiv ID using Semantic Scholar"""
-        try:
-            clean_id = arxiv_id.replace("arXiv:", "").strip()
-            url = f"{self.SEMANTIC_SCHOLAR_API}/paper/arXiv:{clean_id}"
-            params = {"fields": self.S2_SEARCH_FIELDS}
-            response = self.s2_session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Semantic Scholar arXiv lookup error: {e}")
-            return None
-
-    def search_by_title_single(self, title: str) -> Optional[Dict]:
-        """Search a single paper by title using Semantic Scholar"""
+    def _search_s2_single(self, query: str) -> Optional[Dict]:
+        """Internal helper to search a single paper by query (title or text snippet)"""
         try:
             url = f"{self.SEMANTIC_SCHOLAR_API}/paper/search"
             params = {
-                "query": clean_title(title),
+                "query": clean_title(query),
                 "fields": self.S2_SEARCH_FIELDS,
                 "limit": 1
             }
             response = self.s2_session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            if data.get("data") and len(data["data"]) > 0:
-                return data["data"][0]
-            return None
+            return data["data"][0] if data.get("data") else None
         except Exception as e:
-            logger.error(f"Semantic Scholar title search error: {e}")
+            logger.error(f"Semantic Scholar search error for '{query[:50]}...': {e}")
             return None
 
-    def search_paper_smart(self, title: str = "", doi: str = "", arxiv_id: str = "") -> Dict[str, Any]:
+    def search_paper_smart(self, title: str = "", doi: str = "", arxiv_id: str = "", text: str = "") -> Dict[str, Any]:
         """
-        Smart search for paper info with priority: DOI > arXiv > Title
+        Smart search for paper info with priority: DOI > arXiv > Title > Text
         """
         paper = None
-        search_method = None
+        method = None
 
         if doi:
-            paper = self.get_paper_by_doi(doi)
-            search_method = "doi"
-
+            paper, method = self._fetch_s2_paper(f"DOI:{doi}"), "doi"
+        
         if not paper and arxiv_id:
-            paper = self.get_paper_by_arxiv(arxiv_id)
-            search_method = "arxiv"
-
+            paper, method = self._fetch_s2_paper(f"ArXiv:{arxiv_id.replace('arXiv:', '')}"), "arxiv"
+            
         if not paper and title:
-            paper = self.search_by_title_single(title)
-            search_method = "title"
+            paper, method = self._search_s2_single(title), "title"
+            
+        if not paper and text:
+            paper, method = self._search_s2_single(text), "text"
 
         if not paper:
-            return {
-                "success": False,
-                "error": "Paper not found",
-                "searchedBy": search_method
-            }
+            return {"success": False, "error": "Paper not found", "searchedBy": method}
 
-        formatted = format_paper_response(paper)
         return {
-            "success": True,
-            "paper": formatted,
-            "searchedBy": search_method
+            "success": True, 
+            "paper": format_paper_response(paper), 
+            "searchedBy": method,
+            "valid": 1 if paper.get("title") and paper.get("authors") else 0
         }
 
     def batch_search_papers(self, references: List[Dict]) -> List[Dict]:
-        """
-        Batch search for multiple papers.
-        references: List of dicts with keys 'title', 'doi', 'arxivId'
-        """
+        """Batch search for multiple papers using search_paper_smart logic"""
         results = []
-        for ref in references[:10]:  # Limit to 10
+        for ref in references[:10]:
             title = ref.get("title", "").strip()
             doi = ref.get("doi", "").strip()
             arxiv_id = ref.get("arxivId", "").strip()
+            text = ref.get("text", "").strip()
 
-            paper = None
-            if doi:
-                paper = self.get_paper_by_doi(doi)
-            elif arxiv_id:
-                paper = self.get_paper_by_arxiv(arxiv_id)
-            elif title:
-                paper = self.search_by_title_single(title)
-
-            if paper:
-                results.append({
-                    "query": ref,
-                    "found": True,
-                    "paper": format_paper_response(paper)
-                })
-            else:
-                results.append({
-                    "query": ref,
-                    "found": False,
-                    "paper": None
-                })
+            res = self.search_paper_smart(title=title, doi=doi, arxiv_id=arxiv_id, text=text)
+            results.append({
+                "query": ref,
+                "found": res["success"],
+                "paper": res.get("paper")
+            })
         return results
 
     def search_papers(self, query: str, source: Literal["arxiv", "semantic_scholar"] = "arxiv", max_results: int = 5, **kwargs) -> List[Dict[str, Any]]:

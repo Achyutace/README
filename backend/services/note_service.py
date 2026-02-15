@@ -14,13 +14,14 @@ class NoteService:
     def __init__(self, db_repo: SQLRepository):
         self.repo = db_repo
 
-    def add_note(self, user_id: str, file_hash: str, content: str, 
+    def add_note(self, user_id: str, file_hash: str, content: str, title: str = None, 
                  keywords: List[str] = None, meta_data: Dict = None) -> int:
         """
         添加笔记
         :param user_id: 用户ID (str)
         :param file_hash: 全局文件Hash
         :param content: 笔记内容 (Markdown 或 JSON字符串)
+        :param title: 笔记标题
         :param keywords: 关键词
         :param meta_data: 额外元数据 (如 color, position, type)
         :return: 笔记的唯一 ID (int)
@@ -47,6 +48,7 @@ class NoteService:
         note = self.repo.add_note(
             user_paper_id=user_paper.id,
             content=content,
+            title=title,
             keywords=keywords or []
         )
         
@@ -67,16 +69,17 @@ class NoteService:
             logger.error(f"Error deleting note {note_id}: {e}")
             return False
 
-    def update_note_content(self, note_id: int, content: Optional[str] = None,  keywords: Optional[List[str]] = None) -> bool:
+    def update_note_content(self, note_id: int, title: Optional[str] = None, content: Optional[str] = None,  keywords: Optional[List[str]] = None) -> bool:
         """
         修改笔记
         :param note_id: 笔记ID
+        :param title: 新标题
         :param content: 新内容
         :param keywords: 新关键词
         :return: 是否成功
         """
 
-        self.repo.update_note(note_id, content=content, keywords=keywords)
+        self.repo.update_note(note_id, title=title, content=content, keywords=keywords)
         return True
 
     def get_notes(self, user_id: str, file_hash: str) -> List[Dict]:
@@ -100,24 +103,31 @@ class NoteService:
         
         result = []
         for n in notes:
-            # 尝试解析 JSON content 以便前端更好使用
+            # 优先使用数据库中的 title 字段
+            title_val = n.title
             content_val = n.content
-            is_json = False
+            
+            # 兼容旧数据：如果是 JSON 格式，尝试解析 title 和 content
             try:
                 parsed = json.loads(n.content)
-                if isinstance(parsed, dict) or isinstance(parsed, list):
-                    content_val = parsed
-                    is_json = True
+                if isinstance(parsed, dict):
+                    # 如果 n.title 为空，尝试从 JSON 中获取 title
+                    if not title_val:
+                         title_val = parsed.get('title')
+                    
+                    # 如果内容是 JSON 包装的，提取真正的 content
+                    if 'content' in parsed:
+                        content_val = parsed['content']
             except:
                 pass
             
             result.append({
                 "id": n.id,
+                "title": title_val,
                 "content": content_val,
                 "keywords": n.keywords,
                 "created_at": n.created_at.isoformat() if n.created_at else None,
                 "updated_at": n.updated_at.isoformat() if n.updated_at else None,
-                "is_json": is_json
             })
             
         return result
@@ -132,26 +142,29 @@ class NoteService:
         if not note:
             return None
             
+        title_val = note.title
         content_val = note.content
-        is_json = False
+
+        # 兼容旧数据
         try:
             parsed = json.loads(note.content)
-            if isinstance(parsed, (dict, list)):
-                content_val = parsed
-                is_json = True
+            if isinstance(parsed, dict):
+                if not title_val:
+                    title_val = parsed.get('title')
+                if 'content' in parsed:
+                    content_val = parsed['content']
         except:
             pass
             
         return {
             "id": note.id,
             "user_paper_id": str(note.user_paper_id),
+            "title": title_val,
             "content": content_val,
             "keywords": note.keywords,
             "created_at": note.created_at.isoformat() if note.created_at else None,
-            "updated_at": note.updated_at.isoformat() if note.updated_at else None,
-            "is_json": is_json
+            "updated_at": note.updated_at.isoformat() if note.updated_at else None
         }
-
     # ==================== 高亮 ====================
 
     def _resolve_user_paper_id(self, user_id: str, file_hash: str):

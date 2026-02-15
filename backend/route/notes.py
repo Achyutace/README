@@ -39,17 +39,12 @@ def create_note():
         content = data.get('content', '')
         keywords = data.get('keywords', [])
 
-        # 如果有标题, 合并为 JSON 存储
-        note_content = json.dumps({
-            'title': title,
-            'content': content
-        }) if title else content
-
         note_service = current_app.note_service
         note_id = note_service.add_note(
             user_id=user_id,
             file_hash=pdf_id,
-            content=note_content,
+            content=content,
+            title=title,
             keywords=keywords
         )
 
@@ -58,10 +53,6 @@ def create_note():
             'id': note_id,
             'message': 'Note created'
         })
-
-    except Exception as e:
-        current_app.logger.error(f"Error creating note: {e}")
-        return jsonify({'error': str(e)}), 500
 
 
 @notes_bp.route('/<pdf_id>', methods=['GET'])
@@ -76,27 +67,12 @@ def get_notes(pdf_id):
 
         notes = note_service.get_notes(user_id=user_id, file_hash=pdf_id)
 
-        # 解析笔记内容 (如果是 JSON 格式, 提取 title/content)
         formatted_notes = []
         for note in notes:
-            raw_content = note.get('content', '')
-            title = ''
-            content = raw_content
-
-            # 尝试解析 JSON 
-            if isinstance(raw_content, str):
-                try:
-                    parsed = json.loads(raw_content)
-                    if isinstance(parsed, dict) and 'title' in parsed:
-                        title = parsed['title']
-                        content = parsed['content']
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
             formatted_notes.append({
                 'id': note['id'],
-                'title': title,
-                'content': content,
+                'title': note.get('title') or '',
+                'content': note.get('content') or '',
                 'keywords': note.get('keywords', []),
                 'createdAt': note.get('created_at'),
                 'updatedAt': note.get('updated_at'),
@@ -122,26 +98,64 @@ def update_note(note_id):
     Request Body:
     {
         "title": "新标题",   // 可选
-        "content": "新内容", // 必需
+        "content": "新内容", // 可选
         "keywords": [...]    // 可选
     }
     """
     data = request.get_json()
 
     try:
-        title = data.get('title', '')
-        content = data.get('content', '')
+        note_service = current_app.note_service
+        
+        # 1. 获取现有笔记
+        existing_note = note_service.get_note_by_id(note_id)
+        if not existing_note:
+            return jsonify({'error': 'Note not found'}), 404
+
+        # 2. 获取更新字段
+        title = data.get('title')
+        content = data.get('content')
         keywords = data.get('keywords')
 
-        note_content = json.dumps({
-            'title': title,
-            'content': content
-        }) if title else content
+        # 3. 校验必填项 (至少更新一项)
+        if title is None and content is None and keywords is None:
+            return jsonify({'error': 'At least one field (title, content, keywords) must be provided'}), 400
 
-        note_service = current_app.note_service
+        # 4. 构建新的内容
+        new_content_str = None
+        if title is not None or content is not None:
+            # 解析现有内容
+            current_raw = existing_note.content
+            current_title = ""
+            current_text = current_raw
+
+            if current_raw:
+                try:
+                    parsed = json.loads(current_raw)
+                    if isinstance(parsed, dict):
+                        current_title = parsed.get('title', '')
+                        current_text = parsed.get('content', '')
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            # 合并
+            final_title = title if title is not None else current_title
+            final_content = content if content is not None else current_text
+
+            # 如果有标题，这就得存成 JSON
+            # 或者如果原来就是 JSON 格式，也要保持 JSON 格式
+            if final_title:
+                new_content_str = json.dumps({
+                    'title': final_title,
+                    'content': final_content
+                })
+            else:
+                new_content_str = final_content
+
+        # 5. 调用 Service 更新
         note_service.update_note_content(
             note_id=note_id,
-            content=note_content,
+            content=new_content_str,
             keywords=keywords
         )
 
