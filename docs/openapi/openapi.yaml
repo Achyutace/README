@@ -1,0 +1,32 @@
+openapi: 3.0.0
+info:
+  title: README PDF Reader API
+  description: README的OpenAPI文档
+  version: 1.1.0
+servers:
+  - url: http://localhost:5000/api
+    description: 本地开发环境
+  
+paths:
+  # --- PDF 相关 API ---
+  /pdf/upload:
+    $ref: ./paths/pdf.yaml#/upload
+    description: 上传PDF文件
+  /pdf/{pdf_id}/status:
+    $ref: ./paths/pdf.yaml#/status
+    description: 获取PDF处理状态
+  /pdf/{pdf_id}/text:
+    $ref: ./paths/pdf.yaml#/text
+    description: 获取PDF文本内容
+  /pdf/{pdf_id}/info:
+    $ref: ./paths/pdf.yaml#/info
+    description: 获取PDF信息
+  /pdf/{pdf_id}/pages:
+    $ref: ./paths/pdf.yaml#/pages
+    description: 获取PDF页数
+  /pdf/{pdf_id}/page/{page_number}/text:
+    $ref: ./paths/pdf.yaml#/page/text
+    description: 获取PDF页文本内容
+  /pdf/{pdf_id}/page/{page_number}/image:
+    $ref: ./paths/pdf.yaml#/page/image
+    description: 获取PDF页图像

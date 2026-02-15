@@ -30,3 +30,24 @@
 - `app.py`: Entry point.
 - `/services/pdf_service.py`: Logic to parse PDF and extract text coordinates.
 - `/services/ai_service.py`: Logic to call LLMs.
+
+### OpenAPI
+openapi/
+├── openapi.yaml                 # 👑 主入口文件 (总指挥)
+├── paths/                       # 存放具体的 API 路径定义
+│   ├── pdf.yaml                 # 所有 /pdf/* 相关的接口
+│   ├── chat.yaml                # 所有 /chatbox/* 相关的接口
+│   ├── highlight.yaml           # /highlight/*
+│   ├── notes.yaml               # /notes/*
+│   ├── translate.yaml           # /translate/*
+│   ├── smartref.yaml            # /smartref/*
+│   └── system.yaml              # /health
+└── components/                  # 存放组件 (Schema, Security)
+    ├── security.yaml            # 认证定义 (UserIdHeader)
+    └── schemas/                 # 数据模型
+        ├── common.yaml          # 通用的 (比如 Error)
+        ├── pdf.yaml             # UploadResponse, PDFInfoResponse...
+        ├── chat.yaml            # ChatResponse, MessageRequest...
+        ├── highlight.yaml
+        ├── notes.yaml
+        └── smartref.yaml

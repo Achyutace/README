@@ -48,3 +48,6 @@ redis>=5.0.0
 networkx==3.2.1
 
 pyyaml>=6.0
+
+# docs
+apiflask==3.0.2
