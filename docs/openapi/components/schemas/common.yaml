@@ -1,0 +1,9 @@
+ErrorResponse:
+  type: object
+  required:
+    - error
+  properties:
+    error:
+      type: string
+      description: 错误信息
+      example: "Invalid file type"

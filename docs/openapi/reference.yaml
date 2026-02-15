@@ -1,0 +1,857 @@
+openapi: 3.0.0
+info:
+  title: Paper Agent Backend API
+  description: API documentation for the Paper Agent backend services including PDF upload, Chat, Highlight, and Notes.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000/api
+    description: Local Development Server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Access Token. 通过 /api/auth/login 或 /api/auth/register 获取。
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    # --- PDF Upload Schemas ---
+    UploadResponse:
+      type: object
+      properties:
+        pdfId:
+          type: string
+          description: Hash of the file
+        taskId:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        pageCount:
+          type: integer
+        filename:
+          type: string
+        userId:
+          type: string
+        isNewUpload:
+          type: boolean
+
+    TaskStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        currentPage:
+          type: integer
+        totalPages:
+          type: integer
+        error:
+          type: string
+          nullable: true
+        paragraphs:
+          type: array
+          items:
+            type: object # Simplified Paragraph Object
+
+    PDFInfoResponse:
+      type: object
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        page_count:
+          type: integer
+        file_hash:
+          type: string
+
+    # --- Chatbox Schemas ---
+    NewSessionResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        title:
+          type: string
+        isNew:
+          type: boolean
+        messageCount:
+          type: integer
+
+    MessageRequest:
+      type: object
+      required: [message, sessionId]
+      properties:
+        message:
+          type: string
+        sessionId:
+          type: string
+        pdfId:
+          type: string
+          nullable: true
+
+    ChatResponse:
+      type: object
+      properties:
+        response:
+          type: string
+        citations:
+          type: array
+          items:
+            type: object
+        sessionId:
+          type: string
+
+    SessionListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        sessions:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+
+    # --- Highlight Schemas ---
+    HighlightRequest:
+      type: object
+      required: [pdfId, page, rects, pageWidth, pageHeight]
+      properties:
+        pdfId:
+          type: string
+        page:
+          type: integer
+        rects:
+          type: array
+          items:
+            type: object
+            properties:
+              x: {type: number}
+              y: {type: number}
+              width: {type: number}
+              height: {type: number}
+        pageWidth:
+          type: number
+        pageHeight:
+          type: number
+        text:
+          type: string
+        color:
+          type: string
+
+    # --- Note Schemas ---
+    NoteRequest:
+      type: object
+      required: [pdfId]
+      properties:
+        pdfId:
+          type: string
+        content:
+          type: string
+        title:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+
+    NoteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        id:
+          type: integer
+        message:
+          type: string
+
+    # --- SmartRef Schemas ---
+    PaperRef:
+      type: object
+      properties:
+        paperId: {type: string}
+        title: {type: string}
+        authors: {type: array, items: {type: string}}
+        abstract: {type: string}
+        year: {type: integer}
+        venue: {type: string}
+        citationCount: {type: integer}
+        url: {type: string}
+        doi: {type: string}
+        arxivId: {type: string}
+
+    SmartRefSearchResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        paper:
+          $ref: '#/components/schemas/PaperRef'
+        searchedBy: {type: string}
+
+    SmartRefBatchResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              query: {type: object}
+              found: {type: boolean}
+              paper:
+                $ref: '#/components/schemas/PaperRef'
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ================= Auth =================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 用户注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username: {type: string}
+                email: {type: string, format: email}
+                password: {type: string, minLength: 6}
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  user:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      username: {type: string}
+                      email: {type: string}
+                  accessToken: {type: string}
+                  refreshToken: {type: string}
+        '400':
+          description: 参数错误或邮箱/用户名已存在
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string}
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  user:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      username: {type: string}
+                      email: {type: string}
+                  accessToken: {type: string}
+                  refreshToken: {type: string}
+        '401':
+          description: 邮箱或密码错误
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新 Access Token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: {type: string}
+      responses:
+        '200':
+          description: 新的 Access Token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: {type: string}
+        '401':
+          description: Refresh Token 无效或过期
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前用户信息
+      responses:
+        '200':
+          description: 用户信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      username: {type: string}
+                      email: {type: string}
+                      createdAt: {type: string, format: date-time}
+
+  # ================= PDF Upload =================
+  /pdf/upload:
+    post:
+      tags: [PDF]
+      summary: Upload a PDF file
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        200:
+          description: Successful upload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        400:
+          description: Invalid file
+
+  /pdf/{pdf_id}/status:
+    get:
+      tags: [PDF]
+      summary: Get PDF processing status
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: from_page
+          schema:
+            type: integer
+            default: 1
+      responses:
+        200:
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatusResponse'
+
+  /pdf/{pdf_id}/info:
+    get:
+      tags: [PDF]
+      summary: Get PDF metadata
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: PDF Info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PDFInfoResponse'
+
+  /pdf/{pdf_id}/source:
+    get:
+      tags: [PDF]
+      summary: Download/Preview PDF file
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: PDF file stream
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /pdf/{pdf_id}/paragraphs:
+    get:
+      tags: [PDF]
+      summary: Get parsed paragraphs for a PDF
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        200:
+          description: List of paragraphs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paragraphs:
+                    type: array
+                    items:
+                      type: object
+
+  # ================= Chatbox =================
+  /chatbox/new:
+    post:
+      tags: [Chat]
+      summary: Create a new session ID
+      responses:
+        200:
+          description: New session info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewSessionResponse'
+
+  /chatbox/message:
+    post:
+      tags: [Chat]
+      summary: Send a message (Non-streaming)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+      responses:
+        200:
+          description: AI Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+
+  /chatbox/simple-chat:
+    post:
+      tags: [Chat]
+      summary: Simple Chat (Full text context, Non-streaming)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+      responses:
+        200:
+          description: AI Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+
+  /chatbox/stream:
+    post:
+      tags: [Chat]
+      summary: Send a message (Streaming SSE)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+      responses:
+        200:
+          description: Server Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /chatbox/sessions:
+    get:
+      tags: [Chat]
+      summary: List user sessions
+      parameters:
+        - in: query
+          name: pdfId
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        200:
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+
+  /chatbox/session/{session_id}/messages:
+    get:
+      tags: [Chat]
+      summary: Get messages for a session
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Session messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  messages: {type: array}
+
+  /chatbox/session/{session_id}:
+    delete:
+      tags: [Chat]
+      summary: Delete a session
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Success
+
+  /chatbox/session/{session_id}/title:
+    put:
+      tags: [Chat]
+      summary: Update session title
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string}
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  sessionId: {type: string}
+                  title: {type: string}
+
+  # ================= Highlight =================
+  /highlight/:
+    post:
+      tags: [Highlight]
+      summary: Create a highlight
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HighlightRequest'
+      responses:
+        200:
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  id: {type: integer}
+
+  /highlight/{pdf_id}:
+    get:
+      tags: [Highlight]
+      summary: Get highlights for a PDF
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        200:
+          description: List of highlights
+
+  /highlight/{highlight_id}:
+    delete:
+      tags: [Highlight]
+      summary: Delete a highlight
+      parameters:
+        - in: path
+          name: highlight_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Success
+    put:
+      tags: [Highlight]
+      summary: Update a highlight (color)
+      parameters:
+        - in: path
+          name: highlight_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                color: {type: string}
+      responses:
+        200:
+          description: Success
+
+  # ================= Translate =================
+  /translate/paragraph:
+    post:
+      tags: [Translate]
+      summary: Translate a paragraph
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pdfId, paragraphId]
+              properties:
+                pdfId: {type: string}
+                paragraphId: {type: string}
+                force: {type: boolean}
+      responses:
+        200:
+          description: Translation result
+
+  /translate/text:
+    post:
+      tags: [Translate]
+      summary: Translate selected text with context
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string}
+                pdfId: {type: string}
+                contextParagraphs: {type: integer}
+      responses:
+        200:
+          description: Translation result
+
+  /translate/page/{pdf_id}/{page_number}:
+    get:
+      tags: [Translate]
+      summary: Get all cached translations for a page
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: page_number
+          required: true
+          schema: {type: integer}
+      responses:
+        200:
+          description: Page translations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pdfId: {type: string}
+                  page: {type: integer}
+                  translations: {type: object}
+
+  # ================= Notes =================
+  /notes:
+    post:
+      tags: [Notes]
+      summary: Create a note
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteRequest'
+      responses:
+        200:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteResponse'
+
+  /notes/{pdf_id}:
+    get:
+      tags: [Notes]
+      summary: Get notes for a PDF
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: List of notes
+
+  /notes/{note_id}:
+    delete:
+      tags: [Notes]
+      summary: Delete a note
+      parameters:
+        - in: path
+          name: note_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: Success
+    put:
+      tags: [Notes]
+      summary: Update a note
+      parameters:
+        - in: path
+          name: note_id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                content: {type: string}
+                keywords: {type: array, items: {type: string}}
+      responses:
+        200:
+          description: Success
+
+  # ================= SmartRef =================
+  /smartref/search:
+    post:
+      tags: [SmartRef]
+      summary: Search for a paper (by DOI, arXiv, or title)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                doi: {type: string}
+                arxivId: {type: string}
+      responses:
+        200:
+          description: Found paper
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartRefSearchResponse'
+        404:
+          description: Not found
+
+  /smartref/batch:
+    post:
+      tags: [SmartRef]
+      summary: Batch search papers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                references:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      title: {type: string}
+                      doi: {type: string}
+                      arxivId: {type: string}
+      responses:
+        200:
+          description: Batch results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartRefBatchResponse'
+
+  # ================= Health =================
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        200:
+          description: System status
