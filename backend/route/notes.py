@@ -54,6 +54,10 @@ def create_note():
             'message': 'Note created'
         })
 
+    except Exception as e:
+        current_app.logger.error(f"Error creating note: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @notes_bp.route('/<pdf_id>', methods=['GET'])
 @require_auth
@@ -107,55 +111,19 @@ def update_note(note_id):
     try:
         note_service = current_app.note_service
         
-        # 1. 获取现有笔记
-        existing_note = note_service.get_note_by_id(note_id)
-        if not existing_note:
-            return jsonify({'error': 'Note not found'}), 404
-
-        # 2. 获取更新字段
+        # 1. 简单校验
         title = data.get('title')
         content = data.get('content')
         keywords = data.get('keywords')
 
-        # 3. 校验必填项 (至少更新一项)
         if title is None and content is None and keywords is None:
             return jsonify({'error': 'At least one field (title, content, keywords) must be provided'}), 400
 
-        # 4. 构建新的内容
-        new_content_str = None
-        if title is not None or content is not None:
-            # 解析现有内容
-            current_raw = existing_note.content
-            current_title = ""
-            current_text = current_raw
-
-            if current_raw:
-                try:
-                    parsed = json.loads(current_raw)
-                    if isinstance(parsed, dict):
-                        current_title = parsed.get('title', '')
-                        current_text = parsed.get('content', '')
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            
-            # 合并
-            final_title = title if title is not None else current_title
-            final_content = content if content is not None else current_text
-
-            # 如果有标题，这就得存成 JSON
-            # 或者如果原来就是 JSON 格式，也要保持 JSON 格式
-            if final_title:
-                new_content_str = json.dumps({
-                    'title': final_title,
-                    'content': final_content
-                })
-            else:
-                new_content_str = final_content
-
-        # 5. 调用 Service 更新
+        # 2. 调用 Service 更新
         note_service.update_note_content(
             note_id=note_id,
-            content=new_content_str,
+            title=title,
+            content=content,
             keywords=keywords
         )
 

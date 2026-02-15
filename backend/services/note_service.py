@@ -103,28 +103,10 @@ class NoteService:
         
         result = []
         for n in notes:
-            # 优先使用数据库中的 title 字段
-            title_val = n.title
-            content_val = n.content
-            
-            # 兼容旧数据：如果是 JSON 格式，尝试解析 title 和 content
-            try:
-                parsed = json.loads(n.content)
-                if isinstance(parsed, dict):
-                    # 如果 n.title 为空，尝试从 JSON 中获取 title
-                    if not title_val:
-                         title_val = parsed.get('title')
-                    
-                    # 如果内容是 JSON 包装的，提取真正的 content
-                    if 'content' in parsed:
-                        content_val = parsed['content']
-            except:
-                pass
-            
             result.append({
                 "id": n.id,
-                "title": title_val,
-                "content": content_val,
+                "title": n.title,
+                "content": n.content,
                 "keywords": n.keywords,
                 "created_at": n.created_at.isoformat() if n.created_at else None,
                 "updated_at": n.updated_at.isoformat() if n.updated_at else None,
@@ -142,25 +124,11 @@ class NoteService:
         if not note:
             return None
             
-        title_val = note.title
-        content_val = note.content
-
-        # 兼容旧数据
-        try:
-            parsed = json.loads(note.content)
-            if isinstance(parsed, dict):
-                if not title_val:
-                    title_val = parsed.get('title')
-                if 'content' in parsed:
-                    content_val = parsed['content']
-        except:
-            pass
-            
         return {
             "id": note.id,
             "user_paper_id": str(note.user_paper_id),
-            "title": title_val,
-            "content": content_val,
+            "title": note.title,
+            "content": note.content,
             "keywords": note.keywords,
             "created_at": note.created_at.isoformat() if note.created_at else None,
             "updated_at": note.updated_at.isoformat() if note.updated_at else None

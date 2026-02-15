@@ -623,7 +623,7 @@
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `pdfId` | String | 是 | PDF 文件 Hash |
-| `content` | String | 否 | 笔记内容（Markdown 或纯文本） |
+| `content` | String | 否 | 笔记内容（Markdown） |
 | `title` | String | 否 | 笔记标题 |
 | `keywords` | Array\<String\> | 否 | 关键词列表 |
 
@@ -642,11 +642,43 @@
 获取用户针对某 PDF 的所有笔记。
 
 - **接口**: `GET /api/notes/<pdf_id>`
+- **路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `pdf_id` | String | PDF 文件 Hash |
+
+- **成功响应** (`200`):
+
+```json
+{
+  "success": true,
+  "notes": [
+    {
+      "id": 1,
+      "title": "笔记标题",
+      "content": "笔记内容",
+      "keywords": ["关键词1", "关键词2"],
+      "createdAt": "2026-02-15T10:00:00Z",
+      "updatedAt": "2026-02-15T10:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
 
 ### 7.3 更新笔记
 
+支持部分更新，即仅更新提供的字段。
+
 - **接口**: `PUT /api/notes/<note_id>`
-- **请求参数** (Body):
+- **路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `note_id` | Integer | 笔记 ID |
+
+- **请求参数** (Body): 至少提供其中一个字段
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -654,9 +686,39 @@
 | `title` | String | 否 | 新标题 |
 | `keywords` | Array\<String\> | 否 | 新关键词列表 |
 
+- **成功响应** (`200`):
+
+```json
+{
+  "success": true,
+  "message": "Note updated"
+}
+```
+
+- **错误响应**:
+
+| 状态码 | 条件 | 说明 |
+|--------|------|------|
+| `400` | 所有字段均为空 | `{ "error": "At least one field (title, content, keywords) must be provided" }` |
+| `404` | 笔记不存在 | `{ "error": "Note not found" }` |
+
 ### 7.4 删除笔记
 
 - **接口**: `DELETE /api/notes/<note_id>`
+- **路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `note_id` | Integer | 笔记 ID |
+
+- **成功响应** (`200`):
+
+```json
+{
+  "success": true,
+  "message": "Note deleted"
+}
+```
 
 ---
 
