@@ -50,7 +50,7 @@ components:
         $ref: '#/components/schemas/Paragraph'
     Metadata:
       type: object
-      description: PDF文件的元数据，这些字段由 fitz.Document.metadata（PyMuPDF）从 PDF 文件自身的元数据中提取。
+      description: PDF文件的元数据，这些字段由 fitz.Document.metadata（PyMuPDF）从 PDF 文件自身的元数据中提取。之后会改。
       example:
         "title": "Attention Is All You Need"
         "author": "Ashish Vaswani et al."
@@ -61,6 +61,17 @@ components:
         "creationDate": "D:20170612..."
         "modDate": "D:20170612..."
         "format": "PDF 1.5"
+        "dimensions": [
+          {
+            "width": 100.0,
+            "height": 100.0
+          },{
+            "width": 100.0,
+            "height": 100.0
+          }
+        ]
+
+        
 
     # 下面是请求/响应的schema
     ErrorResponse:
@@ -234,3 +245,15 @@ upload:
           application/json:
             schema:
               $ref: '#/components/schemas/InfoResponse'
+      400:
+        description: 请求参数错误 (PDF文件Hash不存在)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
