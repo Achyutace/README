@@ -1,11 +1,12 @@
 from flask import Blueprint, request, jsonify, g
+from flask_jwt_extended import jwt_required
 from services.websearch_service import web_search_service
-from route.utils import require_auth, _parse_paragraph_id
+from utils.pdf_engine import parse_paragraph_id as _parse_paragraph_id
 
 link_bp = Blueprint('link', __name__, url_prefix='/api/link')
 
 @link_bp.route('/data', methods=['POST'])
-@require_auth
+@jwt_required()
 def get_link_data():
     """
     根据 pdfId 和 targetParagraphId 获取论文信息

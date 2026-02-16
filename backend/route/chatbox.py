@@ -6,7 +6,7 @@ chatbox.py
 import json
 import uuid
 from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app, g
-from route.utils import require_auth
+from flask_jwt_extended import jwt_required
 from tasks.chat_tasks import generate_session_title_task
 
 # 定义 Blueprint
@@ -37,7 +37,7 @@ def handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, u
 # ==================== 路由接口 ====================
 
 @chatbox_bp.route('/new', methods=['POST'])
-@require_auth
+@jwt_required()
 def new_session():
     """
     接口 A: 处理【新对话】— 仅生成前端 ID，不写库 (懒创建)
@@ -53,7 +53,7 @@ def new_session():
 
 
 @chatbox_bp.route('/message', methods=['POST'])
-@require_auth
+@jwt_required()
 def send_message():
     """
     接口 B: 发送消息（非流式）
@@ -117,7 +117,7 @@ def send_message():
 
 
 @chatbox_bp.route('/simple-chat', methods=['POST'])
-@require_auth
+@jwt_required()
 def simple_chat():
     """
     接口 B2: 简单对话模式（基于 PDF 全文，非流式）
@@ -174,7 +174,7 @@ def simple_chat():
 
 
 @chatbox_bp.route('/stream', methods=['POST'])
-@require_auth
+@jwt_required()
 def stream_message():
     """
     接口 C: 发送消息（流式 SSE）
@@ -242,7 +242,7 @@ def stream_message():
 
 
 @chatbox_bp.route('/session/<session_id>', methods=['DELETE'])
-@require_auth
+@jwt_required()
 def delete_session(session_id):
     """
     接口 D: 删除会话
@@ -265,7 +265,7 @@ def delete_session(session_id):
 
 
 @chatbox_bp.route('/sessions', methods=['GET'])
-@require_auth
+@jwt_required()
 def list_sessions():
     """
     接口 E: 获取会话列表
@@ -291,7 +291,7 @@ def list_sessions():
 
 
 @chatbox_bp.route('/session/<session_id>/messages', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_session_messages(session_id):
     """
     接口 F: 获取会话的所有消息
@@ -315,7 +315,7 @@ def get_session_messages(session_id):
 
 
 @chatbox_bp.route('/session/<session_id>/title', methods=['PUT'])
-@require_auth
+@jwt_required()
 def update_session_title(session_id):
     """
     接口 G: 更新会话标题

@@ -1,6 +1,8 @@
+from datetime import timedelta
 from pathlib import Path
 from flask import Flask, request, jsonify, g, send_from_directory
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from core.config import settings
@@ -32,6 +34,12 @@ from celery_app import celery  # noqa: F401  (确保 Worker 能发现任务)
 app = Flask(__name__)
 # 允许跨域，支持前端从不同端口访问
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# ==================== 2.5 JWT 配置 ====================
+app.config['JWT_SECRET_KEY'] = settings.jwt.secret
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=settings.jwt.access_expire_minutes)
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=settings.jwt.refresh_expire_days)
+jwt_manager = JWTManager(app)
 
 # ==================== 3. 基础配置与路径 ====================
 # 获取项目根目录（README 目录）
@@ -105,29 +113,24 @@ def before_request():
     1. 若 Authorization 头存在且为 Bearer Token，尝试解析 user_id
     2. 初始化该用户的 PdfService、per-request DB 服务
     3. 公开接口不携带 JWT 时不设置 g.user_id，由各路由自行判断
-    4. 受保护接口由 @require_auth 装饰器确保 g.user_id 存在
+    4. 受保护接口由 @jwt_required() 装饰器确保 g.user_id 存在
     """
     import uuid as _uuid
     from core.database import SessionLocal
     from repository.sql_repo import SQLRepository
-    from utils.jwt_handler import decode_token
-    from route.utils import get_jwt_secret
-    import jwt as pyjwt
 
     if request.method == 'OPTIONS':
         return
 
     # ---------- 1. 从 JWT 提取用户身份 ----------
     user_uuid = None
-    auth_header = request.headers.get('Authorization', '')
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-        try:
-            secret = get_jwt_secret()
-            payload = decode_token(token, secret=secret, expected_type='access')
-            user_uuid = _uuid.UUID(payload['sub'])
-        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError, ValueError, KeyError):
-            pass
+    try:
+        verify_jwt_in_request(optional=True)
+        identity = get_jwt_identity()
+        if identity:
+            user_uuid = _uuid.UUID(identity)
+    except Exception:
+        pass
 
     # 挂载到 g（如果解析成功）
     if user_uuid:
@@ -151,7 +154,7 @@ def before_request():
         app.note_service = NoteService(db_repo=req_repo)
     else:
         # 未认证请求 — 不初始化用户相关服务
-        # 公开接口不需要这些，受保护接口会被 @require_auth 拦截
+        # 公开接口不需要这些，受保护接口会被 @jwt_required() 拦截
         g._req_db = None
 
 @app.teardown_request

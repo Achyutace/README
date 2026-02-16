@@ -5,18 +5,15 @@
 """
 
 from flask import Blueprint, request, jsonify, g
-from core.database import SessionLocal
-from repository.sql_repo import SQLRepository
-from utils.jwt_handler import (
-    hash_password,
-    verify_password,
+from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
-    decode_token,
+    decode_token as jwt_decode_token,
+    jwt_required,
 )
-from route.utils import require_auth, get_jwt_secret, get_jwt_config
-
-import jwt as pyjwt   
+from core.database import SessionLocal
+from repository.sql_repo import SQLRepository
+from utils.jwt_handler import hash_password, verify_password
 
 # 定义蓝图
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
@@ -72,17 +69,8 @@ def register():
         user = repo.create_user(username=username, email=email, password_hash=pwd_hash)
 
         # 签发令牌
-        jwt_conf = get_jwt_config()
-        access_token = create_access_token(
-            user_id=user.id,
-            secret=jwt_conf['secret'],
-            expires_minutes=jwt_conf['access_expire_minutes'],
-        )
-        refresh_token = create_refresh_token(
-            user_id=user.id,
-            secret=jwt_conf['secret'],
-            expires_days=jwt_conf['refresh_expire_days'],
-        )
+        access_token = create_access_token(identity=str(user.id))
+        refresh_token = create_refresh_token(identity=str(user.id))
 
         return jsonify({
             'message': 'Registration successful',
@@ -137,17 +125,8 @@ def login():
             return jsonify({'code': 'INVALID_CREDENTIALS', 'error': 'Invalid email or password'}), 401
 
         # 签发令牌
-        jwt_conf = get_jwt_config()
-        access_token = create_access_token(
-            user_id=user.id,
-            secret=jwt_conf['secret'],
-            expires_minutes=jwt_conf['access_expire_minutes'],
-        )
-        refresh_token = create_refresh_token(
-            user_id=user.id,
-            secret=jwt_conf['secret'],
-            expires_days=jwt_conf['refresh_expire_days'],
-        )
+        access_token = create_access_token(identity=str(user.id))
+        refresh_token = create_refresh_token(identity=str(user.id))
 
         return jsonify({
             'message': 'Login successful',
@@ -187,18 +166,16 @@ def refresh():
         return jsonify({'code': 'MISSING_TOKEN', 'error': 'refreshToken is required'}), 400
 
     refresh_token = data['refreshToken']
-    jwt_conf = get_jwt_config()
-    secret = jwt_conf['secret']
 
     try:
-        payload = decode_token(refresh_token, secret=secret, expected_type='refresh')
+        payload = jwt_decode_token(refresh_token)
         user_id = payload['sub']
 
         # 验证用户仍然存在
+        import uuid as _uuid
         db = SessionLocal()
         try:
             repo = SQLRepository(db)
-            import uuid as _uuid
             user = repo.get_user_by_id(_uuid.UUID(user_id))
             if not user:
                 return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 401
@@ -206,26 +183,20 @@ def refresh():
             db.close()
 
         # 签发新的 Access Token
-        new_access_token = create_access_token(
-            user_id=user.id,
-            secret=secret,
-            expires_minutes=jwt_conf['access_expire_minutes'],
-        )
+        new_access_token = create_access_token(identity=str(user.id))
 
         return jsonify({
             'accessToken': new_access_token,
         })
 
-    except pyjwt.ExpiredSignatureError:
-        return jsonify({'code': 'TOKEN_EXPIRED', 'error': 'Refresh token expired, please login again'}), 401
-    except pyjwt.InvalidTokenError as e:
+    except Exception as e:
         return jsonify({'code': 'INVALID_TOKEN', 'error': f'Invalid refresh token: {str(e)}'}), 401
 
 
 # ==================== 获取当前用户信息 ====================
 
 @auth_bp.route('/me', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_current_user():
     """
     获取当前已登录用户的信息 (需要有效 Access Token)

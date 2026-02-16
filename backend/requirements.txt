@@ -4,7 +4,7 @@ flask-cors==4.0.0
 werkzeug==3.0.1
 
 # Authentication
-PyJWT==2.8.0
+flask-jwt-extended==4.7.1
 bcrypt==4.1.2
 
 # Utilities & File Processing

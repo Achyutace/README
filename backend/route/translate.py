@@ -4,7 +4,8 @@
 2. 选中文本翻译 (带上下文)
 """
 from flask import Blueprint, request, jsonify, current_app, g
-from route.utils import require_auth, parse_paragraph_id
+from flask_jwt_extended import jwt_required
+from route.utils import parse_paragraph_id
 from utils.pdf_engine import make_paragraph_id
 
 # 定义蓝图
@@ -13,7 +14,7 @@ translate_bp = Blueprint('translate', __name__, url_prefix='/api/translate')
 # ==================== 路由接口 ====================
 
 @translate_bp.route('/paragraph', methods=['POST'])
-@require_auth
+@jwt_required()
 def translate_paragraph():
     """
     翻译段落 (按需触发)
@@ -66,7 +67,7 @@ def translate_paragraph():
 
 
 @translate_bp.route('/page/<pdf_id>/<int:page_number>', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_page_translations(pdf_id, page_number):
     """
     获取某页的所有历史翻译
@@ -89,7 +90,7 @@ def get_page_translations(pdf_id, page_number):
 
 
 @translate_bp.route('/text', methods=['POST'])
-@require_auth
+@jwt_required()
 def translate_text():
     """
     翻译选中的词句（带上下文）

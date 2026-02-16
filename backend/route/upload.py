@@ -13,7 +13,7 @@
 状态定义: pending | processing | completed | failed
 """
 from flask import Blueprint, request, jsonify, current_app, g, send_file
-from route.utils import require_auth
+from flask_jwt_extended import jwt_required
 
 # 定义蓝图
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
@@ -24,7 +24,7 @@ upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
 # ==========================================
 
 @upload_bp.route('/upload', methods=['POST'])
-@require_auth
+@jwt_required()
 def upload_pdf():
     """
     上传 PDF 文件接口
@@ -91,7 +91,7 @@ def upload_pdf():
 # ==================== 任务状态轮询接口 ======================
 
 @upload_bp.route('/<pdf_id>/status', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_task_status(pdf_id):
     """
     获取 PDF 处理进度
@@ -123,7 +123,7 @@ def get_task_status(pdf_id):
 # ================== PDF 信息获取接口 ========================
 
 @upload_bp.route('/<pdf_id>/info', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_pdf_info(pdf_id):
     """获取 PDF 元数据"""
     try:
@@ -136,7 +136,7 @@ def get_pdf_info(pdf_id):
 
 
 @upload_bp.route('/<pdf_id>/paragraphs', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_pdf_paragraphs(pdf_id):
     """获取 PDF 已解析的段落 (从 DB 读取)"""
     page = request.args.get('page', type=int)
@@ -148,7 +148,7 @@ def get_pdf_paragraphs(pdf_id):
 
 
 @upload_bp.route('/<pdf_id>/source', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_pdf_source(pdf_id):
     """
     获取 PDF 源文件流 (支持浏览器直接预览/渲染)

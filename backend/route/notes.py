@@ -7,14 +7,14 @@
 """
 import json
 from flask import Blueprint, request, jsonify, current_app, g
-from route.utils import require_auth
+from flask_jwt_extended import jwt_required
 
 # 定义蓝图
 notes_bp = Blueprint('notes', __name__, url_prefix='/api/notes')
 
 
 @notes_bp.route('', methods=['POST'])
-@require_auth
+@jwt_required()
 def create_note():
     """
     创建笔记
@@ -60,7 +60,7 @@ def create_note():
 
 
 @notes_bp.route('/<pdf_id>', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_notes(pdf_id):
     """
     获取某 PDF 的所有笔记
@@ -94,7 +94,7 @@ def get_notes(pdf_id):
 
 
 @notes_bp.route('/<int:note_id>', methods=['PUT'])
-@require_auth
+@jwt_required()
 def update_note(note_id):
     """
     更新笔记
@@ -138,7 +138,7 @@ def update_note(note_id):
 
 
 @notes_bp.route('/<int:note_id>', methods=['DELETE'])
-@require_auth
+@jwt_required()
 def delete_note(note_id):
     """删除笔记"""
     try:

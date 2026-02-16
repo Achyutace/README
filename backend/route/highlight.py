@@ -2,7 +2,8 @@
 高亮路由：保存/获取/删除/更新高亮
 """
 from flask import Blueprint, request, jsonify, current_app, g
-from route.utils import require_auth, HighlightLogic
+from flask_jwt_extended import jwt_required
+from route.utils import HighlightLogic
 
 # 定义蓝图
 highlight_bp = Blueprint('highlight', __name__, url_prefix='/api/highlight')
@@ -11,7 +12,7 @@ highlight_bp = Blueprint('highlight', __name__, url_prefix='/api/highlight')
 # ==================== 路由接口 ====================
 
 @highlight_bp.route('/', methods=['POST'])
-@require_auth
+@jwt_required()
 def create_highlight():
     """
     创建高亮
@@ -71,7 +72,7 @@ def create_highlight():
 
 
 @highlight_bp.route('/', methods=['GET'])
-@require_auth
+@jwt_required()
 def get_highlights():
     """
     获取某 PDF 的所有高亮
@@ -107,7 +108,7 @@ def get_highlights():
 
 
 @highlight_bp.route('/<int:highlight_id>', methods=['DELETE'])
-@require_auth
+@jwt_required()
 def delete_highlight(highlight_id):
     """删除高亮"""
     try:
@@ -119,7 +120,7 @@ def delete_highlight(highlight_id):
 
 
 @highlight_bp.route('/<int:highlight_id>', methods=['PUT'])
-@require_auth
+@jwt_required()
 def update_highlight(highlight_id):
     """更新高亮 (颜色)"""
     data = request.get_json()
