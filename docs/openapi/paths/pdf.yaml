@@ -1,6 +1,9 @@
 upload:
   post:
+    tags: [PDF]
     summary: 上传PDF文件
+    security:
+      - BearerAuth: []
     requestBody:
       content:
         multipart/form-data:
@@ -35,7 +38,10 @@ upload:
 
 status:
   get:
+    tags: [PDF]
     summary: 获取PDF处理状态
+    security:
+      - BearerAuth: []
     description: 获取PDF处理状态，包括任务状态、处理进度等。目前前端代码还没用这个接口，还没加异步轮询。
     parameters:
       - name: pdf_id
@@ -74,7 +80,10 @@ status:
 
 info:
   get:
+    tags: [PDF]
     summary: 获取PDF信息
+    security:
+      - BearerAuth: []
     description: 获取PDF信息，包括文件名、页数、元数据等
     parameters:
       - name: pdf_id
@@ -105,7 +114,10 @@ info:
 
 paragraphs:
   get:
+    tags: [PDF]
     summary: 获取PDF段落
+    security:
+      - BearerAuth: []
     description: 使用场景：在pdf某页前端的段落翻译需要所有的id，bbox和content
     parameters:
       - name: pdf_id
@@ -138,7 +150,10 @@ paragraphs:
 
 source:
   get:
+    tags: [PDF]
     summary: 获取PDF源文件
+    security:
+      - BearerAuth: []
     description: 获取PDF源文件，用于浏览器直接预览/渲染
     parameters:
       - name: pdf_id

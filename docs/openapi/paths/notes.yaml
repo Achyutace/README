@@ -4,6 +4,8 @@ create:
   post:
     tags: [Notes]
     summary: 创建笔记
+    security:
+      - BearerAuth: []
     requestBody:
       required: true
       content:
@@ -35,6 +37,8 @@ by-id:
   get:
     tags: [Notes]
     summary: 获取某 PDF 的所有笔记
+    security:
+      - BearerAuth: []
     description: "Flask 路由: GET /notes/<pdf_id>，此处 id 为 PDF 文件 Hash (string)"
     parameters:
       - name: id
@@ -59,6 +63,8 @@ by-id:
   put:
     tags: [Notes]
     summary: 更新笔记
+    security:
+      - BearerAuth: []
     description: "Flask 路由: PUT /notes/<int:note_id>，此处 id 为笔记 ID (integer)"
     parameters:
       - name: id
@@ -95,6 +101,8 @@ by-id:
   delete:
     tags: [Notes]
     summary: 删除笔记
+    security:
+      - BearerAuth: []
     description: "Flask 路由: DELETE /notes/<int:note_id>，此处 id 为笔记 ID (integer)"
     parameters:
       - name: id

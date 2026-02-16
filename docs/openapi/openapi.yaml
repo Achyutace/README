@@ -6,7 +6,19 @@ info:
 servers:
   - url: http://localhost:5000/api
     description: 本地开发环境
-  
+
+# 全局安全配置：所有接口默认需要 JWT Bearer Token
+# 公开接口 (register/login/refresh/health) 在各自定义中用 security: [] 覆盖
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    $ref: './components/security.yaml#/securitySchemes'
+  schemas:
+    ErrorResponse:
+      $ref: './components/schemas/common.yaml#/ErrorResponse'
+
 paths:
   # --- Auth 相关 API ---
   /auth/register:
@@ -71,3 +83,7 @@ paths:
   # --- Link 相关 API ---
   /link/data:
     $ref: "./paths/link.yaml#/data"
+
+  # --- System 相关 API ---
+  /health:
+    $ref: "./paths/system.yaml#/health"

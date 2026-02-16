@@ -1,0 +1,8 @@
+securitySchemes:
+  BearerAuth:
+    type: http
+    scheme: bearer
+    bearerFormat: JWT
+    description: |
+      JWT Access Token，通过 /api/auth/login 或 /api/auth/register 获取。
+      在请求头中以 `Authorization: Bearer <token>` 方式携带。

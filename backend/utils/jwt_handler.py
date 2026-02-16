@@ -15,7 +15,6 @@ from typing import Optional, Dict, Any
 
 # ==================== 默认配置 ====================
 
-_DEFAULT_SECRET = "change-me-in-config-yaml"   # 仅作回退，生产环境必须在 config.yaml 中配置
 _DEFAULT_ACCESS_EXPIRE_MINUTES = 30
 _DEFAULT_REFRESH_EXPIRE_DAYS = 7
 _ALGORITHM = "HS256"
@@ -41,7 +40,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(
     user_id: uuid.UUID,
-    secret: str = _DEFAULT_SECRET,
+    secret: str,
     expires_minutes: int = _DEFAULT_ACCESS_EXPIRE_MINUTES,
     extra_claims: Optional[Dict[str, Any]] = None,
 ) -> str:
@@ -71,7 +70,7 @@ def create_access_token(
 
 def create_refresh_token(
     user_id: uuid.UUID,
-    secret: str = _DEFAULT_SECRET,
+    secret: str,
     expires_days: int = _DEFAULT_REFRESH_EXPIRE_DAYS,
 ) -> str:
     """
@@ -90,7 +89,7 @@ def create_refresh_token(
 
 def decode_token(
     token: str,
-    secret: str = _DEFAULT_SECRET,
+    secret: str,
     expected_type: str = "access",
 ) -> Dict[str, Any]:
     """

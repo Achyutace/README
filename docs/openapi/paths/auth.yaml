@@ -4,6 +4,7 @@ register:
   post:
     tags: [Auth]
     summary: 用户注册
+    security: []
     requestBody:
       required: true
       content:
@@ -40,6 +41,7 @@ login:
   post:
     tags: [Auth]
     summary: 用户登录
+    security: []
     requestBody:
       required: true
       content:
@@ -75,6 +77,7 @@ refresh:
   post:
     tags: [Auth]
     summary: 刷新 Access Token
+    security: []
     description: 用 Refresh Token 换取新的 Access Token，Refresh Token 本身不会更新
     requestBody:
       required: true
@@ -112,6 +115,8 @@ me:
   get:
     tags: [Auth]
     summary: 获取当前用户信息
+    security:
+      - BearerAuth: []
     description: 需要有效的 Access Token (require_auth)
     responses:
       200:

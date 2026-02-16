@@ -16,20 +16,27 @@ import jwt as pyjwt
 
 def get_jwt_secret() -> str:
     """
-    从 core.config.settings 或 app.config 中获取 JWT 密钥。
-    必须在 config.yaml 中配置 jwt.secret, 否则使用不安全的默认值。
+    从 core.config.settings 获取 JWT 密钥。
+    必须在 config.yaml 中配置 jwt.secret。
     """
     try:
         from core.config import settings
+        secret = None
         if hasattr(settings, 'jwt') and settings.jwt:
-            return settings.jwt.secret
-        secret = getattr(settings, 'jwt_secret', None)
-        if secret:
-            return secret
-    except Exception:
-        pass
-    # 回退：从 app.config 读取
-    return current_app.config.get('JWT_SECRET', 'change-me-in-config-yaml')
+            secret = settings.jwt.secret
+        
+        if not secret or secret == 'change-me-in-config-yaml':
+            # 尝试从环境变量获取
+            import os
+            secret = os.getenv('JWT_SECRET')
+            
+        if not secret or secret == 'change-me-in-config-yaml':
+            raise ValueError("JWT secret is not configured or is using default insecure value.")
+            
+        return secret
+    except Exception as e:
+        # 如果无法获取配置，系统配置错误
+        raise ValueError(f"Failed to retrieve JWT secret: {str(e)}")
 
 
 def get_jwt_config():
@@ -38,19 +45,15 @@ def get_jwt_config():
     """
     try:
         from core.config import settings
-        if hasattr(settings, 'jwt') and settings.jwt:
-            return {
-                'secret': settings.jwt.secret,
-                'access_expire_minutes': settings.jwt.access_expire_minutes,
-                'refresh_expire_days': settings.jwt.refresh_expire_days,
-            }
-    except Exception:
-        pass
-    return {
-        'secret': 'change-me-in-config-yaml',
-        'access_expire_minutes': 30,
-        'refresh_expire_days': 7,
-    }
+        secret = get_jwt_secret() 
+        
+        return {
+            'secret': secret,
+            'access_expire_minutes': settings.jwt.access_expire_minutes,
+            'refresh_expire_days': settings.jwt.refresh_expire_days,
+        }
+    except Exception as e:
+        raise ValueError(f"Failed to retrieve JWT config: {str(e)}")
 
 
 # ==================== 鉴权 ====================
@@ -58,10 +61,8 @@ def get_jwt_config():
 def require_auth(f):
     """
     JWT 鉴权装饰器
-
-    从 Authorization: Bearer <token> 头中解析 Access Token，
+    只允许 Authorization: Bearer <token> 头部，严格校验 Token。
     验证签名与有效期，并将 user_id 挂载到 g.user_id (uuid.UUID)。
-
     失败时返回 401。
     """
     @wraps(f)
@@ -88,7 +89,11 @@ def require_auth(f):
             return jsonify({'error': 'Token expired'}), 401
         except pyjwt.InvalidTokenError as e:
             return jsonify({'error': f'Invalid token: {str(e)}'}), 401
-        except ValueError:
+        except ValueError as e:
+            # 区分是 secret 配置错误还是 user_id 格式错误
+            if "JWT secret" in str(e):
+                current_app.logger.error(f"Authentication failed due to server config: {e}")
+                return jsonify({'error': 'Internal server authentication error'}), 500
             return jsonify({'error': 'Invalid user ID in token'}), 401
 
         return f(*args, **kwargs)

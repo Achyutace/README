@@ -4,6 +4,8 @@ paragraph:
   post:
     tags: [Translate]
     summary: 翻译段落（按需触发，带缓存）
+    security:
+      - BearerAuth: []
     description: |
       前端点击某段落的翻译按钮时调用。
       后端流程：解析段落 ID → 从 DB 取原文 → 调用 LLM 翻译 → 结果存库。
@@ -44,6 +46,8 @@ text:
   post:
     tags: [Translate]
     summary: 翻译选中文本（带上下文）
+    security:
+      - BearerAuth: []
     description: |
       用户框选一段文字后调用。
       如果提供了 pdfId，后端会取前 N 段原文作为上下文，帮助 LLM 更准确地翻译。
@@ -77,6 +81,8 @@ page-translations:
   get:
     tags: [Translate]
     summary: 获取某页的所有历史翻译
+    security:
+      - BearerAuth: []
     description: 用户刷新页面后，前端批量获取之前翻译过的段落缓存
     parameters:
       - name: pdf_id

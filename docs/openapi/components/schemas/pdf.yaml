@@ -104,9 +104,6 @@ UploadResponse:
     filename:
       type: string
       description: 上传时的原始文件名
-    userId:
-      type: string
-      description: 当前用户UUID
     isNewUpload:
       type: boolean
       description: 用file_hash查globalfile表，true 表示文件不存在，需要重新上传；false 表示文件已存在（秒传）
