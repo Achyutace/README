@@ -4,7 +4,7 @@ paragraph:
   post:
     tags: [Translate]
     summary: 翻译段落（按需触发，带缓存）
-    description: |
+    description: 
       前端点击某段落的翻译按钮时调用。
       后端流程：解析段落 ID → 从 DB 取原文 → 调用 LLM 翻译 → 结果存库。
       已翻译过的段落会命中缓存直接返回，除非 force=true。
