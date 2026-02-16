@@ -42,7 +42,7 @@ def register():
     """
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Missing request body'}), 400
+        return jsonify({'code': 'MISSING_BODY', 'error': 'Missing request body'}), 400
 
     username = (data.get('username') or '').strip()
     email = (data.get('email') or '').strip().lower()
@@ -50,10 +50,10 @@ def register():
 
     # 参数校验
     if not username or not email or not password:
-        return jsonify({'error': 'username, email and password are required'}), 400
+        return jsonify({'code': 'MISSING_FIELDS', 'error': 'username, email and password are required'}), 400
 
     if len(password) < 6:
-        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        return jsonify({'code': 'PASSWORD_TOO_SHORT', 'error': 'Password must be at least 6 characters'}), 400
 
     db = SessionLocal()
     try:
@@ -61,11 +61,11 @@ def register():
 
         # 检查邮箱是否已注册
         if repo.get_user_by_email(email):
-            return jsonify({'error': 'Email already registered'}), 400
+            return jsonify({'code': 'EMAIL_EXISTS', 'error': 'Email already registered'}), 400
 
         # 检查用户名是否已占用
         if repo.get_user_by_name(username):
-            return jsonify({'error': 'Username already taken'}), 400
+            return jsonify({'code': 'USERNAME_TAKEN', 'error': 'Username already taken'}), 400
 
         # 创建用户
         pwd_hash = hash_password(password)
@@ -96,7 +96,7 @@ def register():
         }), 201
 
     except Exception as e:
-        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
+        return jsonify({'code': 'SERVER_ERROR', 'error': f'Registration failed: {str(e)}'}), 500
     finally:
         db.close()
 
@@ -120,13 +120,13 @@ def login():
     """
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Missing request body'}), 400
+        return jsonify({'code': 'MISSING_BODY', 'error': 'Missing request body'}), 400
 
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
 
     if not email or not password:
-        return jsonify({'error': 'email and password are required'}), 400
+        return jsonify({'code': 'MISSING_FIELDS', 'error': 'email and password are required'}), 400
 
     db = SessionLocal()
     try:
@@ -134,7 +134,7 @@ def login():
         user = repo.get_user_by_email(email)
 
         if not user or not verify_password(password, user.password_hash):
-            return jsonify({'error': 'Invalid email or password'}), 401
+            return jsonify({'code': 'INVALID_CREDENTIALS', 'error': 'Invalid email or password'}), 401
 
         # 签发令牌
         jwt_conf = get_jwt_config()
@@ -161,7 +161,7 @@ def login():
         })
 
     except Exception as e:
-        return jsonify({'error': f'Login failed: {str(e)}'}), 500
+        return jsonify({'code': 'SERVER_ERROR', 'error': f'Login failed: {str(e)}'}), 500
     finally:
         db.close()
 
@@ -184,7 +184,7 @@ def refresh():
     """
     data = request.get_json()
     if not data or not data.get('refreshToken'):
-        return jsonify({'error': 'refreshToken is required'}), 400
+        return jsonify({'code': 'MISSING_TOKEN', 'error': 'refreshToken is required'}), 400
 
     refresh_token = data['refreshToken']
     jwt_conf = get_jwt_config()
@@ -201,7 +201,7 @@ def refresh():
             import uuid as _uuid
             user = repo.get_user_by_id(_uuid.UUID(user_id))
             if not user:
-                return jsonify({'error': 'User not found'}), 401
+                return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 401
         finally:
             db.close()
 
@@ -217,9 +217,9 @@ def refresh():
         })
 
     except pyjwt.ExpiredSignatureError:
-        return jsonify({'error': 'Refresh token expired, please login again'}), 401
+        return jsonify({'code': 'TOKEN_EXPIRED', 'error': 'Refresh token expired, please login again'}), 401
     except pyjwt.InvalidTokenError as e:
-        return jsonify({'error': f'Invalid refresh token: {str(e)}'}), 401
+        return jsonify({'code': 'INVALID_TOKEN', 'error': f'Invalid refresh token: {str(e)}'}), 401
 
 
 # ==================== 获取当前用户信息 ====================
@@ -236,7 +236,7 @@ def get_current_user():
         user = repo.get_user_by_id(g.user_id)
 
         if not user:
-            return jsonify({'error': 'User not found'}), 404
+            return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 404
 
         return jsonify({
             'user': {

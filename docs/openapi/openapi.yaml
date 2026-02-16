@@ -8,6 +8,16 @@ servers:
     description: 本地开发环境
   
 paths:
+  # --- Auth 相关 API ---
+  /auth/register:
+    $ref: "./paths/auth.yaml#/register"
+  /auth/login:
+    $ref: "./paths/auth.yaml#/login"
+  /auth/refresh:
+    $ref: "./paths/auth.yaml#/refresh"
+  /auth/me:
+    $ref: "./paths/auth.yaml#/me"
+
   # --- PDF 相关 API ---
   /pdf/upload:
     $ref: "./paths/pdf.yaml#/upload"
@@ -37,3 +47,27 @@ paths:
     $ref: "./paths/chat.yaml#/session-messages"
   "/chatbox/session/{session_id}/title":
     $ref: "./paths/chat.yaml#/update-title"
+
+  # --- Notes 相关 API ---
+  /notes:
+    $ref: "./paths/notes.yaml#/create"
+  "/notes/{id}":
+    $ref: "./paths/notes.yaml#/by-id"
+
+  # --- Highlight 相关 API ---
+  /highlight:
+    $ref: "./paths/highlight.yaml#/create"
+  "/highlight/{highlight_id}":
+    $ref: "./paths/highlight.yaml#/by-highlight-id"
+
+  # --- Translate 相关 API ---
+  /translate/paragraph:
+    $ref: "./paths/translate.yaml#/paragraph"
+  /translate/text:
+    $ref: "./paths/translate.yaml#/text"
+  "/translate/page/{pdf_id}/{page_number}":
+    $ref: "./paths/translate.yaml#/page-translations"
+
+  # --- Link 相关 API ---
+  /link/data:
+    $ref: "./paths/link.yaml#/data"

@@ -1,0 +1,48 @@
+# Link 相关 Schema
+
+LinkDataRequest:
+  type: object
+  required:
+    - pdfId
+    - targetParagraphId
+  properties:
+    pdfId:
+      type: string
+      description: PDF 文件 Hash
+    targetParagraphId:
+      type: string
+      description: 段落 ID（格式：pdf_chk_{hash前8位}_{页码}_{块号}）
+      example: "pdf_chk_11451419_198_10"
+
+LinkDataResponse:
+  type: object
+  properties:
+    title:
+      type: string
+      description: 论文标题
+      example: "Attention Is All You Need"
+    url:
+      type: string
+      description: 论文链接
+      example: "https://www.semanticscholar.org/paper/..."
+    snippet:
+      type: string
+      description: 论文简介，目前用的semantic scholar的abstract
+    published_date:
+      type: string
+      description: 发表年份
+      example: "2017"
+    authors:
+      type: array
+      description: 作者列表
+      items:
+        type: string
+      example: ["Ashish Vaswani", "Noam Shazeer"]
+    source:
+      type: string
+      description: 数据来源
+      example: "semantic_scholar"
+    valid:
+      type: integer
+      description: 搜索结果是否有效（1=有效，0=未找到）
+      enum: [0, 1]

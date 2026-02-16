@@ -30,7 +30,7 @@ def create_highlight():
     data = request.get_json()
 
     # 1. 参数校验
-    required_fields = ['pdfId', 'page', 'rects', 'pageWidth', 'pageHeight']
+    required_fields = ['pdfId', 'page', 'rects', 'pageWidth', 'pageHeight', 'text', 'color']
     if not all(k in data for k in required_fields):
         return jsonify({'error': 'Missing required fields'}), 400
 
@@ -70,16 +70,21 @@ def create_highlight():
         return jsonify({'error': str(e)}), 500
 
 
-@highlight_bp.route('/<pdf_id>', methods=['GET'])
+@highlight_bp.route('/', methods=['GET'])
 @require_auth
-def get_highlights(pdf_id):
+def get_highlights():
     """
     获取某 PDF 的所有高亮
     返回归一化坐标 (0.0 - 1.0), 前端需乘以当前 Canvas 尺寸渲染
 
     Query Params:
-        page: int (可选, 按页筛选)
+        pdfId: str (必填, PDF 文件 Hash)
+        page:  int (可选, 按页筛选)
     """
+    pdf_id = request.args.get('pdfId')
+    if not pdf_id:
+        return jsonify({'error': 'Missing required query parameter: pdfId'}), 400
+
     try:
         page = request.args.get('page', type=int)
 

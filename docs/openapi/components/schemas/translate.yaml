@@ -1,0 +1,78 @@
+# Translate 相关 Schema
+
+TranslateParagraphRequest:
+  type: object
+  required: [pdfId, paragraphId]
+  properties:
+    pdfId:
+      type: string
+      description: PDF 文件 Hash
+    paragraphId:
+      type: string
+      description: 段落 ID（格式：pdf_chk_{hash前8位}_{页码}_{块号}）
+      example: "pdf_chk_11451419_3_2"
+    force:
+      type: boolean
+      description: 是否强制重新翻译（忽略缓存）
+      default: false
+
+TranslateParagraphResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    translation:
+      type: string
+      description: 翻译结果
+    cached:
+      type: boolean
+      description: 是否命中缓存
+    paragraphId:
+      type: string
+
+TranslateTextRequest:
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+      description: 选中的文本
+      example: "Self-attention mechanism"
+    pdfId:
+      type: string
+      description: 关联的 PDF Hash（可选，用于获取上下文提高翻译质量）
+    contextParagraphs:
+      type: integer
+      description: 用于上下文的段落数量
+      default: 3
+
+TranslateTextResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    originalText:
+      type: string
+      description: 原文
+    translatedText:
+      type: string
+      description: 翻译结果
+    hasContext:
+      type: boolean
+      description: 是否使用了上下文
+    contextLength:
+      type: integer
+      description: 上下文长度
+
+PageTranslationsResponse:
+  type: object
+  properties:
+    pdfId:
+      type: string
+    page:
+      type: integer
+    translations:
+      type: object
+      description: "键为 paragraphId，值为翻译文本。如 { \"pdf_chk_xxx_3_1\": \"翻译内容\" }"
+      additionalProperties:
+        type: string

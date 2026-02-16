@@ -1,0 +1,115 @@
+# Highlight 相关 Schema
+
+Rect:
+  type: object
+  description: 归一化后的矩形坐标 (0.0 - 1.0)，前端需乘以当前 Canvas 尺寸渲染
+  required: [x, y, width, height]
+  properties:
+    x:
+      type: number
+      format: float
+    y:
+      type: number
+      format: float
+    width:
+      type: number
+      format: float
+    height:
+      type: number
+      format: float
+
+CreateHighlightRequest:
+  type: object
+  required: [pdfId, page, rects, pageWidth, pageHeight, text, color]
+  description: 创建高亮请求。text和color待定是否可选
+  properties:
+    pdfId:
+      type: string
+      description: PDF 文件 Hash
+    page:
+      type: integer
+      description: 页码
+      example: 1
+    rects:
+      type: array
+      description: 选区矩形列表，是像素坐标
+      items:
+        $ref: '#/Rect'
+    pageWidth:
+      type: number
+      description: 当前页面宽度（像素），用于坐标归一化
+      example: 800
+    pageHeight:
+      type: number
+      description: 当前页面高度（像素），用于坐标归一化
+      example: 1200
+    text:
+      type: string
+      description: 选中的文本内容
+    color:
+      type: string
+      description: 高亮颜色，格式是16进制
+      default: "#FFFF00"
+      example: "#FFFF00"
+
+Highlight:
+  type: object
+  properties:
+    id:
+      type: integer
+    page:
+      type: integer
+    rects:
+      type: array
+      items:
+        $ref: '#/Rect'
+    text:
+      type: string
+    color:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+
+CreateHighlightResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    id:
+      type: integer
+      description: 新建高亮ID
+    rects:
+      type: array
+      description: 归一化后的矩形坐标
+      items:
+        $ref: '#/Rect'
+    message:
+      type: string
+      example: "Highlight created"
+
+HighlightListResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    highlights:
+      type: array
+      items:
+        $ref: '#/Highlight'
+    total:
+      type: integer
+
+UpdateHighlightRequest:
+  type: object
+  properties:
+    color:
+      type: string
+      description: 新颜色
+      example: "#FF0000"
+
+SuccessResponse:
+  type: object
+  properties:
+    success:
+      type: boolean

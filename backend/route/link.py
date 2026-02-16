@@ -28,12 +28,12 @@ def get_link_data():
     # 1. 解析段落 ID
     para_info = _parse_paragraph_id(para_id)
     if not para_info:
-         return jsonify({"error": "Invalid targetParagraphId format"}), 400
+        return jsonify({"error": "Invalid targetParagraphId format"}), 400
     
     # 2. 从 PdfService 获取段落文本
     try:
         if not hasattr(g, 'pdf_service'):
-             return jsonify({"error": "Service not initialized"}), 500
+            return jsonify({"error": "Service not initialized"}), 500
 
         paragraphs = g.pdf_service.get_paragraph(
             pdf_id=pdf_id, 

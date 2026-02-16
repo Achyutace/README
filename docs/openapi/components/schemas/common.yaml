@@ -3,7 +3,11 @@ ErrorResponse:
   required:
     - error
   properties:
+    code:
+      type: string
+      description: 机器可读的错误码，前端按此字段判断错误类型
+      example: "MISSING_FIELDS"
     error:
       type: string
-      description: 错误信息
+      description: 人类可读的错误信息，可直接展示给用户
       example: "Invalid file type"
