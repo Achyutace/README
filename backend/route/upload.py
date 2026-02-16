@@ -72,7 +72,6 @@ def upload_pdf():
             'status': result['status'],
             'pageCount': result.get('pageCount', 0),
             'filename': file.filename,
-            'userId': str(user_id),
             'isNewUpload': result.get('is_new', True),
         }
 
@@ -80,7 +79,7 @@ def upload_pdf():
             f"[Upload] pdf_id={pdf_id}, "
             f"task_id={result.get('task_id')}, "
             f"status={result['status']}, "
-            f"user={user_id_str}"
+            f"user={g.user_id_str}"
         )
         return jsonify(response_data)
 

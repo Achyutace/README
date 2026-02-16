@@ -38,8 +38,6 @@ components:
           type: integer
         filename:
           type: string
-        userId:
-          type: string
         isNewUpload:
           type: boolean
 
@@ -285,6 +283,7 @@ paths:
     get:
       tags: [System]
       summary: Health check
+      security: []
       responses:
         200:
           description: System status

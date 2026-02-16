@@ -101,15 +101,11 @@ app.note_service = None   # 占位, 由 before_request 初始化
 @app.before_request
 def before_request():
     """
-    在每个请求处理之前执行：
-    1. 尝试从 JWT 解析 user_id（若 Authorization 头存在）
-    2. 初始化该用户的 PdfService (因为上传路径依赖用户 ID)
-    3. 初始化 per-request 的 DB 服务
-
-    注意：
-    - 公开接口 (auth/register, auth/login, health, smartref 等)
-      不携带 JWT, 此时 g.user_id 不设置, 由各路由自行判断
-    - 受保护接口由 @require_auth 装饰器确保 g.user_id 存在
+    每个请求前：
+    1. 若 Authorization 头存在且为 Bearer Token，尝试解析 user_id
+    2. 初始化该用户的 PdfService、per-request DB 服务
+    3. 公开接口不携带 JWT 时不设置 g.user_id，由各路由自行判断
+    4. 受保护接口由 @require_auth 装饰器确保 g.user_id 存在
     """
     import uuid as _uuid
     from core.database import SessionLocal
@@ -118,14 +114,12 @@ def before_request():
     from route.utils import get_jwt_secret
     import jwt as pyjwt
 
-    # 跳过 OPTIONS 请求 (CORS 预检)
     if request.method == 'OPTIONS':
         return
 
-    # ---------- 1. 从 JWT 提取用户身份 (可选) ----------
+    # ---------- 1. 从 JWT 提取用户身份 ----------
     user_uuid = None
     auth_header = request.headers.get('Authorization', '')
-
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
         try:
@@ -133,7 +127,6 @@ def before_request():
             payload = decode_token(token, secret=secret, expected_type='access')
             user_uuid = _uuid.UUID(payload['sub'])
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError, ValueError, KeyError):
-            # token 无效时不中断请求; @require_auth 会在需要鉴权的路由中拦截
             pass
 
     # 挂载到 g（如果解析成功）

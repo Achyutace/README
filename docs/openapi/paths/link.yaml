@@ -4,6 +4,8 @@ data:
   post:
     tags: [Link]
     summary: 智能引用功能
+    security:
+      - BearerAuth: []
     description: |
       解析段落 ID → 提取段落原文 → 调用 Semantic Scholar 搜索匹配的论文。
       解析段落 ID：PDF 里的蓝色 [Vaswani et al., 2017] 是一个 PDF annotation（subtype: 'Link'），带有一个 dest 指向参考文献页的坐标。前端处理乘paragraph_id发送回后端。

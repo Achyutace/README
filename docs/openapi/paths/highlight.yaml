@@ -4,6 +4,8 @@ create:
   post:
     tags: [Highlight]
     summary: 创建高亮
+    security:
+      - BearerAuth: []
     description: 前端画了高亮以后，后端要存到数据库。这里的传入坐标是像素坐标。
     requestBody:
       required: true
@@ -39,6 +41,8 @@ create:
   get:
     tags: [Highlight]
     summary: 获取某 PDF 的所有高亮
+    security:
+      - BearerAuth: []
     description: 返回归一化坐标 (0.0-1.0)，前端需乘以当前 Canvas 尺寸渲染
     parameters:
       - name: pdfId
@@ -77,6 +81,8 @@ by-highlight-id:
   put:
     tags: [Highlight]
     summary: 更新高亮颜色
+    security:
+      - BearerAuth: []
     parameters:
       - name: highlight_id
         in: path
@@ -106,6 +112,8 @@ by-highlight-id:
   delete:
     tags: [Highlight]
     summary: 删除高亮
+    security:
+      - BearerAuth: []
     parameters:
       - name: highlight_id
         in: path

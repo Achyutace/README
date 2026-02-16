@@ -3,6 +3,8 @@ new:
   post:
     tags: [Chat]
     summary: 创建新会话
+    security:
+      - BearerAuth: []
     description: 仅生成前端会话ID，不写库。实际会话在第一次发送消息时懒创建。
     responses:
       200:
@@ -16,6 +18,8 @@ message:
   post:
     tags: [Chat]
     summary: 发送消息（非流式）
+    security:
+      - BearerAuth: []
     description: 基于 RAG Agent 的完整对话，包含意图识别、检索、生成等步骤
     requestBody:
       required: true
@@ -47,6 +51,8 @@ simple-chat:
   post:
     tags: [Chat]
     summary: 简单对话（基于PDF全文，非流式）
+    security:
+      - BearerAuth: []
     description: 不走 RAG 检索，直接把 PDF 全文作为上下文交给 LLM
     requestBody:
       required: true
@@ -78,6 +84,8 @@ stream:
   post:
     tags: [Chat]
     summary: 发送消息（流式 SSE）
+    security:
+      - BearerAuth: []
     description: |
       通过 Server-Sent Events 流式返回中间步骤和最终结果。
       简单来说，每个agent的中间步骤都会返回一个事件，让前端可以先处理，实时展示出来。
@@ -127,6 +135,8 @@ sessions:
   get:
     tags: [Chat]
     summary: 获取会话列表
+    security:
+      - BearerAuth: []
     parameters:
       - name: pdfId
         in: query
@@ -159,6 +169,8 @@ delete-session:
   delete:
     tags: [Chat]
     summary: 删除会话
+    security:
+      - BearerAuth: []
     parameters:
       - name: session_id
         in: path
@@ -185,6 +197,8 @@ session-messages:
   get:
     tags: [Chat]
     summary: 获取会话的所有消息
+    security:
+      - BearerAuth: []
     parameters:
       - name: session_id
         in: path
@@ -211,6 +225,8 @@ update-title:
   put:
     tags: [Chat]
     summary: 更新会话标题
+    security:
+      - BearerAuth: []
     parameters:
       - name: session_id
         in: path
