@@ -32,31 +32,26 @@ def create_note():
     if not data or not data.get('pdfId'):
         return jsonify({'error': 'Missing pdfId'}), 400
 
-    try:
-        pdf_id = data['pdfId']          # pdf_id == file_hash
-        user_id = g.user_id
-        title = data.get('title', '')
-        content = data.get('content', '')
-        keywords = data.get('keywords', [])
+    pdf_id = data['pdfId']          # pdf_id == file_hash
+    user_id = g.user_id
+    title = data.get('title', '')
+    content = data.get('content', '')
+    keywords = data.get('keywords', [])
 
-        note_service = current_app.note_service
-        note_id = note_service.add_note(
-            user_id=user_id,
-            file_hash=pdf_id,
-            content=content,
-            title=title,
-            keywords=keywords
-        )
+    note_service = current_app.note_service
+    note_id = note_service.add_note(
+        user_id=user_id,
+        file_hash=pdf_id,
+        content=content,
+        title=title,
+        keywords=keywords
+    )
 
-        return jsonify({
-            'success': True,
-            'id': note_id,
-            'message': 'Note created'
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Error creating note: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'id': note_id,
+        'message': 'Note created'
+    })
 
 
 @notes_bp.route('/<pdf_id>', methods=['GET'])
@@ -65,32 +60,27 @@ def get_notes(pdf_id):
     """
     获取某 PDF 的所有笔记
     """
-    try:
-        user_id = g.user_id
-        note_service = current_app.note_service
+    user_id = g.user_id
+    note_service = current_app.note_service
 
-        notes = note_service.get_notes(user_id=user_id, file_hash=pdf_id)
+    notes = note_service.get_notes(user_id=user_id, file_hash=pdf_id)
 
-        formatted_notes = []
-        for note in notes:
-            formatted_notes.append({
-                'id': note['id'],
-                'title': note.get('title') or '',
-                'content': note.get('content') or '',
-                'keywords': note.get('keywords', []),
-                'createdAt': note.get('created_at'),
-                'updatedAt': note.get('updated_at'),
-            })
-
-        return jsonify({
-            'success': True,
-            'notes': formatted_notes,
-            'total': len(formatted_notes)
+    formatted_notes = []
+    for note in notes:
+        formatted_notes.append({
+            'id': note['id'],
+            'title': note.get('title') or '',
+            'content': note.get('content') or '',
+            'keywords': note.get('keywords', []),
+            'createdAt': note.get('created_at'),
+            'updatedAt': note.get('updated_at'),
         })
 
-    except Exception as e:
-        current_app.logger.error(f"Error fetching notes: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'notes': formatted_notes,
+        'total': len(formatted_notes)
+    })
 
 
 @notes_bp.route('/<int:note_id>', methods=['PUT'])
@@ -108,51 +98,40 @@ def update_note(note_id):
     """
     data = request.get_json()
 
-    try:
-        note_service = current_app.note_service
-        
-        # 1. 简单校验
-        title = data.get('title')
-        content = data.get('content')
-        keywords = data.get('keywords')
+    # 1. 简单校验
+    title = data.get('title')
+    content = data.get('content')
+    keywords = data.get('keywords')
 
-        if title is None and content is None and keywords is None:
-            return jsonify({'error': 'At least one field (title, content, keywords) must be provided'}), 400
+    if title is None and content is None and keywords is None:
+        return jsonify({'error': 'At least one field (title, content, keywords) must be provided'}), 400
 
-        # 2. 调用 Service 更新
-        note_service.update_note_content(
-            note_id=note_id,
-            title=title,
-            content=content,
-            keywords=keywords
-        )
+    # 2. 调用 Service 更新
+    note_service = current_app.note_service
+    note_service.update_note_content(
+        note_id=note_id,
+        title=title,
+        content=content,
+        keywords=keywords
+    )
 
-        return jsonify({
-            'success': True,
-            'message': 'Note updated'
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Error updating note: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'message': 'Note updated'
+    })
 
 
 @notes_bp.route('/<int:note_id>', methods=['DELETE'])
 @jwt_required()
 def delete_note(note_id):
     """删除笔记"""
-    try:
-        note_service = current_app.note_service
-        success = note_service.delete_note(note_id)
+    note_service = current_app.note_service
+    success = note_service.delete_note(note_id)
 
-        if not success:
-            return jsonify({'error': 'Note not found or delete failed'}), 404
+    if not success:
+        return jsonify({'error': 'Note not found or delete failed'}), 404
 
-        return jsonify({
-            'success': True,
-            'message': 'Note deleted'
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Error deleting note: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'message': 'Note deleted'
+    })

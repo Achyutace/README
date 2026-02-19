@@ -35,40 +35,35 @@ def create_highlight():
     if not all(k in data for k in required_fields):
         return jsonify({'error': 'Missing required fields'}), 400
 
-    try:
-        pdf_id = data['pdfId']   # pdf_id == file_hash
+    pdf_id = data['pdfId']   # pdf_id == file_hash
 
-        # 2. 坐标归一化
-        normalized_rects = HighlightLogic.normalize_coordinates(
-            data['rects'],
-            data['pageWidth'],
-            data['pageHeight']
-        )
+    # 2. 坐标归一化
+    normalized_rects = HighlightLogic.normalize_coordinates(
+        data['rects'],
+        data['pageWidth'],
+        data['pageHeight']
+    )
 
-        # 3. 持久化
-        note_svc = current_app.note_service
-        highlight_id = note_svc.add_highlight(
-            user_id=g.user_id,
-            file_hash=pdf_id,
-            page_number=data['page'],
-            rects=normalized_rects,
-            selected_text=data.get('text', ''),
-            color=data.get('color', '#FFFF00')
-        )
+    # 3. 持久化
+    note_svc = current_app.note_service
+    highlight_id = note_svc.add_highlight(
+        user_id=g.user_id,
+        file_hash=pdf_id,
+        page_number=data['page'],
+        rects=normalized_rects,
+        selected_text=data.get('text', ''),
+        color=data.get('color', '#FFFF00')
+    )
 
-        if highlight_id is None:
-            return jsonify({'error': 'Paper not in user library'}), 404
+    if highlight_id is None:
+        return jsonify({'error': 'Paper not in user library'}), 404
 
-        return jsonify({
-            'success': True,
-            'id': highlight_id,
-            'rects': normalized_rects,
-            'message': 'Highlight created'
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Error creating highlight: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'id': highlight_id,
+        'rects': normalized_rects,
+        'message': 'Highlight created'
+    })
 
 
 @highlight_bp.route('/', methods=['GET'])
@@ -86,37 +81,29 @@ def get_highlights():
     if not pdf_id:
         return jsonify({'error': 'Missing required query parameter: pdfId'}), 400
 
-    try:
-        page = request.args.get('page', type=int)
+    page = request.args.get('page', type=int)
 
-        note_svc = current_app.note_service
-        highlights = note_svc.get_highlights(
-            user_id=g.user_id,
-            file_hash=pdf_id,
-            page_number=page
-        )
+    note_svc = current_app.note_service
+    highlights = note_svc.get_highlights(
+        user_id=g.user_id,
+        file_hash=pdf_id,
+        page_number=page
+    )
 
-        return jsonify({
-            'success': True,
-            'highlights': highlights,
-            'total': len(highlights)
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Error fetching highlights: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'highlights': highlights,
+        'total': len(highlights)
+    })
 
 
 @highlight_bp.route('/<int:highlight_id>', methods=['DELETE'])
 @jwt_required()
 def delete_highlight(highlight_id):
     """删除高亮"""
-    try:
-        note_svc = current_app.note_service
-        note_svc.delete_highlight(highlight_id)
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    note_svc = current_app.note_service
+    note_svc.delete_highlight(highlight_id)
+    return jsonify({'success': True})
 
 
 @highlight_bp.route('/<int:highlight_id>', methods=['PUT'])
@@ -124,12 +111,9 @@ def delete_highlight(highlight_id):
 def update_highlight(highlight_id):
     """更新高亮 (颜色)"""
     data = request.get_json()
-    try:
-        note_svc = current_app.note_service
-        note_svc.update_highlight(
-            highlight_id=highlight_id,
-            color=data.get('color')
-        )
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    note_svc = current_app.note_service
+    note_svc.update_highlight(
+        highlight_id=highlight_id,
+        color=data.get('color')
+    )
+    return jsonify({'success': True})

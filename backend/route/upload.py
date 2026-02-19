@@ -12,8 +12,12 @@
 
 状态定义: pending | processing | completed | failed
 """
-from flask import Blueprint, request, jsonify, current_app, g, send_file
+from flask import Blueprint, request, jsonify, g, send_file
 from flask_jwt_extended import jwt_required
+from core.exceptions import NotFoundError
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # 定义蓝图
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
@@ -44,48 +48,43 @@ def upload_pdf():
     if not file.filename.lower().endswith('.pdf'):
         return jsonify({'error': 'Only PDF files are allowed'}), 400
 
-    try:
-        pdf_service = g.pdf_service
-        user_id = g.user_id
+    pdf_service = g.pdf_service
+    user_id = g.user_id
 
-        # 2. 摄入文件 (Hash + 存盘 + COS + DB + Celery)
-        result = pdf_service.ingest_file(
-            file_obj=file,
-            filename=file.filename,
-            user_id=user_id
-        )
+    # 2. 摄入文件 (Hash + 存盘 + COS + DB + Celery)
+    result = pdf_service.ingest_file(
+        file_obj=file,
+        filename=file.filename,
+        user_id=user_id
+    )
 
-        pdf_id = result['pdf_id']
+    pdf_id = result['pdf_id']
 
-        # 3. 绑定到用户书架
-        library_service = current_app.library_service
-        library_service.bind_paper(
-            user_id=user_id,
-            pdf_id=pdf_id,
-            title=file.filename
-        )
+    # 3. 绑定到用户书架
+    library_service = current_app.library_service
+    library_service.bind_paper(
+        user_id=user_id,
+        pdf_id=pdf_id,
+        title=file.filename
+    )
 
-        # 4. 立即返回
-        response_data = {
-            'pdfId': pdf_id,
-            'taskId': result.get('task_id'),
-            'status': result['status'],
-            'pageCount': result.get('pageCount', 0),
-            'filename': file.filename,
-            'isNewUpload': result.get('is_new', True),
-        }
+    # 4. 立即返回
+    response_data = {
+        'pdfId': pdf_id,
+        'taskId': result.get('task_id'),
+        'status': result['status'],
+        'pageCount': result.get('pageCount', 0),
+        'filename': file.filename,
+        'isNewUpload': result.get('is_new', True),
+    }
 
-        current_app.logger.info(
-            f"[Upload] pdf_id={pdf_id}, "
-            f"task_id={result.get('task_id')}, "
-            f"status={result['status']}, "
-            f"user={g.user_id_str}"
-        )
-        return jsonify(response_data)
-
-    except Exception as e:
-        current_app.logger.error(f"Upload error: {e}")
-        return jsonify({'error': str(e)}), 500
+    logger.info(
+        f"[Upload] pdf_id={pdf_id}, "
+        f"task_id={result.get('task_id')}, "
+        f"status={result['status']}, "
+        f"user={g.user_id_str}"
+    )
+    return jsonify(response_data)
 
 
 # ==================== 任务状态轮询接口 ======================
@@ -110,14 +109,9 @@ def get_task_status(pdf_id):
     """
     from_page = request.args.get('from_page', 1, type=int)
 
-    try:
-        pdf_service = g.pdf_service
-        result = pdf_service.get_process_status(pdf_id, from_page=from_page)
-        return jsonify(result)
-
-    except Exception as e:
-        current_app.logger.error(f"Status query error for {pdf_id}: {e}")
-        return jsonify({'error': str(e)}), 500
+    pdf_service = g.pdf_service
+    result = pdf_service.get_process_status(pdf_id, from_page=from_page)
+    return jsonify(result)
 
 
 # ================== PDF 信息获取接口 ========================
@@ -130,9 +124,7 @@ def get_pdf_info(pdf_id):
         info = g.pdf_service.get_info(pdf_id)
         return jsonify(info)
     except FileNotFoundError:
-        return jsonify({'error': 'PDF not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise NotFoundError('PDF not found')
 
 
 @upload_bp.route('/<pdf_id>/paragraphs', methods=['GET'])
@@ -140,11 +132,8 @@ def get_pdf_info(pdf_id):
 def get_pdf_paragraphs(pdf_id):
     """获取 PDF 已解析的段落 (从 DB 读取)"""
     page = request.args.get('page', type=int)
-    try:
-        result = g.pdf_service.get_paragraph(pdf_id, pagenumber=page)
-        return jsonify({'paragraphs': result})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    result = g.pdf_service.get_paragraph(pdf_id, pagenumber=page)
+    return jsonify({'paragraphs': result})
 
 
 @upload_bp.route('/<pdf_id>/source', methods=['GET'])
@@ -162,7 +151,4 @@ def get_pdf_source(pdf_id):
             download_name=f"{pdf_id}.pdf"
         )
     except FileNotFoundError:
-        return jsonify({'error': 'PDF file not found'}), 404
-    except Exception as e:
-        current_app.logger.error(f"Failed to retrieve PDF source for {pdf_id}: {e}")
-        return jsonify({'error': str(e)}), 500
+        raise NotFoundError('PDF file not found')

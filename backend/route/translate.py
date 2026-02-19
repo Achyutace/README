@@ -7,6 +7,9 @@ from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required
 from route.utils import parse_paragraph_id
 from utils.pdf_engine import make_paragraph_id
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # 定义蓝图
 translate_bp = Blueprint('translate', __name__, url_prefix='/api/translate')
@@ -31,39 +34,34 @@ def translate_paragraph():
     paragraph_id = data['paragraphId']
     force = data.get('force', False)
 
-    try:
-        # 2. 解析段落 ID → (page, index)
-        page, index = parse_paragraph_id(paragraph_id)
-        if page is None or index is None:
-            return jsonify({'error': 'Invalid paragraphId format'}), 400
+    # 2. 解析段落 ID → (page, index)
+    page, index = parse_paragraph_id(paragraph_id)
+    if page is None or index is None:
+        return jsonify({'error': 'Invalid paragraphId format'}), 400
 
-        # 3. 从 paper_service (DB) 获取原文
-        pdf_service = g.pdf_service
-        paragraphs = pdf_service.get_paragraph(pdf_id, pagenumber=page, paraid=index)
-        original_text = paragraphs[0].get('original_text', '').strip() if paragraphs else ''
-        if not original_text:
-            return jsonify({'error': 'Original text not found for this paragraph'}), 404
+    # 3. 从 paper_service (DB) 获取原文
+    pdf_service = g.pdf_service
+    paragraphs = pdf_service.get_paragraph(pdf_id, pagenumber=page, paraid=index)
+    original_text = paragraphs[0].get('original_text', '').strip() if paragraphs else ''
+    if not original_text:
+        return jsonify({'error': 'Original text not found for this paragraph'}), 404
 
-        # 4. 调用 translate_service (内部处理缓存 + LLM + 存库)
-        translate_service = current_app.translate_service
-        result = translate_service.translate_paragraph(
-            file_hash=pdf_id,
-            page_number=page,
-            paragraph_index=index,
-            original_text=original_text,
-            force=force
-        )
+    # 4. 调用 translate_service (内部处理缓存 + LLM + 存库)
+    translate_service = current_app.translate_service
+    result = translate_service.translate_paragraph(
+        file_hash=pdf_id,
+        page_number=page,
+        paragraph_index=index,
+        original_text=original_text,
+        force=force
+    )
 
-        return jsonify({
-            'success': True,
-            'translation': result['translation'],
-            'cached': result.get('cached', False),
-            'paragraphId': paragraph_id
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Translation error: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'translation': result['translation'],
+        'cached': result.get('cached', False),
+        'paragraphId': paragraph_id
+    })
 
 
 @translate_bp.route('/page/<pdf_id>/<int:page_number>', methods=['GET'])
@@ -74,19 +72,14 @@ def get_page_translations(pdf_id, page_number):
 
     场景: 用户刷新页面后, 前端批量获取并缓存之前翻译过的段落
     """
-    try:
-        translate_service = current_app.translate_service
-        page_trans = translate_service.get_page_translations(pdf_id, page_number)
+    translate_service = current_app.translate_service
+    page_trans = translate_service.get_page_translations(pdf_id, page_number)
 
-        return jsonify({
-            'pdfId': pdf_id,
-            'page': page_number,
-            'translations': page_trans   # { "paragraphId": "翻译文本", ... }
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Get page translations error: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'pdfId': pdf_id,
+        'page': page_number,
+        'translations': page_trans   # { "paragraphId": "翻译文本", ... }
+    })
 
 
 @translate_bp.route('/text', methods=['POST'])
@@ -111,32 +104,27 @@ def translate_text():
     if not text or not text.strip():
         return jsonify({'error': 'Text cannot be empty'}), 400
 
-    try:
-        # 2. 获取上下文 (如果提供了 pdfId)
-        context = None
-        if pdf_id:
-            context = translate_service_build_context(pdf_id, context_paragraphs)
+    # 2. 获取上下文 (如果提供了 pdfId)
+    context = None
+    if pdf_id:
+        context = translate_service_build_context(pdf_id, context_paragraphs)
 
-        # 3. 调用 translate_service
-        translate_service = current_app.translate_service
-        result = translate_service.translate_text(text=text, context=context)
+    # 3. 调用 translate_service
+    translate_service = current_app.translate_service
+    result = translate_service.translate_text(text=text, context=context)
 
-        return jsonify({
-            'success': True,
-            'originalText': result['originalText'],
-            'translatedText': result['translatedText'],
-            'hasContext': result['hasContext'],
-            'contextLength': result['contextLength']
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Text translation error: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'originalText': result['originalText'],
+        'translatedText': result['translatedText'],
+        'hasContext': result['hasContext'],
+        'contextLength': result['contextLength']
+    })
 
 
 # ==================== 内部辅助 ====================
 
-def translate_service_build_context(pdf_id: str, max_paragraphs: int = 3) -> str:
+def translate_service_build_context(pdf_id: str, max_paragraphs: int = 3) -> str | None:
     """
     从 paper_service 获取前 N 段原文, 拼接为上下文字符串
     """
@@ -147,5 +135,5 @@ def translate_service_build_context(pdf_id: str, max_paragraphs: int = 3) -> str
             context_parts = [p.get('original_text', '') for p in paragraphs[:max_paragraphs]]
             return '\n\n'.join(context_parts)
     except Exception as e:
-        current_app.logger.warning(f"Failed to build context for {pdf_id}: {e}")
+        logger.warning(f"Failed to build context for {pdf_id}: {e}")
     return None

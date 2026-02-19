@@ -8,6 +8,9 @@ import uuid
 from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app, g
 from flask_jwt_extended import jwt_required
 from tasks.chat_tasks import generate_session_title_task
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # 定义 Blueprint
 chatbox_bp = Blueprint('chatbox', __name__, url_prefix='/api/chatbox')
@@ -22,7 +25,7 @@ def handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, u
     existing_session = chat_service.get_session(session_id, user_id)
 
     if not existing_session:
-        current_app.logger.info(f"Lazy creating session: {session_id}")
+        logger.info(f"Lazy creating session: {session_id}")
 
         chat_service.create_session(
             user_id=user_id,
@@ -68,52 +71,47 @@ def send_message():
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
 
-    try:
-        agent_service = current_app.agent_service
-        chat_service = current_app.chat_service
+    agent_service = current_app.agent_service
+    chat_service = current_app.chat_service
 
-        # 1. 懒创建会话
-        handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+    # 1. 懒创建会话
+    handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
 
-        # 2. 存储用户消息
-        chat_service.add_user_message(session_id, user_id, user_query)
+    # 2. 存储用户消息
+    chat_service.add_user_message(session_id, user_id, user_query)
 
-        # 3. 获取历史记录
-        history = chat_service.get_formatted_history(session_id, user_id, limit=10)
+    # 3. 获取历史记录
+    history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
-        # 4. 调用 Agent
-        '''
-            return {
-                'response': final_state['final_response'],  # 最终答案
-                'citations': final_state['citations'],  # 引用来源
-                'steps': final_state['steps'],  # 执行步骤记录
-                'context_used': {
-                    'local_chunks': len(final_state['local_context']),
-                    'external_sources': len(final_state['external_context'])
-                }
+    # 4. 调用 Agent
+    '''
+        return {
+            'response': final_state['final_response'],  # 最终答案
+            'citations': final_state['citations'],  # 引用来源
+            'steps': final_state['steps'],  # 执行步骤记录
+            'context_used': {
+                'local_chunks': len(final_state['local_context']),
+                'external_sources': len(final_state['external_context'])
             }
-        '''
-        result = agent_service.chat(
-            user_query=user_query,
-            user_id=user_id,
-            paper_id=pdf_id,
-            chat_history=history
-        )
+        }
+    '''
+    result = agent_service.chat(
+        user_query=user_query,
+        user_id=user_id,
+        paper_id=pdf_id,
+        chat_history=history
+    )
 
-        # 5. 存储 AI 回答
-        chat_service.add_ai_message(
-            session_id=session_id,
-            user_id=user_id,
-            content=result['response'],
-            citations=result.get('citations')
-        )
+    # 5. 存储 AI 回答
+    chat_service.add_ai_message(
+        session_id=session_id,
+        user_id=user_id,
+        content=result['response'],
+        citations=result.get('citations')
+    )
 
-        result['sessionId'] = session_id
-        return jsonify(result)
-
-    except Exception as e:
-        current_app.logger.error(f"Chatbox error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    result['sessionId'] = session_id
+    return jsonify(result)
 
 
 @chatbox_bp.route('/simple-chat', methods=['POST'])
@@ -132,45 +130,40 @@ def simple_chat():
     if not session_id or not user_query:
         return jsonify({'error': 'Message and sessionId are required'}), 400
 
-    try:
-        agent_service = current_app.agent_service
-        pdf_service = g.pdf_service
-        chat_service = current_app.chat_service
+    agent_service = current_app.agent_service
+    pdf_service = g.pdf_service
+    chat_service = current_app.chat_service
 
-        # 1. 懒创建
-        handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+    # 1. 懒创建
+    handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
 
-        # 2. 存储用户消息
-        chat_service.add_user_message(session_id, user_id, user_query)
+    # 2. 存储用户消息
+    chat_service.add_user_message(session_id, user_id, user_query)
 
-        # 3. 历史记录
-        history = chat_service.get_formatted_history(session_id, user_id, limit=10)
+    # 3. 历史记录
+    history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
-        # 4. 获取 PDF 全文
-        paragraphs = pdf_service.get_paragraph(pdf_id) if pdf_id else []
-        context_text = "\n\n".join([p.get('original_text', '') for p in paragraphs]) if paragraphs else ''
+    # 4. 获取 PDF 全文
+    paragraphs = pdf_service.get_paragraph(pdf_id) if pdf_id else []
+    context_text = "\n\n".join([p.get('original_text', '') for p in paragraphs]) if paragraphs else ''
 
-        # 5. 调用 Agent simple_chat
-        result = agent_service.simple_chat(
-            user_query=user_query,
-            context_text=context_text,
-            chat_history=history
-        )
+    # 5. 调用 Agent simple_chat
+    result = agent_service.simple_chat(
+        user_query=user_query,
+        context_text=context_text,
+        chat_history=history
+    )
 
-        # 6. 存储 AI 回答
-        chat_service.add_ai_message(
-            session_id=session_id,
-            user_id=user_id,
-            content=result['response'],
-            citations=result.get('citations')
-        )
+    # 6. 存储 AI 回答
+    chat_service.add_ai_message(
+        session_id=session_id,
+        user_id=user_id,
+        content=result['response'],
+        citations=result.get('citations')
+    )
 
-        result['sessionId'] = session_id
-        return jsonify(result)
-
-    except Exception as e:
-        current_app.logger.error(f"Simple chat error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    result['sessionId'] = session_id
+    return jsonify(result)
 
 
 @chatbox_bp.route('/stream', methods=['POST'])
@@ -226,7 +219,7 @@ def stream_message():
                 )
 
         except Exception as e:
-            current_app.logger.error(f"Stream error: {str(e)}")
+            logger.error(f"Stream error: {str(e)}")
             error_event = {'type': 'error', 'error': str(e)}
             yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
 
@@ -247,21 +240,16 @@ def delete_session(session_id):
     """
     接口 D: 删除会话
     """
-    try:
-        chat_service = current_app.chat_service
-        user_id = g.user_id
+    chat_service = current_app.chat_service
+    user_id = g.user_id
 
-        chat_service.delete_session(session_id, user_id)
+    chat_service.delete_session(session_id, user_id)
 
-        return jsonify({
-            'success': True,
-            'sessionId': session_id,
-            'message': 'Session deleted'
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Delete session error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'sessionId': session_id,
+        'message': 'Session deleted'
+    })
 
 
 @chatbox_bp.route('/sessions', methods=['GET'])
@@ -270,24 +258,19 @@ def list_sessions():
     """
     接口 E: 获取会话列表
     """
-    try:
-        chat_service = current_app.chat_service
-        user_id = g.user_id
+    chat_service = current_app.chat_service
+    user_id = g.user_id
 
-        pdf_id = request.args.get('pdfId')
-        limit = request.args.get('limit', type=int, default=50)
+    pdf_id = request.args.get('pdfId')
+    limit = request.args.get('limit', type=int, default=50)
 
-        sessions = chat_service.list_user_sessions(user_id, file_hash=pdf_id, limit=limit)
+    sessions = chat_service.list_user_sessions(user_id, file_hash=pdf_id, limit=limit)
 
-        return jsonify({
-            'success': True,
-            'sessions': sessions,
-            'total': len(sessions)
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"List sessions error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'sessions': sessions,
+        'total': len(sessions)
+    })
 
 
 @chatbox_bp.route('/session/<session_id>/messages', methods=['GET'])
@@ -296,22 +279,17 @@ def get_session_messages(session_id):
     """
     接口 F: 获取会话的所有消息
     """
-    try:
-        chat_service = current_app.chat_service
-        user_id = g.user_id
+    chat_service = current_app.chat_service
+    user_id = g.user_id
 
-        messages = chat_service.get_session_messages_for_ui(session_id, user_id)
+    messages = chat_service.get_session_messages_for_ui(session_id, user_id)
 
-        return jsonify({
-            'success': True,
-            'sessionId': session_id,
-            'messages': messages,
-            'total': len(messages)
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Get messages error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'sessionId': session_id,
+        'messages': messages,
+        'total': len(messages)
+    })
 
 
 @chatbox_bp.route('/session/<session_id>/title', methods=['PUT'])
@@ -320,26 +298,21 @@ def update_session_title(session_id):
     """
     接口 G: 更新会话标题
     """
-    try:
-        data = request.get_json()
-        new_title = data.get('title')
-        user_id = g.user_id
+    data = request.get_json()
+    new_title = data.get('title')
+    user_id = g.user_id
 
-        if not new_title or not new_title.strip():
-            return jsonify({'error': 'Title is required'}), 400
+    if not new_title or not new_title.strip():
+        return jsonify({'error': 'Title is required'}), 400
 
-        chat_service = current_app.chat_service
-        success = chat_service.update_title(session_id, user_id, new_title.strip())
+    chat_service = current_app.chat_service
+    success = chat_service.update_title(session_id, user_id, new_title.strip())
 
-        if not success:
-            return jsonify({'error': 'Session not found or update failed'}), 404
+    if not success:
+        return jsonify({'error': 'Session not found or update failed'}), 404
 
-        return jsonify({
-            'success': True,
-            'sessionId': session_id,
-            'title': new_title.strip()
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Update title error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({
+        'success': True,
+        'sessionId': session_id,
+        'title': new_title.strip()
+    })

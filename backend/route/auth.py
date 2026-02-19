@@ -83,8 +83,6 @@ def register():
             'refreshToken': refresh_token,
         }), 201
 
-    except Exception as e:
-        return jsonify({'code': 'SERVER_ERROR', 'error': f'Registration failed: {str(e)}'}), 500
     finally:
         db.close()
 
@@ -139,8 +137,6 @@ def login():
             'refreshToken': refresh_token,
         })
 
-    except Exception as e:
-        return jsonify({'code': 'SERVER_ERROR', 'error': f'Login failed: {str(e)}'}), 500
     finally:
         db.close()
 
@@ -167,30 +163,26 @@ def refresh():
 
     refresh_token = data['refreshToken']
 
+    payload = jwt_decode_token(refresh_token)
+    user_id = payload['sub']
+
+    # 验证用户仍然存在
+    import uuid as _uuid
+    db = SessionLocal()
     try:
-        payload = jwt_decode_token(refresh_token)
-        user_id = payload['sub']
+        repo = SQLRepository(db)
+        user = repo.get_user_by_id(_uuid.UUID(user_id))
+        if not user:
+            return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 401
+    finally:
+        db.close()
 
-        # 验证用户仍然存在
-        import uuid as _uuid
-        db = SessionLocal()
-        try:
-            repo = SQLRepository(db)
-            user = repo.get_user_by_id(_uuid.UUID(user_id))
-            if not user:
-                return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 401
-        finally:
-            db.close()
+    # 签发新的 Access Token
+    new_access_token = create_access_token(identity=str(user.id))
 
-        # 签发新的 Access Token
-        new_access_token = create_access_token(identity=str(user.id))
-
-        return jsonify({
-            'accessToken': new_access_token,
-        })
-
-    except Exception as e:
-        return jsonify({'code': 'INVALID_TOKEN', 'error': f'Invalid refresh token: {str(e)}'}), 401
+    return jsonify({
+        'accessToken': new_access_token,
+    })
 
 
 # ==================== 获取当前用户信息 ====================

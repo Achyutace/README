@@ -6,7 +6,13 @@ from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identi
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from core.config import settings
+from core.exceptions import APIError
+from core.logging import setup_logging, get_logger
 # TODO：自动化测试
+
+# ==================== 0. 全局日志配置 ====================
+setup_logging()
+logger = get_logger(__name__)
 
 # ==================== 1. 导入服务类 ====================
 from services.paper_service import PdfService
@@ -182,6 +188,19 @@ if settings.debug:  # 假设你的 settings 中有 debug 开关
     @app.route('/api/openapi.yaml')
     def send_openapi():
         return send_from_directory('.', 'openapi.yaml')
+
+# ==================== 5.5 全局错误处理 ====================
+
+@app.errorhandler(APIError)
+def handle_api_error(error):
+    """处理所有自定义 API 异常 → 统一 JSON 格式"""
+    return jsonify(error.to_dict()), error.status_code
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """未预期的异常 → 500 + 日志"""
+    logger.error(f"Unexpected error: {error}", exc_info=True)
+    return jsonify({"code": "SERVER_ERROR", "error": "Internal server error"}), 500
 
 # ==================== 6. 注册蓝图 ====================
 

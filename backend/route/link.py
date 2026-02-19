@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, g
 from flask_jwt_extended import jwt_required
 from services.websearch_service import web_search_service
 from utils.pdf_engine import parse_paragraph_id as _parse_paragraph_id
+from core.exceptions import NotFoundError
 
 link_bp = Blueprint('link', __name__, url_prefix='/api/link')
 
@@ -32,50 +33,44 @@ def get_link_data():
         return jsonify({"error": "Invalid targetParagraphId format"}), 400
     
     # 2. 从 PdfService 获取段落文本
-    try:
-        if not hasattr(g, 'pdf_service'):
-            return jsonify({"error": "Service not initialized"}), 500
+    if not hasattr(g, 'pdf_service'):
+        return jsonify({"error": "Service not initialized"}), 500
 
+    try:
         paragraphs = g.pdf_service.get_paragraph(
             pdf_id=pdf_id, 
             pagenumber=para_info['page_number'], 
             paraid=para_info['index']
         )
-        
-        query_text = paragraphs[0].get('original_text', '') if paragraphs else ''
-        if not query_text:
-            return jsonify({"error": "Paragraph content empty"}), 404
-            
     except FileNotFoundError:
-        return jsonify({"error": "PDF file not found"}), 404
-    except Exception as e:
-        return jsonify({"error": f"Failed to get paragraph: {str(e)}"}), 500
+        raise NotFoundError("PDF file not found")
+    
+    query_text = paragraphs[0].get('original_text', '') if paragraphs else ''
+    if not query_text:
+        return jsonify({"error": "Paragraph content empty"}), 404
 
     # 3. 搜索论文信息
-    try:
-        search_res = web_search_service.search_paper_smart(text=query_text)
-        
-        if not search_res.get("success"):
-            return jsonify({
-                "title": "",
-                "url": "",
-                "snippet": "未找到相关论文信息",
-                "published_date": "",
-                "authors": [],
-                "source": "semantic_scholar",
-                "valid": 0
-            })
-            
-        result = search_res["paper"] # Now it returns 'paper' formatted
-        
+    search_res = web_search_service.search_paper_smart(text=query_text)
+    
+    if not search_res.get("success"):
         return jsonify({
-            "title": result.get("title", ""),
-            "url": result.get("url", ""),
-            "snippet": result.get("abstract", ""),
-            "published_date": str(result.get("year", "")),
-            "authors": result.get("authors", []),
+            "title": "",
+            "url": "",
+            "snippet": "未找到相关论文信息",
+            "published_date": "",
+            "authors": [],
             "source": "semantic_scholar",
-            "valid": search_res.get("valid", 0)
+            "valid": 0
         })
-    except Exception as e:
-         return jsonify({"error": f"Search failed: {str(e)}"}), 500
+        
+    result = search_res["paper"] # Now it returns 'paper' formatted
+    
+    return jsonify({
+        "title": result.get("title", ""),
+        "url": result.get("url", ""),
+        "snippet": result.get("abstract", ""),
+        "published_date": str(result.get("year", "")),
+        "authors": result.get("authors", []),
+        "source": "semantic_scholar",
+        "valid": search_res.get("valid", 0)
+    })
