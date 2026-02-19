@@ -15,6 +15,15 @@ TranslateParagraphRequest:
       type: boolean
       description: 是否强制重新翻译（忽略缓存）
       default: false
+    model:
+      type: string
+      description: 指定使用的模型（覆盖全局配置）
+    apiKey:
+      type: string
+      description: 指定使用的 API Key
+    apiBase:
+      type: string
+      description: 指定使用的 API Base URL
 
 TranslateParagraphResponse:
   type: object
@@ -45,6 +54,15 @@ TranslateTextRequest:
       type: integer
       description: 用于上下文的段落数量
       default: 3
+    model:
+      type: string
+      description: 指定使用的模型（覆盖全局配置）
+    apiKey:
+      type: string
+      description: 指定使用的 API Key
+    apiBase:
+      type: string
+      description: 指定使用的 API Base URL
 
 TranslateTextResponse:
   type: object

@@ -5,7 +5,8 @@ readme/
 │   │   ├── database.py             # 数据库初始化连接: PostgreSQL(主库), Qdrant(向量库)
 │   │   ├── security.py             # JWT 校验 & 用户鉴权
 │   │   ├── exceptions.py           # 自定义异常，发送给前端
-│   │   └── logging.py              # 统一日志配置
+│   │   ├── logging.py              # 统一日志配置
+│   │   └── llm_provider.py         # LLM 配置抽象层 (解析配置, 创建客户端, 代理支持)
 │   |
 │   ├── api/                # 路由层：接发请求
 │   |   ├── dependencies.py # FastAPI的依赖注入

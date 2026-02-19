@@ -1,46 +1,43 @@
 # README PDF Reader Configuration
 # Fill in your API keys below
 
-# OpenAI / LLM Configuration
+# OpenAI / LLM Configuration (全局默认凭证)
+# 所有 LLM 服务默认使用此 API 凭证
 openai:
   api_key: "your_api_key"
   api_base: "https://yunwu.ai/v1"
 
-# Translation Service
-translate:
-  api_key: "your_api_key"
-  api_base: "https://yunwu.ai/v1"
-
-# Tavily Search API
-tavily:
-  api_key: "your_api_key"
-
 # Model Configuration (模型配置)
-# Different services can use different models
-# 不同服务可以使用不同的模型
+# 不同服务可以使用不同的模型，也可覆盖 API 凭证
+#
+# 简写 → 只指定模型名（使用全局 openai 凭证）:
+#   chat: "qwen-plus"
+#
+# 详写 → 指定模型 + 独立 API 凭证:
+#   translate:
+#     model: "deepseek-chat"
+#     api_key: "sk-other-key"
+#     api_base: "https://api.deepseek.com/v1"
 models:
-  # Chat/Agent model - for academic assistant conversations
   # 聊天/代理模型 - 用于学术助手对话
   chat: "qwen-plus"
 
-  # Translation model - for paragraph translation
   # 翻译模型 - 用于段落翻译
   translate: "qwen-plus"
 
-  # Vision model - for image analysis (requires vision capability)
   # 视觉模型 - 用于图片分析（需要支持视觉功能）
   vision: "gpt-4o-mini"
 
-  # Embedding model - for RAG vector embeddings
-  # 嵌入模型 - 用于RAG向量嵌入
+  # 嵌入模型 - 用于 RAG 向量嵌入
   embedding: "text-embedding-3-small"
 
-  # Roadmap model - for generating concept roadmaps
   # 路线图模型 - 用于生成概念路线图
   roadmap: "qwen-plus"
+
 # Scientific Literature APIs
 scientific:
   semantic_scholar_api_key: ""
+  semantic_scholar_api_url: "https://api.semanticscholar.org/graph/v1"
 
 # Database Configuration (PostgreSQL)
 database:
@@ -57,15 +54,34 @@ tavily:
 
 # 向量数据库配置
 vector_store:
-  # 启用特定的向量存储
   enable_qdrant: true
-  
+
   qdrant:
     url: "http://localhost:6333"
     api_key: ""
     prefer_grpc: true
 
-# Celery 任务队列（Redis 与后端同机部署，只监听本机）
+# Object Storage Configuration (Tencent COS)
+cos:
+  enabled: false # Set to true to enable Cloud Object Storage
+  secret_id: "your-secret-id"
+  secret_key: "your-secret-key"
+  region: "ap-guangzhou"
+  bucket: "your-bucket-name-1250000000"
+  scheme: "https"
+
+
+# 对象存储库配置 
+# Object Storage Configuration (Tencent COS)
+cos:
+  enabled: false # Set to true to enable Cloud Object Storage
+  secret_id: "your-secret-id"
+  secret_key: "your-secret-key"
+  region: "ap-guangzhou" # e.g., ap-guangzhou, ap-shanghai
+  bucket: "your-bucket-name-1250000000"
+  scheme: "https" 
+
+# Celery 任务队列
 celery:
   broker_url: "redis://127.0.0.1:6379/0"
   result_backend: "redis://127.0.0.1:6379/1"

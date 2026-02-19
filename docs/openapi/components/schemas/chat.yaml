@@ -40,6 +40,16 @@ MessageRequest:
     pdfId:
       type: string
       description: 关联的PDF文件Hash，不传则为全局对话
+    model:
+      type: string
+      description: 指定使用的模型（覆盖全局配置）
+      example: "gpt-4"
+    apiKey:
+      type: string
+      description: 指定使用的 API Key（覆盖全局配置）
+    apiBase:
+      type: string
+      description: 指定使用的 API Base URL（覆盖全局配置）
 
 # ---------- 响应 ----------
 

@@ -14,7 +14,9 @@ from functools import partial
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
+from langchain_community.chat_models import ChatOpenAI
 
+from core.llm_provider import resolve_llm_profile
 from agent.state import AgentState
 from agent.nodes.router import router_node
 from agent.nodes.paper_expert import paper_expert_node
@@ -29,21 +31,33 @@ class AcademicAgentService:
     def __init__(
         self,
         rag_service: RAGService,
-        openai_api_key: str,
-        openai_api_base: Optional[str] = None,
-        model: str = "qwen-plus",
         temperature: float = 0.7,
     ):
-        if not openai_api_key:
-            raise ValueError("需要有效的 openai_api_key，请在 config.yaml 中配置。")
-
+        """
+        初始化 Agent 服务
+        
+        Args:
+            rag_service: RAG 服务实例
+        """
         self.rag_service = rag_service
-        self.llm = ChatOpenAI(
-            model=model,
-            temperature=temperature,
-            api_key=openai_api_key,
-            base_url=openai_api_base,
-        )
+        
+        # 1. 解析配置
+        self.profile = resolve_llm_profile(scene="chat")
+
+        if not self.profile.is_available:
+            print("Warning: OpenAI API key not found. Agent may fail.")
+
+        # 2. 初始化 LLM
+        # LangChain 的 ChatOpenAI 参数略有不同
+        llm_kwargs = {
+            "model": self.profile.model,
+            "temperature": temperature,
+            "api_key": self.profile.api_key
+        }
+        if self.profile.api_base:
+            llm_kwargs["base_url"] = self.profile.api_base
+
+        self.llm = ChatOpenAI(**llm_kwargs)
         self.workflow = self._build_workflow()
 
     # ==================== 工作流 ====================

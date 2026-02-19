@@ -5,7 +5,8 @@ import re
 import uuid
 from typing import List, Dict, Optional, Any
 
-from config import settings
+from core.config import settings
+from core.llm_provider import resolve_llm_profile
 from ..repository.vector_repo import vector_repo
 
 try:
@@ -28,22 +29,23 @@ class RAGService:
     
     COLLECTION_NAME = "paper_collection"
 
-    def __init__(self, 
-                 api_base: str = None):
+    def __init__(self):
         """
-        Args:
-            api_base: OpenAI API 基础 URL (可选,例如使用代理或其他兼容服务)
+        RAG Service Initialization
         """
+        # 1. 解析配置 (scene="embedding")
+        self.profile = resolve_llm_profile(scene="embedding")
+        
         # 嵌入模型
-        if HAS_OPENAI and settings.has_openai_key:
+        if HAS_OPENAI and self.profile.is_available:
             embedding_kwargs = {
-                "model": "text-embedding-3-small"
+                "model": self.profile.model
             }
-            if api_base or settings.openai.api_base:
-                embedding_kwargs["openai_api_base"] = api_base or settings.openai.api_base
+            if self.profile.api_base:
+                embedding_kwargs["openai_api_base"] = self.profile.api_base
 
             self.embeddings = OpenAIEmbeddings(
-                api_key=settings.openai.api_key,
+                api_key=self.profile.api_key,
                 **embedding_kwargs
             )
             self.has_embeddings = True

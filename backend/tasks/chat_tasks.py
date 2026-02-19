@@ -14,6 +14,7 @@ from celery import shared_task
 
 from core.database import db
 from core.config import settings
+from core.llm_provider import resolve_llm_profile
 from repository.sql_repo import SQLRepository
 from services.chat_service import ChatService
 
@@ -27,8 +28,10 @@ def _generate_title_via_llm(user_query: str) -> str:
     轻量级标题生成 —— 镜像 AcademicAgentService.generate_session_title 的核心逻辑,
     但不依赖 rag_service / storage_service，仅需 LLM。
     """
-    api_key = settings.openai.api_key
-    if not api_key:
+    # 1. 解析配置
+    profile = resolve_llm_profile(scene="chat")
+    
+    if not profile.is_available:
         # Demo 模式：直接截断
         return (user_query[:20] + "...") if len(user_query) > 20 else user_query
 
@@ -36,12 +39,15 @@ def _generate_title_via_llm(user_query: str) -> str:
         from langchain_openai import ChatOpenAI
         from langchain_core.messages import HumanMessage
 
-        llm = ChatOpenAI(
-            model=settings.openai.model,
-            temperature=0.7,
-            api_key=api_key,
-            base_url=settings.openai.api_base,
-        )
+        llm_kwargs = {
+            "model": profile.model,
+            "temperature": 0.7,
+            "api_key": profile.api_key
+        }
+        if profile.api_base:
+            llm_kwargs["base_url"] = profile.api_base
+            
+        llm = ChatOpenAI(**llm_kwargs)
 
         prompt = (
             "请为下面的用户提问生成一个极简短的会话标题（不超过15个字）。\n"

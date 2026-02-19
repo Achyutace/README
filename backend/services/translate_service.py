@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 from core.config import settings
+from core.llm_provider import resolve_llm_profile, create_openai_client
 from utils.llm_simple import translate_text
 from core.database import db
 from repository.sql_repo import SQLRepository
@@ -26,31 +27,37 @@ class TranslateService:
     """
 
     def __init__(self,
-                 model: str = "qwen-plus",
+                 model: str = None,
                  temperature: float = 0.3,
-                 base_url: str = None):
+                 base_url: str = None,
+                 api_key: str = None):
         """
         Args:
-            model: 使用的模型
-            temperature: 温度参数（翻译任务建议较低）
-            base_url: OpenAI API 基础 URL（可选，用于代理或其他兼容服务）
+            model: 使用的模型 (可选，默认从 config 读取)
+            temperature: 温度参数
+            base_url: 请求级 API Base 覆盖
+            api_key: 请求级 API Key 覆盖
         """
-        self.model = model
+        # 1. 解析配置 (优先级: 参数 > config.models.translate > config.openai)
+        self.profile = resolve_llm_profile(
+            scene="translate",
+            api_key=api_key,
+            api_base=base_url,
+            model=model
+        )
+        
+        self.model = self.profile.model
         self.temperature = temperature
 
-        # 初始化 OpenAI 客户端
-        if settings.has_translate_key and HAS_OPENAI:
-            client_kwargs = {"api_key": settings.translate.api_key}
-            # 支持 base_url 参数或配置文件
-            if base_url or settings.translate.api_base:
-                client_kwargs["base_url"] = base_url or settings.translate.api_base
-
-            self.client = OpenAI(**client_kwargs)
+        # 2. 初始化客户端
+        if self.profile.is_available and HAS_OPENAI:
+            self.client = create_openai_client(self.profile)
             self.has_client = True
         else:
             self.client = None
             self.has_client = False
-            print("Warning: Translate API key not found. Translate service will use demo mode.")
+            if not self.profile.is_available:
+                print("Warning: Translate API key not found. Translate service will use demo mode.")
 
     def translate(self, text: str, context: str = None) -> str:
         """

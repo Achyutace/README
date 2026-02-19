@@ -12,7 +12,8 @@ import io
 from typing import Dict, List, Optional
 from pathlib import Path
 
-from config import settings
+from core.config import settings
+from core.llm_provider import resolve_llm_profile
 
 try:
     import fitz  # PyMuPDF
@@ -47,28 +48,31 @@ class ImageService:
     def __init__(self,
                  db=None,
                  cache_dir: str = None,
-                 model: str = "gpt-4o-mini"):
+                 model: str = None):
         """
         Args:
             db: 数据库实例
             cache_dir: 图片缓存目录
-            model: 用于图片分析的模型（需要支持vision）
+            model: 用于图片分析的模型（默认从 config 读取）
         """
         self.db = db
         self.cache_dir = cache_dir
-        self.model = model
+        
+        # 1. 解析配置
+        self.profile = resolve_llm_profile(scene="vision", model=model)
+        self.model = self.profile.model
 
         if cache_dir:
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
         # 初始化 LLM（用于图片分析）
-        if settings.has_openai_key and HAS_LANGCHAIN:
+        if self.profile.is_available and HAS_LANGCHAIN:
             llm_kwargs = {
-                "model": model,
-                "api_key": settings.openai.api_key
+                "model": self.model,
+                "api_key": self.profile.api_key
             }
-            if settings.openai.api_base:
-                llm_kwargs["base_url"] = settings.openai.api_base
+            if self.profile.api_base:
+                llm_kwargs["base_url"] = self.profile.api_base
             self.llm = ChatOpenAI(**llm_kwargs)
             self.has_llm = True
         else:

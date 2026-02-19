@@ -6,7 +6,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from typing import List, Dict, Any, Optional, Literal
 from utils.search_refine import clean_title, format_paper_response
-from config import settings
+from core.config import settings
 
 try:
     from tavily import TavilyClient
@@ -21,7 +21,6 @@ class WebSearchService:
     and academic paper search (ArXiv, Semantic Scholar).
     """
 
-    SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1"
     S2_SEARCH_FIELDS = "paperId,title,authors,abstract,year,venue,citationCount,url,externalIds"
 
     def __init__(self, tavily_api_key: Optional[str] = None):
@@ -72,6 +71,16 @@ class WebSearchService:
             adapter = HTTPAdapter(max_retries=retries)
             self._s2_session.mount('http://', adapter)
             self._s2_session.mount('https://', adapter)
+            
+            # Configure Proxies
+            proxies = {}
+            if settings.proxy.http:
+                proxies["http"] = settings.proxy.http
+            if settings.proxy.https:
+                proxies["https"] = settings.proxy.https
+            
+            if proxies:
+                self._s2_session.proxies.update(proxies)
             
             # Read API Key
             s2_key = settings.scientific.semantic_scholar_api_key if hasattr(settings, 'scientific') else None
@@ -219,7 +228,7 @@ class WebSearchService:
             if fields_of_study:
                 params["fieldsOfStudy"] = fields_of_study
 
-            url = f"{self.SEMANTIC_SCHOLAR_API}/paper/search"
+            url = f"{settings.scientific.semantic_scholar_api_url}/paper/search"
             
             response = session.get(url, params=params, timeout=10)
             response.raise_for_status()
@@ -252,7 +261,7 @@ class WebSearchService:
     def _search_s2_single(self, query: str) -> Optional[Dict]:
         """Internal helper to search a single paper by query (title or text snippet)"""
         try:
-            url = f"{self.SEMANTIC_SCHOLAR_API}/paper/search"
+            url = f"{settings.scientific.semantic_scholar_api_url}/paper/search"
             params = {
                 "query": clean_title(query),
                 "fields": self.S2_SEARCH_FIELDS,

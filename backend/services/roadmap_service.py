@@ -4,28 +4,18 @@ from datetime import datetime
 import httpx
 from openai import OpenAI
 
-from config import settings
+from core.config import settings
+from core.llm_provider import resolve_llm_profile, create_openai_client
 
 
 class MapService:
     def __init__(self):
-        # 初始化 OpenAI 客户端
-        client_kwargs = {}
+        # 1. 解析配置
+        self.profile = resolve_llm_profile(scene="roadmap")
 
-        if settings.has_openai_key:
-            client_kwargs["api_key"] = settings.openai.api_key
-
-        if settings.openai.api_base:
-            client_kwargs["base_url"] = settings.openai.api_base
-
-        # 支持代理（如果有）
-        proxy_url = settings.proxy.http or settings.proxy.https
-        if proxy_url:
-            http_client = httpx.Client(proxies=proxy_url)
-            client_kwargs["http_client"] = http_client
-
-        if settings.has_openai_key:
-            self.client = OpenAI(**client_kwargs)
+        # 2. 初始化客户端
+        if self.profile.is_available:
+            self.client = create_openai_client(self.profile)
         else:
             self.client = None
             
@@ -35,7 +25,7 @@ class MapService:
             try:
         
                 response = self.client.chat.completions.create(
-                    model="qwen-plus",
+                    model=self.profile.model,
                     messages=[
                         {
                             "role": "system",

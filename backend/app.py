@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from pathlib import Path
 from flask import Flask, request, jsonify, g, send_from_directory
@@ -88,7 +89,6 @@ app.rag_service = rag_service
 
 # (2) 翻译服务：负责调用 LLM 进行翻译
 translate_service = TranslateService(
-    model=settings.openai.model,
     temperature=0.3
 )
 app.translate_service = translate_service
@@ -96,9 +96,6 @@ app.translate_service = translate_service
 # (3) Agent 服务：负责聊天和智能问答
 agent_service = AcademicAgentService(
     rag_service=rag_service,
-    openai_api_key=settings.openai.api_key,
-    openai_api_base=settings.openai.api_base,
-    model=settings.openai.model
 )
 app.agent_service = agent_service
 
@@ -156,7 +153,7 @@ def before_request():
 
 # ==================== 5.5 Swagger UI ====================
 # 只有在开发模式下才注册 Swagger
-if settings.debug:  # 假设你的 settings 中有 debug 开关
+if os.environ.get("FLASK_ENV") == "development" or os.environ.get("FLASK_DEBUG") == "1":
     SWAGGER_URL = '/api/docs'
     API_URL = '/api/openapi.yaml'
     swaggerui_blueprint = get_swaggerui_blueprint(

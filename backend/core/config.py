@@ -2,7 +2,7 @@ import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 # Load config.yaml
 CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
@@ -15,14 +15,30 @@ def load_yaml_config(path: Path) -> Dict[str, Any]:
 
 _raw_config = load_yaml_config(CONFIG_PATH)
 
+
+# ==================== 配置模型 ====================
+
 class OpenAIConfig(BaseModel):
     api_key: str
     api_base: str
-    model: str = "gpt-4o"
+
+class SceneModelConfig(BaseModel):
+    """单个场景的模型配置（支持可选的独立 API 凭证）"""
+    model: str
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+
+class ModelsConfig(BaseModel):
+    """按场景分配模型"""
+    chat: SceneModelConfig = SceneModelConfig(model="qwen-plus")
+    translate: SceneModelConfig = SceneModelConfig(model="qwen-plus")
+    vision: SceneModelConfig = SceneModelConfig(model="gpt-4o-mini")
+    embedding: SceneModelConfig = SceneModelConfig(model="text-embedding-3-small")
+    roadmap: SceneModelConfig = SceneModelConfig(model="qwen-plus")
+
 
 class VectorStoreConfig(BaseModel):
     enable_qdrant: bool = True
-    
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: Optional[str] = None
     qdrant_prefer_grpc: bool = True
@@ -39,30 +55,74 @@ class CeleryConfig(BaseModel):
     broker_url: str = "redis://localhost:6379/0"
     result_backend: str = "redis://localhost:6379/1"
 
+
 class DatabaseConfig(BaseModel):
     url: str
+
 
 class ProxyConfig(BaseModel):
     http: Optional[str] = None
     https: Optional[str] = None
 
+
 class TavilyConfig(BaseModel):
     api_key: Optional[str] = None
 
+
 class ScientificConfig(BaseModel):
     semantic_scholar_api_key: Optional[str] = None
+    semantic_scholar_api_url: str = "https://api.semanticscholar.org/graph/v1"
 
-class TranslateConfig(BaseModel):
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
 
 class JWTConfig(BaseModel):
     secret: str = "change-me-in-config-yaml"
     access_expire_minutes: int = 30
     refresh_expire_days: int = 7
 
+
+# ==================== 解析辅助 ====================
+
+def _parse_scene_model(value) -> SceneModelConfig:
+    """解析场景模型配置，支持简写和详写两种格式"""
+    if isinstance(value, str):
+        # 简写: "qwen-plus"
+        return SceneModelConfig(model=value)
+    elif isinstance(value, dict):
+        # 详写: { model: "xxx", api_key: "...", api_base: "..." }
+        return SceneModelConfig(
+            model=value.get("model", "qwen-plus"),
+            api_key=value.get("api_key"),
+            api_base=value.get("api_base"),
+        )
+    return SceneModelConfig(model="qwen-plus")
+
+
+def _parse_models_config(raw: Dict[str, Any]) -> ModelsConfig:
+    """从 raw config 解析 models 块"""
+    models_raw = raw.get("models", {})
+    if not models_raw:
+        return ModelsConfig()
+
+    return ModelsConfig(
+        chat=_parse_scene_model(models_raw.get("chat", "qwen-plus")),
+        translate=_parse_scene_model(models_raw.get("translate", "qwen-plus")),
+        vision=_parse_scene_model(models_raw.get("vision", "gpt-4o-mini")),
+        embedding=_parse_scene_model(models_raw.get("embedding", "text-embedding-3-small")),
+        roadmap=_parse_scene_model(models_raw.get("roadmap", "qwen-plus")),
+    )
+
+
+# ==================== 主配置类 ====================
+
 class AppConfig:
     def __init__(self, raw: Dict[str, Any]):
+        # OpenAI (全局默认凭证)
+        oa_conf = raw.get("openai", {})
+        self.openai = OpenAIConfig(**oa_conf) if oa_conf else OpenAIConfig(api_key="", api_base="")
+
+        # Models (按场景分配)
+        self.models = _parse_models_config(raw)
+
         # Database
         db_conf = raw.get("database", {})
         self.database = DatabaseConfig(
@@ -86,20 +146,10 @@ class AppConfig:
         # Scientific
         scientific_conf = raw.get("scientific", {})
         self.scientific = ScientificConfig(
-            semantic_scholar_api_key=scientific_conf.get("semantic_scholar_api_key")
+            semantic_scholar_api_key=scientific_conf.get("semantic_scholar_api_key"),
+            semantic_scholar_api_url=scientific_conf.get("semantic_scholar_api_url", "https://api.semanticscholar.org/graph/v1")
         )
 
-        # Translate
-        trans_conf = raw.get("translate", {})
-        self.translate = TranslateConfig(
-            api_key=trans_conf.get("api_key"),
-            api_base=trans_conf.get("api_base")
-        )
-
-        # OpenAI
-        oa_conf = raw.get("openai", {})
-        self.openai = OpenAIConfig(**oa_conf) if oa_conf else None
-        
         # Vector Store
         vs_conf = raw.get("vector_store", {})
         self.vector_store = VectorStoreConfig(
@@ -141,9 +191,6 @@ class AppConfig:
     def has_openai_key(self) -> bool:
         return self.openai is not None and bool(self.openai.api_key)
 
-    @property
-    def has_translate_key(self) -> bool:
-        return self.translate is not None and bool(self.translate.api_key)
 
 # Global Instance
 settings = AppConfig(_raw_config)

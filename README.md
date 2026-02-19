@@ -24,7 +24,7 @@ cd frontend && npm install && npm run dev:mock
 
 ## 后端开发
 
-**前提：** Python 3.10+，以及获取 `config.yaml`（含云服务连接信息，不入库）。
+**前提：** Python 3.10+，以及获取 `config.yaml`（请复制 `config.yaml.example` 并填入 Key）。
 
 ```bash
 # Windows
