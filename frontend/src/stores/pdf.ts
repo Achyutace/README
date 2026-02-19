@@ -6,6 +6,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { PdfParagraph } from '../types'
+import type { PageSize } from '../types/pdf'
+import type { InternalLinkData } from '../api'
 
  // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
@@ -74,6 +76,10 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 所有文档的段落数据（用于翻译/定位等功能）
   const allParagraphs = ref<Record<string, PdfParagraph[]>>({})
+
+  // 页面尺寸数据（用于坐标转换等）
+  const pageSizesConstant = ref<PageSize | null>(null)
+  const pageSizesArray = ref<PageSize[] | null>(null)
 
   // 当前文档的段落（计算属性）
   const paragraphs = computed(() => {
@@ -147,6 +153,8 @@ export const usePdfStore = defineStore('pdf', () => {
   function goToPage(page: number) {
     if (page >= 1 && page <= totalPages.value) {
       currentPage.value = page
+    } else {
+      console.warn(`Invalid page number: ${page}, valid range: 1-${totalPages.value}`)
     }
   }
 
@@ -204,7 +212,12 @@ export const usePdfStore = defineStore('pdf', () => {
   // 从当前选择创建一个高亮并保存到当前文档
   function addHighlightFromSelection() {
     // 需要有选择信息、选中文本且存在当前文档 ID
-    if (!selectionInfo.value || !selectedText.value || !currentDocumentId.value) return
+    if (!selectionInfo.value || !selectedText.value || !currentDocumentId.value) {
+      if (!selectionInfo.value) console.warn('Cannot add highlight: no selection info')
+      if (!selectedText.value) console.warn('Cannot add highlight: no selected text')
+      if (!currentDocumentId.value) console.warn('Cannot add highlight: no document ID')
+      return
+    }
 
     const docId = currentDocumentId.value
     if (!allHighlights.value[docId]) {
@@ -248,23 +261,37 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 删除当前文档下的某条高亮
   function removeHighlight(id: string) {
-    if (!currentDocumentId.value) return
+    if (!currentDocumentId.value) {
+      console.warn('Cannot remove highlight: no current document')
+      return
+    }
 
     const docId = currentDocumentId.value
     if (allHighlights.value[docId]) {
+      const beforeLength = allHighlights.value[docId].length
       allHighlights.value[docId] = allHighlights.value[docId].filter(h => h.id !== id)
+      if (allHighlights.value[docId].length === beforeLength) {
+        console.warn(`Highlight ${id} not found in document ${docId}`)
+      }
+    } else {
+      console.warn(`No highlights found for document ${docId}`)
     }
     clearHighlightSelection()
   }
 
   // 更新某条高亮的颜色
   function updateHighlightColor(id: string, color: string) {
-    if (!currentDocumentId.value) return
+    if (!currentDocumentId.value) {
+      console.warn('Cannot update highlight color: no current document')
+      return
+    }
 
     const docId = currentDocumentId.value
     const highlight = allHighlights.value[docId]?.find(h => h.id === id)
     if (highlight) {
       highlight.color = color
+    } else {
+      console.warn(`Highlight ${id} not found in document ${docId} for color update`)
     }
   }
 
@@ -309,6 +336,12 @@ export const usePdfStore = defineStore('pdf', () => {
   // 获取指定页面对应的段落列表（用于显示翻译、跳转等）
   function getParagraphsByPage(page: number): PdfParagraph[] {
     return paragraphs.value.filter(p => p.page === page)
+  }
+
+  // 设置页面尺寸数据
+  function setPageSizes(constant: PageSize | null, array: PageSize[] | null) {
+    pageSizesConstant.value = constant
+    pageSizesArray.value = array
   }
 
   // ---------------------- 笔记预览卡片（小悬浮卡片） ----------------------
@@ -378,6 +411,64 @@ export const usePdfStore = defineStore('pdf', () => {
     smartRefCard.value.position = position
   }
 
+  // ---------------------- 内部链接弹窗 ----------------------
+  /** PDF 内部链接目标坐标 */
+  type DestinationCoords = {
+    page: number
+    x: number | null
+    y: number | null
+    zoom: number | null
+    type: string
+  }
+
+  const internalLinkPopup = ref<{
+    isVisible: boolean
+    destCoords: DestinationCoords | null
+    position: { x: number; y: number }
+    linkData: InternalLinkData | null
+    paragraphContent: string | null
+    isLoading: boolean
+    error: string | null
+  }>({
+    isVisible: false,
+    destCoords: null,
+    position: { x: 0, y: 0 },
+    linkData: null,
+    paragraphContent: null,
+    isLoading: false,
+    error: null
+  })
+
+  function openInternalLinkPopup(destCoords: DestinationCoords, position: { x: number; y: number }) {
+    internalLinkPopup.value = {
+      isVisible: true,
+      destCoords,
+      position,
+      linkData: null,
+      paragraphContent: null,
+      isLoading: false,
+      error: null
+    }
+  }
+
+  function closeInternalLinkPopup() {
+    internalLinkPopup.value.isVisible = false
+  }
+
+  function updateInternalLinkPopupPosition(position: { x: number; y: number }) {
+    internalLinkPopup.value.position = position
+  }
+
+  function setInternalLinkData(data: InternalLinkData | null, paragraphContent?: string, error?: string) {
+    internalLinkPopup.value.linkData = data
+    internalLinkPopup.value.paragraphContent = paragraphContent || null
+    internalLinkPopup.value.error = error || null
+  }
+
+  function setInternalLinkLoading(loading: boolean) {
+    internalLinkPopup.value.isLoading = loading
+  }
+
   // ---------------------- 导出 store 接口 ----------------------
   return {
     currentPdfUrl,
@@ -425,6 +516,10 @@ export const usePdfStore = defineStore('pdf', () => {
     paragraphs,
     setParagraphs,
     getParagraphsByPage,
+    // 页面尺寸
+    pageSizesConstant,
+    pageSizesArray,
+    setPageSizes,
     // 笔记预览卡片
     notePreviewCard,
     openNotePreviewCard,
@@ -435,5 +530,12 @@ export const usePdfStore = defineStore('pdf', () => {
     openSmartRefCard,
     closeSmartRefCard,
     updateSmartRefPosition,
+    // 内部链接弹窗
+    internalLinkPopup,
+    openInternalLinkPopup,
+    closeInternalLinkPopup,
+    updateInternalLinkPopupPosition,
+    setInternalLinkData,
+    setInternalLinkLoading,
   }
 })

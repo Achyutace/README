@@ -29,9 +29,15 @@ export function getPageSize(
     return pageSizesConstant
   }
   if (pageSizesArray) {
-    return pageSizesArray[pageNumber - 1] ?? { width: 612, height: 792 }
+    const size = pageSizesArray[pageNumber - 1]
+    if (!size) {
+      console.warn(`Page size not found for page ${pageNumber}, using default A4 size`)
+      return { width: 612, height: 792 }
+    }
+    return size
   }
   // 默认 A4 尺寸
+  console.warn('No page size data available, using default A4 size')
   return { width: 612, height: 792 }
 }
 
@@ -44,7 +50,14 @@ export function getScaledPageSize(
   pageSizesConstant: PageSize | null,
   pageSizesArray: PageSize[] | null
 ): PageSize {
-  const size = getPageSize(pageNumber, pageSizesConstant, pageSizesArray) || { width: 612, height: 792 }
+  const size = getPageSize(pageNumber, pageSizesConstant, pageSizesArray)
+  if (!size) {
+    console.warn(`Failed to get scaled page size for page ${pageNumber}, using default A4`)
+    return {
+      width: Math.floor(612 * scale),
+      height: Math.floor(792 * scale)
+    }
+  }
   return {
     width: Math.floor(size.width * scale),
     height: Math.floor(size.height * scale)
@@ -138,14 +151,20 @@ export function hexToRgba(color: string, alpha = 0.35): string {
   const hex = color.replace('#', '')
   const fallback = `rgba(246, 224, 94, ${alpha})`
 
-  if (hex.length !== 3 && hex.length !== 6) return fallback
+  if (hex.length !== 3 && hex.length !== 6) {
+    console.warn(`Invalid hex color format: ${color}, using fallback`)
+    return fallback
+  }
 
   const normalized = hex.length === 3
     ? hex.split('').map(ch => ch + ch).join('')
     : hex
 
   const intVal = Number.parseInt(normalized, 16)
-  if (Number.isNaN(intVal)) return fallback
+  if (Number.isNaN(intVal)) {
+    console.warn(`Failed to parse hex color: ${color}, using fallback`)
+    return fallback
+  }
 
   const r = (intVal >> 16) & 255
   const g = (intVal >> 8) & 255

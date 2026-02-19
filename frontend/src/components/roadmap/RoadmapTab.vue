@@ -95,6 +95,8 @@ async function loadRoadmap() {
     await aiStore.fetchRoadmap(libraryStore.currentDocument.id) 
     // 100ms 后超时，加载默认页面
     setTimeout(() => fitView(), 100)
+  } else {
+    console.warn('Cannot load roadmap: no current document selected')
   }
 }
 
@@ -104,6 +106,8 @@ watch(() => libraryStore.currentDocument?.id, (newId) => {
   if (newId) {
     selectedNode.value = null
     loadRoadmap()
+  } else {
+    console.warn('Current document cleared, roadmap will not be loaded')
   }
 })
 

@@ -217,8 +217,9 @@ export interface Note {
   note_type: string
   color: string
   position: any | null
-  created_time: string
-  updated_time: string
+  keywords: string[]  // 笔记关键词列表
+  createdAt: string
+  updatedAt: string
 }
 
 // 创建笔记请求体（前端调用时使用）
@@ -226,6 +227,7 @@ export interface CreateNoteRequest {
   pdfId: string
   title?: string
   content: string
+  keywords?: string[]  // 笔记关键词列表
   pageNumber?: number
   noteType?: string
   color?: string
@@ -236,7 +238,19 @@ export interface CreateNoteRequest {
 export interface UpdateNoteRequest {
   title?: string
   content: string
+  keywords?: string[]  // 笔记关键词列表
   color?: string
+}
+
+// 内部链接数据返回类型
+export interface InternalLinkData {
+  title: string
+  url: string
+  snippet: string
+  published_date: string
+  authors: string[]
+  source: string
+  valid: number  // 1 表示内容完整，0 表示有缺失项
 }
 
 // -----------------------------
@@ -425,6 +439,44 @@ export const chatSessionApi = {
     })
     return data
   },
+}
+
+// -----------------------------
+// 内部链接数据 API
+// -----------------------------
+
+export const linkApi = {
+  // 获取内部链接数据（发送 pdfId 和 paragraphId，返回论文信息）
+  getLinkData: async (pdfId: string, targetParagraphId: string): Promise<InternalLinkData> => {
+    // const defaultData: InternalLinkData = {
+    //   title: 'Attention Is All You Need',
+    //   url: 'https://arxiv.org/abs/1706.03762',
+    //   snippet: '这是一个示例论文的摘要片段，用于展示内部链接数据的结构。',
+    //   published_date: '2024-01-01',
+    //   authors: ['作者 A', '作者 B'],
+    //   source: 'arXiv',
+    //   valid: 1
+    // }
+    const defaultData: InternalLinkData = {
+      title: "",
+      url: '',
+      snippet: '',
+      published_date: '',
+      authors: [],
+      source: '',
+      valid: 0
+    }
+    try {
+      const { data } = await api.post<InternalLinkData>('/link/data', {
+        pdfId,
+        targetParagraphId
+      })
+      return data || defaultData
+    } catch (error) {
+      console.warn('Internal link search failed, returning default data', error)
+      return defaultData
+    }
+  }
 }
 
 // -----------------------------

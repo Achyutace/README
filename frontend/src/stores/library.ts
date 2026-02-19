@@ -84,6 +84,8 @@ export const useLibraryStore = defineStore('library', () => {
   function selectDocument(id: string) {
     if (documents.value.some(doc => doc.id === id)) {
       currentDocumentId.value = id
+    } else {
+      console.warn(`Document ${id} not found in library`)
     }
   }
 
@@ -92,6 +94,8 @@ export const useLibraryStore = defineStore('library', () => {
     const doc = documents.value.find(d => d.id === id)
     if (doc) {
       doc.pageCount = pageCount
+    } else {
+      console.warn(`Cannot update page count: Document ${id} not found`)
     }
   }
 

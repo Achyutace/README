@@ -37,7 +37,7 @@ import {
   CLICK_TIME_THRESHOLD,
   DRAG_DISTANCE_THRESHOLD
 } from '../../utils/PdfHelper'
-import { applyInterimScaleToPage } from '../../utils/PdfRender'
+import { applyInterimScaleToPage, fetchInternalLinkData } from '../../utils/PdfRender'
 import { useZoomAnchor } from '../../composables/useZoomAnchor'
 import { usePageRender } from '../../composables/usePageRender'
 import { usePdfSelection } from '../../composables/usePdfSelection'
@@ -45,7 +45,8 @@ import { useNotesLookup } from '../../composables/useNotesLookup'
 
 import TextSelectionTooltip from './TextSelectionTooltip.vue' 
 import TranslationPanel from './TranslationPanel.vue' 
-import NotePreviewCard from './NotePreviewCard.vue' 
+import NotePreviewCard from './NotePreviewCard.vue'
+import InternalLinkPopup from './InternalLinkPopup.vue' 
 
 GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -208,6 +209,11 @@ function setPageRef(pageNumber: number, el: HTMLElement | null) {
       linkLayer,
       highlightLayer
     })
+  } else {
+    console.warn(
+      `Failed to set page ref for page ${pageNumber}: missing required elements. ` +
+      `canvas: ${!!canvas}, textLayer: ${!!textLayer}, linkLayer: ${!!linkLayer}, highlightLayer: ${!!highlightLayer}`
+    )
   }
 }
 
@@ -301,6 +307,7 @@ async function preloadPageSizes(pdf: PDFDocumentProxy) {
   }
 
   if (allSameSize && firstSize) {
+    console.log(`All pages have the same size: ${firstSize.width}x${firstSize.height}. Using constant size optimization.`)
     pageSizesConstant.value = firstSize
     pageSizesArray.value = null
     pageHeightAccumulator.value = []
@@ -682,9 +689,39 @@ watch(
   }
 )
 
-// 监听内部链接跳转事件
-window.addEventListener('pdf-internal-link', ((event: CustomEvent<{ page: number }>) => {
-  pdfStore.goToPage(event.detail.page)
+// 监听内部链接点击事件
+window.addEventListener('pdf-internal-link', ((event: CustomEvent<{ 
+  destCoords: { page: number; x: number | null; y: number | null; zoom: number | null; type: string }
+  clickX: number
+  clickY: number 
+}>) => {
+  const { destCoords, clickX, clickY } = event.detail
+  // 显示弹窗而不是直接跳转，弹窗位置在点击位置右侧下方
+  const popupX = Math.min(clickX + 10, window.innerWidth - 280)
+  const popupY = Math.min(clickY + 10, window.innerHeight - 200)
+  pdfStore.openInternalLinkPopup(destCoords, { x: popupX, y: popupY })
+  
+  // 获取内部链接数据并更新弹窗
+  if (pdfStore.currentDocumentId) {
+    pdfStore.setInternalLinkLoading(true)
+    // 提供 getLinkLayer 函数用于在 valid=0 时搜索段落内的链接
+    const getLinkLayer = (page: number) => pageRefs.get(page)?.linkLayer ?? null
+    fetchInternalLinkData(pdfStore.currentDocumentId, destCoords, pdfStore.paragraphs, getLinkLayer, pdfDoc.value || undefined)
+      .then((result) => {
+        if (result) {
+          pdfStore.setInternalLinkData(result.linkData, result.paragraphContent || undefined)
+        } else {
+          pdfStore.setInternalLinkData(null, undefined, '获取数据失败')
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch internal link data:', err)
+        pdfStore.setInternalLinkData(null, undefined, '获取数据失败')
+      })
+      .finally(() => {
+        pdfStore.setInternalLinkLoading(false)
+      })
+  }
 }) as EventListener)
 
 // ------------------------- 生命周期 -------------------------
@@ -823,6 +860,7 @@ onBeforeUnmount(() => {
     
     <TranslationPanel />
     <NotePreviewCard />
+    <InternalLinkPopup />
   </div>
 </template>
 
