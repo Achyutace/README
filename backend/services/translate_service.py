@@ -14,6 +14,9 @@ from utils.llm_simple import translate_text
 from core.database import db
 from repository.sql_repo import SQLRepository
 from utils.pdf_engine import make_paragraph_id
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 try:
     from openai import OpenAI
@@ -57,7 +60,7 @@ class TranslateService:
             self.client = None
             self.has_client = False
             if not self.profile.is_available:
-                print("Warning: Translate API key not found. Translate service will use demo mode.")
+                logger.warning("Translate API key not found. Translate service will use demo mode.")
 
     def translate(self, text: str, context: str = None) -> str:
         """
@@ -85,7 +88,7 @@ class TranslateService:
                 temperature=self.temperature
             )
         except Exception as e:
-            print(f"Translation error: {e}")
+            logger.error(f"Translation error: {e}")
             return self._demo_translate(text)
 
     def translate_paragraph(self, file_hash: str, page_number: int, paragraph_index: int, original_text: str, force: bool = False) -> Dict:

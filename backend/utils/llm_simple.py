@@ -1,6 +1,10 @@
 from typing import Optional, Any
 import re
 
+from core.logging import get_logger
+
+logger = get_logger(__name__)
+
 def get_lang_name(lang_code: str) -> str:
     """获取语言显示名称"""
     lang_map = {
@@ -103,7 +107,7 @@ def invoke_llm_translation(
         return response.choices[0].message.content.strip()
     except Exception as e:
         # 记录错误时，不要 dump 整个 client 对象，防止泄漏其中的 api_key
-        print(f"LLM Translation Error: {str(e)}")
+        logger.error(f"LLM Translation Error: {str(e)}")
         return None
 
 def translate_text(
@@ -131,7 +135,7 @@ def translate_text(
         翻译后的文本
     """
     if not client:
-        print("Translate Error: Client is None")
+        logger.error("Translate Error: Client is None")
         return ""
     
     if not text or not text.strip():

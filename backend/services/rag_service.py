@@ -6,14 +6,11 @@ import uuid
 from typing import List, Dict, Optional, Any
 
 from core.config import settings
-from core.llm_provider import resolve_llm_profile
+from core.llm_provider import resolve_llm_profile, get_langchain_embeddings
 from ..repository.vector_repo import vector_repo
+from core.logging import get_logger
 
-try:
-    from langchain_openai import OpenAIEmbeddings
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
+logger = get_logger(__name__)
 
 class RAGService:
     """
@@ -37,22 +34,13 @@ class RAGService:
         self.profile = resolve_llm_profile(scene="embedding")
         
         # 嵌入模型
-        if HAS_OPENAI and self.profile.is_available:
-            embedding_kwargs = {
-                "model": self.profile.model
-            }
-            if self.profile.api_base:
-                embedding_kwargs["openai_api_base"] = self.profile.api_base
-
-            self.embeddings = OpenAIEmbeddings(
-                api_key=self.profile.api_key,
-                **embedding_kwargs
-            )
-            self.has_embeddings = True
+        if self.profile.is_available:
+            self.embeddings = get_langchain_embeddings(self.profile)
+            self.has_embeddings = True if self.embeddings else False
         else:
             self.embeddings = None
             self.has_embeddings = False
-            print("Warning: OpenAI embeddings not available. RAG will use demo mode.")
+            logger.warning("OpenAI embeddings not available. RAG will use demo mode.")
     
     def get_collection_stats(self, user_id: Optional[uuid.UUID] = None) -> Dict:
         """
@@ -233,7 +221,7 @@ class RAGService:
         try:
             query_vector = self.embeddings.embed_query(query)
         except Exception as e:
-            print(f"Embedding error: {e}")
+            logger.error(f"Embedding error: {e}")
             return []
         
         try:
@@ -272,7 +260,7 @@ class RAGService:
             return formatted_results
             
         except Exception as e:
-            print(f"Retrieval error: {e}")
+            logger.error(f"Retrieval error: {e}")
             return []
     
     def _demo_retrieve(self, query: str, user_id: Optional[uuid.UUID] = None, top_k: int = 4) -> List[Dict]:
@@ -327,7 +315,7 @@ class RAGService:
         try:
             query_vector = self.embeddings.embed_query(query)
         except Exception as e:
-            print(f"[retrieve_related_papers] Embedding error: {e}")
+            logger.error(f"[retrieve_related_papers] Embedding error: {e}")
             return []
 
         # 2. 构建过滤条件：仅 abstract 段落 + 用户范围 + 排除当前论文
@@ -358,7 +346,7 @@ class RAGService:
                     filters=fallback_filters,
                 )
         except Exception as e:
-            print(f"[retrieve_related_papers] search error: {e}")
+            logger.error(f"[retrieve_related_papers] search error: {e}")
             return []
 
         # 3. 按 file_hash 去重，只保留每篇论文的最高分结果

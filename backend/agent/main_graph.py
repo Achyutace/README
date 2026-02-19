@@ -11,17 +11,19 @@ Agent 主图 — Router + Expert 架构
 from typing import Dict, List, Optional
 from functools import partial
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
-from core.llm_provider import resolve_llm_profile
+from core.llm_provider import resolve_llm_profile, get_langchain_llm
 from agent.state import AgentState
 from agent.nodes.router import router_node
 from agent.nodes.paper_expert import paper_expert_node
 from agent.nodes.search_expert import search_expert_node
 
 from services.rag_service import RAGService
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class AcademicAgentService:
@@ -44,19 +46,10 @@ class AcademicAgentService:
         self.profile = resolve_llm_profile(scene="chat")
 
         if not self.profile.is_available:
-            print("Warning: OpenAI API key not found. Agent may fail.")
+            logger.warning("OpenAI API key not found. Agent may fail.")
 
         # 2. 初始化 LLM
-        # LangChain 的 ChatOpenAI 参数略有不同
-        llm_kwargs = {
-            "model": self.profile.model,
-            "temperature": temperature,
-            "api_key": self.profile.api_key
-        }
-        if self.profile.api_base:
-            llm_kwargs["base_url"] = self.profile.api_base
-
-        self.llm = ChatOpenAI(**llm_kwargs)
+        self.llm = get_langchain_llm(self.profile, temperature=temperature)
         self.workflow = self._build_workflow()
 
     # ==================== 工作流 ====================
@@ -92,7 +85,7 @@ class AcademicAgentService:
             resp = self.llm.invoke([HumanMessage(content=prompt)])
             return resp.content.strip().strip('"《》')
         except Exception as e:
-            print(f"[title] error: {e}")
+            logger.error(f"[title] error: {e}")
             return user_query[:20]
 
     def chat(self, user_query: str, user_id=None, paper_id=None, chat_history=None) -> Dict:
@@ -111,7 +104,7 @@ class AcademicAgentService:
                 },
             }
         except Exception as e:
-            import traceback; traceback.print_exc()
+            logger.exception("Chat error")
             return {"response": f"抱歉，出现错误：{e}", "citations": [], "steps": ["错误"], "context_used": {}}
 
     def stream_chat(self, user_query: str, user_id=None, paper_id=None, chat_history=None):
@@ -129,7 +122,7 @@ class AcademicAgentService:
                             "steps": node_state.get("steps", []),
                         }
         except Exception as e:
-            print(f"[stream] error: {e}")
+            logger.error(f"[stream] error: {e}")
             yield {"type": "error", "error": str(e)}
 
     def simple_chat(self, user_query: str, context_text=None, chat_history=None, system_prompt=None) -> Dict:
@@ -150,7 +143,7 @@ class AcademicAgentService:
             resp = self.llm.invoke(messages)
             return {"response": resp.content, "citations": [], "context_used": {"has_context": bool(context_text)}}
         except Exception as e:
-            import traceback; traceback.print_exc()
+            logger.exception("Simple chat error")
             return {"response": f"抱歉，出现错误：{e}", "citations": [], "context_used": {}}
 
 

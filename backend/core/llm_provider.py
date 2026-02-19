@@ -75,3 +75,56 @@ def create_openai_client(profile: LLMProfile):
         kwargs["http_client"] = httpx.Client(proxies=proxy_url)
 
     return OpenAI(**kwargs)
+
+
+def get_langchain_llm(profile: LLMProfile, temperature: float = 0.7):
+    """
+    创建 LangChain ChatOpenAI 实例，自动注入全局代理配置
+    """
+    from langchain_openai import ChatOpenAI
+    import httpx
+
+    if not profile.is_available:
+        return None
+
+    kwargs = {
+        "model": profile.model,
+        "temperature": temperature,
+        "api_key": profile.api_key,
+    }
+    
+    if profile.api_base:
+        kwargs["base_url"] = profile.api_base
+
+    # 注入全局代理
+    proxy_url = settings.proxy.http or settings.proxy.https
+    if proxy_url:
+        kwargs["http_client"] = httpx.Client(proxies=proxy_url)
+
+    return ChatOpenAI(**kwargs)
+
+
+def get_langchain_embeddings(profile: LLMProfile):
+    """
+    创建 LangChain OpenAIEmbeddings 实例，自动注入全局代理配置
+    """
+    from langchain_openai import OpenAIEmbeddings
+    import httpx
+
+    if not profile.is_available:
+        return None
+
+    kwargs = {
+        "model": profile.model,
+        "api_key": profile.api_key,
+    }
+
+    if profile.api_base:
+        kwargs["base_url"] = profile.api_base
+
+    # 注入全局代理
+    proxy_url = settings.proxy.http or settings.proxy.https
+    if proxy_url:
+        kwargs["http_client"] = httpx.Client(proxies=proxy_url)
+
+    return OpenAIEmbeddings(**kwargs)
