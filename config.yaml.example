@@ -1,6 +1,13 @@
 # README PDF Reader Configuration
 # Fill in your API keys below
 
+# App Configuration
+app:
+  env: "development" # "development" | "production"
+  debug: true
+  host: "0.0.0.0"
+  port: 5000
+
 # OpenAI / LLM Configuration (全局默认凭证)
 # 所有 LLM 服务默认使用此 API 凭证
 openai:

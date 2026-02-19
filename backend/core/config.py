@@ -22,6 +22,13 @@ class OpenAIConfig(BaseModel):
     api_key: str
     api_base: str
 
+class AppInfoConfig(BaseModel):
+    """应用总体配置"""
+    env: str = "development"
+    debug: bool = True
+    host: str = "0.0.0.0"
+    port: int = 5000
+
 class SceneModelConfig(BaseModel):
     """单个场景的模型配置（支持可选的独立 API 凭证）"""
     model: str
@@ -116,51 +123,75 @@ def _parse_models_config(raw: Dict[str, Any]) -> ModelsConfig:
 
 class AppConfig:
     def __init__(self, raw: Dict[str, Any]):
+        # 1. 应用基本信息
+        app_conf = raw.get("app", {})
+        self.env = app_conf.get("env", "development")
+        self.debug = app_conf.get("debug", self.env == "development")
+        self.app = AppInfoConfig(
+            env=self.env,
+            debug=self.debug,
+            host=app_conf.get("host", "0.0.0.0"),
+            port=app_conf.get("port", 5000),
+        )
+
+        def get_sec(key: str) -> Dict[str, Any]:
+            """辅助获取配置节，支持环境特定的覆盖"""
+            base = raw.get(key, {})
+            # 尝试从当前环境节中获取覆盖配置 (例如: production.database)
+            overrides = raw.get(self.env, {}).get(key, {})
+            if isinstance(base, dict) and isinstance(overrides, dict):
+                return {**base, **overrides}
+            return overrides if overrides is not None else (base if base is not None else {})
+
+        # 2. 从合并后的配置中解析各部分
+        
         # OpenAI (全局默认凭证)
-        oa_conf = raw.get("openai", {})
+        oa_conf = get_sec("openai")
         self.openai = OpenAIConfig(**oa_conf) if oa_conf else OpenAIConfig(api_key="", api_base="")
 
         # Models (按场景分配)
-        self.models = _parse_models_config(raw)
+        models_raw = get_sec("models")
+        self.models = _parse_models_config({"models": models_raw})
 
         # Database
-        db_conf = raw.get("database", {})
+        db_conf = get_sec("database")
         self.database = DatabaseConfig(
             url=db_conf.get("url", "postgresql://user:password@localhost:5432/paper_agent_db")
         )
         self.DATABASE_URL = self.database.url
 
         # Proxy
-        proxy_conf = raw.get("proxy", {})
+        proxy_conf = get_sec("proxy")
         self.proxy = ProxyConfig(
             http=proxy_conf.get("http"),
             https=proxy_conf.get("https")
         )
 
         # Tavily
-        tavily_conf = raw.get("tavily", {})
+        tavily_conf = get_sec("tavily")
         self.tavily = TavilyConfig(
             api_key=tavily_conf.get("api_key")
         )
 
         # Scientific
-        scientific_conf = raw.get("scientific", {})
+        scientific_conf = get_sec("scientific")
         self.scientific = ScientificConfig(
             semantic_scholar_api_key=scientific_conf.get("semantic_scholar_api_key"),
             semantic_scholar_api_url=scientific_conf.get("semantic_scholar_api_url", "https://api.semanticscholar.org/graph/v1")
         )
 
         # Vector Store
-        vs_conf = raw.get("vector_store", {})
+        vs_conf = get_sec("vector_store")
+        qdrant_conf = vs_conf.get("qdrant", {})
         self.vector_store = VectorStoreConfig(
             enable_qdrant=vs_conf.get("enable_qdrant", True),
-            qdrant_url=vs_conf.get("qdrant", {}).get("url", "http://localhost:6333"),
-            qdrant_api_key=vs_conf.get("qdrant", {}).get("api_key"),
-            qdrant_prefer_grpc=vs_conf.get("qdrant", {}).get("prefer_grpc", True),
+            qdrant_url=qdrant_conf.get("url", "http://localhost:6333"),
+            qdrant_api_key=qdrant_conf.get("api_key"),
+            qdrant_prefer_grpc=qdrant_conf.get("prefer_grpc", True),
         )
 
         # COS
-        cos_conf = raw.get("cos", {})
+        cos_conf = get_sec("cos")
         self.cos = COSConfig(
             enabled=cos_conf.get("enabled", False),
             secret_id=cos_conf.get("secret_id", ""),
@@ -171,20 +202,19 @@ class AppConfig:
         )
 
         # Celery
-        celery_conf = raw.get("celery", {})
+        celery_conf = get_sec("celery")
         self.celery = CeleryConfig(
             broker_url=celery_conf.get("broker_url", "redis://localhost:6379/0"),
             result_backend=celery_conf.get("result_backend", "redis://localhost:6379/1"),
         )
 
         # JWT
-        jwt_conf = raw.get("jwt", {})
+        jwt_conf = get_sec("jwt")
         self.jwt = JWTConfig(
             secret=jwt_conf.get("secret", "change-me-in-config-yaml"),
-            access_expire_minutes=jwt_conf.get("access_expire_minutes", 30),
+            access_expire_minutes=jwt_conf.get("access_expire_minutes", 3000),
             refresh_expire_days=jwt_conf.get("refresh_expire_days", 7),
         )
-        # 便捷属性
         self.jwt_secret = self.jwt.secret
 
     @property

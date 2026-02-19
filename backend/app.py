@@ -153,7 +153,7 @@ def before_request():
 
 # ==================== 5.5 Swagger UI ====================
 # 只有在开发模式下才注册 Swagger
-if os.environ.get("FLASK_ENV") == "development" or os.environ.get("FLASK_DEBUG") == "1":
+if settings.env == "development" or settings.debug:
     SWAGGER_URL = '/api/docs'
     API_URL = '/api/openapi.yaml'
     swaggerui_blueprint = get_swaggerui_blueprint(
@@ -210,7 +210,9 @@ def health_check():
 # ==================== 8. 启动入口 ====================
 
 if __name__ == '__main__':
-    # 开发模式启动
-    print(f" Server running at http://localhost:5000")
+    # 获取配置中的主机和端口
+    host = settings.app.host
+    port = settings.app.port
+    print(f" Server running at http://{host}:{port}")
     print(f" Storage Root: {STORAGE_ROOT}")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=settings.debug, host=host, port=port)

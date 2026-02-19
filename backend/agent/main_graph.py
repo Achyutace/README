@@ -14,7 +14,6 @@ from functools import partial
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
-from langchain_community.chat_models import ChatOpenAI
 
 from core.llm_provider import resolve_llm_profile
 from agent.state import AgentState
