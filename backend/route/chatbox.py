@@ -6,7 +6,7 @@ chatbox.py
 import json
 import uuid
 from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app, g
-from flask_jwt_extended import jwt_required
+from core.security import jwt_required
 from tasks.chat_tasks import generate_session_title_task
 from core.logging import get_logger
 

@@ -2,7 +2,7 @@
 高亮路由：保存/获取/删除/更新高亮
 """
 from flask import Blueprint, request, jsonify, current_app, g
-from flask_jwt_extended import jwt_required
+from core.security import jwt_required
 from route.utils import HighlightLogic
 
 # 定义蓝图

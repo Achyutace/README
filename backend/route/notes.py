@@ -7,7 +7,7 @@
 """
 import json
 from flask import Blueprint, request, jsonify, current_app, g
-from flask_jwt_extended import jwt_required
+from core.security import jwt_required
 
 # 定义蓝图
 notes_bp = Blueprint('notes', __name__, url_prefix='/api/notes')

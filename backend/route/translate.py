@@ -4,7 +4,7 @@
 2. 选中文本翻译 (带上下文)
 """
 from flask import Blueprint, request, jsonify, current_app, g
-from flask_jwt_extended import jwt_required
+from core.security import jwt_required
 from route.utils import parse_paragraph_id
 from utils.pdf_engine import make_paragraph_id
 from core.logging import get_logger

@@ -2,12 +2,13 @@ from datetime import timedelta
 from pathlib import Path
 from flask import Flask, request, jsonify, g, send_from_directory
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
+from flask_jwt_extended import JWTManager
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from core.config import settings
 from core.exceptions import APIError
 from core.logging import setup_logging, get_logger
+from core.security import try_get_current_user_id
 # TODO：自动化测试
 
 # ==================== 0. 全局日志配置 ====================
@@ -121,7 +122,6 @@ def before_request():
     3. 公开接口不携带 JWT 时不设置 g.user_id，由各路由自行判断
     4. 受保护接口由 @jwt_required() 装饰器确保 g.user_id 存在
     """
-    import uuid as _uuid
     from core.database import SessionLocal
     from repository.sql_repo import SQLRepository
 
@@ -129,14 +129,7 @@ def before_request():
         return
 
     # ---------- 1. 从 JWT 提取用户身份 ----------
-    user_uuid = None
-    try:
-        verify_jwt_in_request(optional=True)
-        identity = get_jwt_identity()
-        if identity:
-            user_uuid = _uuid.UUID(identity)
-    except Exception:
-        pass
+    user_uuid = try_get_current_user_id()
 
     # 挂载到 g（如果解析成功）
     if user_uuid:

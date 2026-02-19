@@ -3,7 +3,7 @@ readme/
 │   ├── core/               
 │   │   ├── config.py               # 读取 config.yaml, 管理 API Keys
 │   │   ├── database.py             # 数据库初始化连接: PostgreSQL(主库), Qdrant(向量库)
-│   │   ├── security.py             # JWT 校验, 用户鉴权
+│   │   ├── security.py             # JWT 校验 & 用户鉴权
 │   │   ├── exceptions.py           # 自定义异常，发送给前端
 │   │   └── logging.py              # 统一日志配置
 │   |

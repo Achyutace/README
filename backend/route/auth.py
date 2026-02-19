@@ -5,15 +5,15 @@
 """
 
 from flask import Blueprint, request, jsonify, g
-from flask_jwt_extended import (
-    create_access_token,
-    create_refresh_token,
-    decode_token as jwt_decode_token,
-    jwt_required,
-)
 from core.database import SessionLocal
 from repository.sql_repo import SQLRepository
-from utils.jwt_handler import hash_password, verify_password
+from core.security import (
+    hash_password,
+    verify_password,
+    create_tokens,
+    decode_refresh_token,
+    jwt_required,
+)
 
 # 定义蓝图
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
@@ -69,8 +69,7 @@ def register():
         user = repo.create_user(username=username, email=email, password_hash=pwd_hash)
 
         # 签发令牌
-        access_token = create_access_token(identity=str(user.id))
-        refresh_token = create_refresh_token(identity=str(user.id))
+        tokens = create_tokens(str(user.id))
 
         return jsonify({
             'message': 'Registration successful',
@@ -79,8 +78,7 @@ def register():
                 'username': user.username,
                 'email': user.email,
             },
-            'accessToken': access_token,
-            'refreshToken': refresh_token,
+            **tokens,
         }), 201
 
     finally:
@@ -123,8 +121,7 @@ def login():
             return jsonify({'code': 'INVALID_CREDENTIALS', 'error': 'Invalid email or password'}), 401
 
         # 签发令牌
-        access_token = create_access_token(identity=str(user.id))
-        refresh_token = create_refresh_token(identity=str(user.id))
+        tokens = create_tokens(str(user.id))
 
         return jsonify({
             'message': 'Login successful',
@@ -133,8 +130,7 @@ def login():
                 'username': user.username,
                 'email': user.email,
             },
-            'accessToken': access_token,
-            'refreshToken': refresh_token,
+            **tokens,
         })
 
     finally:
@@ -163,8 +159,7 @@ def refresh():
 
     refresh_token = data['refreshToken']
 
-    payload = jwt_decode_token(refresh_token)
-    user_id = payload['sub']
+    user_id = decode_refresh_token(refresh_token)
 
     # 验证用户仍然存在
     import uuid as _uuid
@@ -178,10 +173,10 @@ def refresh():
         db.close()
 
     # 签发新的 Access Token
-    new_access_token = create_access_token(identity=str(user.id))
+    tokens = create_tokens(str(user.id))
 
     return jsonify({
-        'accessToken': new_access_token,
+        'accessToken': tokens['accessToken'],
     })
 
 

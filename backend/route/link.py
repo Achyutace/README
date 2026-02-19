@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, g
-from flask_jwt_extended import jwt_required
+from core.security import jwt_required
 from services.websearch_service import web_search_service
 from utils.pdf_engine import parse_paragraph_id as _parse_paragraph_id
 from core.exceptions import NotFoundError
