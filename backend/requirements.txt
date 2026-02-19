@@ -3,8 +3,11 @@ flask==3.0.0
 flask-cors==4.0.0
 werkzeug==3.0.1
 
+# Authentication
+flask-jwt-extended==4.7.1
+bcrypt==4.1.2
+
 # Utilities & File Processing
-python-dotenv==1.0.0
 PyMuPDF==1.23.7
 Pillow==10.2.0
 
@@ -16,7 +19,7 @@ langchain-community==0.3.0
 langgraph==0.3.0
 
 # Vector Database
-chromadb==0.4.22
+qdrant-client>=1.7.0
 
 # Tools & Agents
 tavily-python==0.3.3
@@ -31,3 +34,26 @@ scikit-learn==1.4.0
 
 # Network
 httpx==0.27.0
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.25
+alembic==1.13.1
+
+# Swagger UI
+flask-swagger-ui==4.11.1
+
+# Object Storage
+cos-python-sdk-v5==1.9.30
+
+# Async Task Queue
+celery==5.3.0
+redis==5.0.0
+
+# Graph Logic
+networkx==3.2.1
+
+pyyaml==6.0.2
+
+# docs
+apiflask==3.0.2

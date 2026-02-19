@@ -1,0 +1,218 @@
+# Chat 相关 Schema
+
+Citation:
+  type: object
+  description: RAG 检索引用源
+  properties:
+    source_type:
+      type: string
+      description: 引用类型
+      enum: [vector, graph]
+    id:
+      type: string
+      description: 引用源ID
+    text:
+      type: string
+      description: 引用文本片段
+    score:
+      type: number
+      format: float
+      description: 相似度分数
+    name:
+      type: string
+      description: 实体名称 (graph 类型)
+
+MessageRequest:
+  type: object
+  required:
+    - message
+    - sessionId
+  properties:
+    message:
+      type: string
+      description: 用户消息内容
+      example: "你好，我是小智，有什么可以帮你的吗？"
+    sessionId:
+      type: string
+      format: uuid
+      description: 会话ID
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    pdfId:
+      type: string
+      description: 关联的PDF文件Hash，不传则为全局对话
+
+# ---------- 响应 ----------
+
+NewSessionResponse:
+  type: object
+  properties:
+    sessionId:
+      type: string
+      format: uuid
+      description: 新生成的会话ID（此时尚未写库，懒创建）
+    title:
+      type: string
+      example: "新对话"
+    isNew:
+      type: boolean
+      example: true
+    messageCount:
+      type: integer
+      example: 0
+
+ChatResponse:
+  type: object
+  properties:
+    response:
+      type: string
+      description: AI 生成的回答
+      example: "这是一篇关于人工智能的文章，人工智能是一种能够模拟人类智能的技术，它能够通过学习、推理和决策来完成各种任务。"
+    citations:
+      type: array
+      description: RAG 引用来源列表
+      items:
+        $ref: '#/Citation'
+    steps:
+      type: array
+      description: Agent 执行步骤记录
+      example: ["1. 检索相关信息", "2. 生成回答"]
+      items:
+        type: string
+    context_used:
+      type: object
+      description: 上下文使用统计
+      properties:
+        local_chunks:
+          type: integer
+        external_sources:
+          type: integer
+    sessionId:
+      type: string
+      format: uuid
+
+StreamEvent:
+  type: object
+  description: SSE 流式事件，type 决定数据结构
+  properties:
+    type:
+      type: string
+      enum: [step, final, error]
+      description: "step: 中间步骤; final: 最终结果; error: 错误"
+    step:
+      type: string
+      description: 当前步骤描述 (type=step)
+      example: "检索相关信息"
+    response:
+      type: string
+      description: 最终回答 (type=final)
+      example: "这是一篇关于人工智能的文章，人工智能是一种能够模拟人类智能的技术，它能够通过学习、推理和决策来完成各种任务。"
+    citations:
+      type: array
+      description: 引用列表 (type=final)
+      items:
+        $ref: '#/Citation'
+      example: [
+        {
+          "source_type": "vector",
+          "id": "123e4567-e89b-12d3-a456-426614174000",
+          "text": "人工智能是一种能够模拟人类智能的技术，它能够通过学习、推理和决策来完成各种任务。",
+          "score": 0.95
+        }
+      ]
+    steps:
+      type: array
+      description: 全部执行步骤 (type=final)
+      items:
+        type: string  
+      example: ["1. 检索相关信息", "2. 生成回答"]
+    error:
+      type: string
+      description: 错误信息 (type=error)
+      example: "检索相关信息失败"
+
+Session:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    pdfId:
+      type: string
+      description: 关联的PDF文件Hash
+    title:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+SessionListResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    sessions:
+      type: array
+      items:
+        $ref: '#/Session'
+    total:
+      type: integer
+
+Message:
+  type: object
+  description: 消息对象，可以参考backend/services/chat_service.py#format_messages
+  properties:
+    id:
+      type: integer
+      description: 消息ID
+    role:
+      type: string
+      enum: [user, assistant]
+    content:
+      type: string
+    citations:
+      type: array
+      items:
+        $ref: '#/Citation'
+    timestamp:
+      type: string
+      format: date-time
+
+SessionMessagesResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    sessionId:
+      type: string
+      format: uuid
+    messages:
+      type: array
+      items:
+        $ref: '#/Message'
+    total:
+      type: integer
+
+DeleteSessionResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    sessionId:
+      type: string
+      format: uuid
+    message:
+      type: string
+
+UpdateTitleResponse:
+  type: object
+  properties:
+    success:
+      type: boolean
+    sessionId:
+      type: string
+      format: uuid
+    title:
+      type: string

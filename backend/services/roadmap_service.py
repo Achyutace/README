@@ -19,7 +19,7 @@ class MapService:
             client_kwargs["base_url"] = settings.openai.api_base
 
         # 支持代理（如果有）
-        proxy_url = os.getenv("http_proxy") or os.getenv("https_proxy")
+        proxy_url = settings.proxy.http or settings.proxy.https
         if proxy_url:
             http_client = httpx.Client(proxies=proxy_url)
             client_kwargs["http_client"] = http_client

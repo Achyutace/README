@@ -1,0 +1,44 @@
+# 所有接口需要 JWT 认证 (require_auth)
+
+data:
+  post:
+    tags: [Link]
+    summary: 智能引用功能
+    security:
+      - BearerAuth: []
+    description: |
+      解析段落 ID → 提取段落原文 → 调用 Semantic Scholar 搜索匹配的论文。
+      解析段落 ID：PDF 里的蓝色 [Vaswani et al., 2017] 是一个 PDF annotation（subtype: 'Link'），带有一个 dest 指向参考文献页的坐标。前端处理乘paragraph_id发送回后端。
+      用于前端点击引用链接时展示被引论文的元信息。
+      前端点击引用链接时，会调用这个接口，传入pdfId和targetParagraphId，然后后端会调用Semantic Scholar搜索论文信息，然后返回前端。
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/link.yaml#/LinkDataRequest'
+    responses:
+      200:
+        description: 论文信息（未找到时 valid=0，其余字段为空）
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/link.yaml#/LinkDataResponse'
+      400:
+        description: 缺少 pdfId / targetParagraphId 或段落 ID 格式错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      404:
+        description: PDF 文件不存在或段落内容为空
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

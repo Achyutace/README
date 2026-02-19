@@ -1,15 +1,12 @@
 """
-RAG Service - 为单篇论文提供上下文检索
+RAG Service - 为用户论文库提供上下文检索
 """
-import os
 import re
-import hashlib
-from typing import List, Dict, Optional
+import uuid
+from typing import List, Dict, Optional, Any
 
 from config import settings
-
-# 禁用 ChromaDB 遥测以避免错误
-os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+from ..repository.vector_repo import vector_repo
 
 try:
     from langchain_openai import OpenAIEmbeddings
@@ -17,41 +14,26 @@ try:
 except ImportError:
     HAS_OPENAI = False
 
-try:
-    from langchain_community.vectorstores import Chroma
-    HAS_CHROMA = True
-except ImportError:
-    HAS_CHROMA = False
-
-try:
-    import fitz  # PyMuPDF
-    HAS_FITZ = True
-except ImportError:
-    HAS_FITZ = False  
-
 class RAGService:
     """
     RAG 服务
-
-    - index_paper: 索引论文（从PDF提取文本并存储）
+    
+    - index_paper_from_db: 从数据库段落索引论文
     - store_chunks: 存储文本块到向量库
     - retrieve: 根据查询检索相关文本
     - delete_paper: 删除论文向量数据
     - check_exists: 检查论文是否已存储
     - get_collection_stats: 获取统计信息
-    - calculate_file_hash: 计算文件哈希值
     """
     
+    COLLECTION_NAME = "paper_collection"
+
     def __init__(self, 
-                 chroma_dir: str = "./storage/chroma_db",
                  api_base: str = None):
         """
         Args:
-            chroma_dir: Chroma 数据库目录
             api_base: OpenAI API 基础 URL (可选,例如使用代理或其他兼容服务)
         """
-        self.chroma_dir = chroma_dir
-        
         # 嵌入模型
         if HAS_OPENAI and settings.has_openai_key:
             embedding_kwargs = {
@@ -69,225 +51,57 @@ class RAGService:
             self.embeddings = None
             self.has_embeddings = False
             print("Warning: OpenAI embeddings not available. RAG will use demo mode.")
-        
-        # 确保 Chroma 目录存在
-        os.makedirs(chroma_dir, exist_ok=True)
-        
-        # 内存缓存（用于 demo 模式或备份）
-        self._paper_cache: Dict[str, Dict] = {}
     
-    @staticmethod
-    def calculate_file_hash(file_path: str) -> str:
-        """
-        计算文件的 SHA256 哈希值
-        
-        Args:
-            file_path: 文件路径
-            
-        Returns:
-            文件的 SHA256 哈希值
-        """
-        sha256_hash = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
-        return sha256_hash.hexdigest()
-    
-    def index_paper(self, pdf_path: str, paper_id: str, user_id: str = "default") -> Dict:
-        """
-        索引论文 - 从 PDF 提取文本并存储到向量库
-        
-        Args:
-            pdf_path: PDF 文件路径
-            paper_id: 论文 ID
-            user_id: 用户 ID
-            
-        Returns:
-            {
-                'success': bool,
-                'message': str,
-                'chunks_created': int,
-                'file_hash': str
-            }
-        """
-        try:
-            # 计算文件哈希
-            file_hash = self.calculate_file_hash(pdf_path)
-            
-            # 从 PDF 提取文本块
-            chunks = self._extract_chunks_from_pdf(pdf_path)
-            
-            if not chunks:
-                return {
-                    'success': False,
-                    'message': 'Failed to extract text from PDF',
-                    'chunks_created': 0,
-                    'file_hash': file_hash
-                }
-            
-            # 存储到向量库
-            result = self.store_chunks(file_hash, chunks)
-            
-            # 缓存元数据
-            self._paper_cache[paper_id] = {
-                'file_hash': file_hash,
-                'user_id': user_id,
-                'chunks_count': len(chunks)
-            }
-            
-            return {
-                'success': result['success'],
-                'message': result['message'],
-                'chunks_created': result.get('chunks_count', 0),
-                'file_hash': file_hash
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'message': f'Error indexing paper: {str(e)}',
-                'chunks_created': 0,
-                'file_hash': ''
-            }
-    
-    def _extract_chunks_from_pdf(self, pdf_path: str, chunk_size: int = 500) -> List[Dict]:
-        """
-        从 PDF 提取文本块
-        
-        Args:
-            pdf_path: PDF 文件路径
-            chunk_size: 每个块的大约字符数
-            
-        Returns:
-            文本块列表
-        """
-        chunks = []
-        
-        if HAS_FITZ:
-            try:
-                doc = fitz.open(pdf_path)
-                for page_num, page in enumerate(doc, 1):
-                    text = page.get_text()
-                    if not text.strip():
-                        continue
-                    
-                    # 按段落分割
-                    paragraphs = text.split('\n\n')
-                    current_chunk = ""
-                    current_section = "content"
-                    
-                    for para in paragraphs:
-                        para = para.strip()
-                        if not para:
-                            continue
-                        
-                        # 检测章节标题
-                        if self._is_section_header(para):
-                            if current_chunk:
-                                chunks.append({
-                                    'content': current_chunk,
-                                    'page': page_num,
-                                    'section': current_section
-                                })
-                                current_chunk = ""
-                            current_section = para.lower()
-                        
-                        current_chunk += para + "\n\n"
-                        
-                        # 如果块足够大，创建新块
-                        if len(current_chunk) >= chunk_size:
-                            chunks.append({
-                                'content': current_chunk.strip(),
-                                'page': page_num,
-                                'section': current_section
-                            })
-                            current_chunk = ""
-                    
-                    # 处理剩余内容
-                    if current_chunk.strip():
-                        chunks.append({
-                            'content': current_chunk.strip(),
-                            'page': page_num,
-                            'section': current_section
-                        })
-                
-                doc.close()
-            except Exception as e:
-                print(f"Error extracting PDF with PyMuPDF: {e}")
-        
-        return chunks
-    
-    def _is_section_header(self, text: str) -> bool:
-        """检测是否为章节标题"""
-        headers = [
-            'abstract', 'introduction', 'related work', 'background',
-            'method', 'methodology', 'approach', 'experiment', 'results',
-            'discussion', 'conclusion', 'references', 'acknowledgment'
-        ]
-        text_lower = text.lower().strip()
-        for header in headers:
-            if re.match(rf'^(\d+\.?\s*)?{header}s?$', text_lower):
-                return True
-        return False
-    
-    def get_collection_stats(self, user_id: str = "default") -> Dict:
+    def get_collection_stats(self, user_id: Optional[uuid.UUID] = None) -> Dict:
         """
         获取知识库统计信息
         
         Args:
-            user_id: 用户 ID
+            user_id: 用户 ID (UUID)
             
         Returns:
             {
                 'collection_name': str,
-                'total_chunks': int,
-                'papers_indexed': int
+                'total_chunks': int
             }
         """
-        try:
-            # 统计缓存中的论文
-            papers_count = len([p for p in self._paper_cache.values() 
-                              if p.get('user_id') == user_id or user_id == 'default'])
+        if not vector_repo.is_available:
+            return {
+                'collection_name': self.COLLECTION_NAME,
+                'total_chunks': 0,
+                'error': 'Vector database not available'
+            }
             
-            total_chunks = sum(p.get('chunks_count', 0) 
-                             for p in self._paper_cache.values()
-                             if p.get('user_id') == user_id or user_id == 'default')
+        try:
+            filters = {'user_ids': str(user_id)} if user_id else None
+            total_chunks = vector_repo.count(self.COLLECTION_NAME, filters)
             
             return {
-                'collection_name': f'user_{user_id}',
+                'collection_name': self.COLLECTION_NAME,
                 'total_chunks': total_chunks,
-                'papers_indexed': papers_count
+                'user_id': str(user_id) if user_id else 'all'
             }
         except Exception as e:
             return {
-                'collection_name': f'user_{user_id}',
+                'collection_name': self.COLLECTION_NAME,
                 'total_chunks': 0,
-                'papers_indexed': 0,
                 'error': str(e)
             }
     
     def store_chunks(self, 
                      file_hash: str, 
-                     chunks: List[Dict]) -> Dict:
+                     chunks: List[Dict],
+                     user_id: Optional[uuid.UUID] = None) -> Dict:
         """
         存储文本块到向量库
         
         Args:
             file_hash: PDF 文件哈希值
-            chunks: 文本块列表，每个元素格式：
-                {
-                    'content': str,      # 文本内容（必需）
-                    'page': int,         # 页码（必需）
-                    'section': str,      # 章节类型（可选，默认 'content'）
-                    'metadata': Dict     # 其他元数据（可选）
-                }
+            chunks: 文本块列表
+            user_id: 用户 ID
         
         Returns:
-            {
-                'success': bool,
-                'message': str,
-                'chunks_count': int
-            }
+            Dict: 结果
         """
         try:
             if not chunks:
@@ -296,8 +110,8 @@ class RAGService:
                     'message': 'No chunks provided'
                 }
             
-            # 如果没有 embeddings，使用 demo 模式
-            if not self.has_embeddings or not HAS_CHROMA:
+            # 如果没有 embeddings 或 vector_repo 不可用，使用 demo 模式
+            if not self.has_embeddings or not vector_repo.is_available:
                 return {
                     'success': True,
                     'message': f'Demo mode: {len(chunks)} chunks cached (not persisted)',
@@ -317,7 +131,8 @@ class RAGService:
                     'file_hash': file_hash,  # 使用 file_hash 
                     'page': chunk.get('page', 0),
                     'section': chunk.get('section', 'content'),
-                    'chunk_index': i
+                    'chunk_index': i,
+                    'page_content': chunk['content'] # 存入 payload 以便检索时获取
                 }
                 # 合并额外的元数据
                 if 'metadata' in chunk:
@@ -326,19 +141,52 @@ class RAGService:
                 metadatas.append(meta)
                 ids.append(f"{file_hash}_chunk_{i}")
             
-            # 先删除旧数据
-            self._delete_from_chroma(file_hash)
+            user_id_str = str(user_id) if user_id else "public"
             
-            # 存储到 Chroma
-            vectorstore = Chroma(
-                collection_name=f"paper_{file_hash[:16]}",  # 使用前16位避免名称过长
-                embedding_function=self.embeddings,
-                persist_directory=self.chroma_dir
-            )
+            # Ensure collection exists
+            vector_repo.create_collection(self.COLLECTION_NAME)
+
+            # Check if vectors already exist for this file (globally)
+            if vector_repo.count(self.COLLECTION_NAME, {'file_hash': file_hash}) > 0:
+                # Append user_id to existing vectors
+                points = vector_repo.scroll(self.COLLECTION_NAME, {'file_hash': file_hash}, limit=1)
+                if points:
+                    current_payload = points[0].payload
+                    existing_users = current_payload.get('user_ids', [])
+                    if not isinstance(existing_users, list):
+                        existing_users = [str(existing_users)] if existing_users else []
+                    
+                    if user_id_str not in existing_users:
+                        existing_users.append(user_id_str)
+                        vector_repo.set_payload(
+                            self.COLLECTION_NAME, 
+                            {'user_ids': existing_users}, 
+                            filters={'file_hash': file_hash}
+                        )
+                        return {
+                            'success': True,
+                            'message': f'Updated access for user {user_id_str} on file {file_hash}',
+                            'chunks_count': len(chunks)
+                        }
+                    else:
+                        return {
+                            'success': True,
+                            'message': 'User already has access',
+                            'chunks_count': len(chunks)
+                        }
             
-            vectorstore.add_texts(
-                texts=texts,
-                metadatas=metadatas,
+            # 2. 生成 Embeddings
+            embeddings = self.embeddings.embed_documents(texts)
+            
+            # Update metadata with user_ids
+            for meta in metadatas:
+                meta['user_ids'] = [user_id_str]
+            
+            # 3. 存储到 Qdrant
+            vector_repo.upsert_vectors(
+                collection_name=self.COLLECTION_NAME,
+                vectors=embeddings,
+                payloads=metadatas,
                 ids=ids
             )
             
@@ -359,7 +207,7 @@ class RAGService:
     def retrieve(self, 
                  query: str,
                  file_hash: str = None,
-                 user_id: str = None,
+                 user_id: Optional[uuid.UUID] = None,
                  top_k: int = 4,
                  filters: Optional[Dict] = None) -> List[Dict]:
         """
@@ -373,84 +221,64 @@ class RAGService:
             filters: 过滤条件，例如 {'section': 'method', 'page': 5}
             
         Returns:
-            [
-                {
-                    'content': '检索到的文本块',
-                    'parent_content': '父级内容（完整块）',
-                    'page': 页码,
-                    'section': 章节类型,
-                    'chunk_index': 块索引,
-                    'score': 相似度分数 (0-1),
-                    'metadata': {...}
-                },
-                ...
-            ]
+            List[Dict]: 检索结果
         """
-        # 如果没有 embeddings，使用 demo 模式
-        if not self.has_embeddings or not HAS_CHROMA:
+        # 如果没有 embeddings 或 Repo 不可用，使用 demo 模式
+        if not self.has_embeddings or not vector_repo.is_available:
             return self._demo_retrieve(query, user_id, top_k)
         
-        # 确定要检索的文件哈希列表
-        file_hashes = []
-        if file_hash:
-            file_hashes = [file_hash]
-        elif user_id:
-            # 根据 user_id 查找关联的论文
-            file_hashes = [p['file_hash'] for p in self._paper_cache.values() 
-                         if p.get('user_id') == user_id]
+        # 生成查询向量
+        try:
+            query_vector = self.embeddings.embed_query(query)
+        except Exception as e:
+            print(f"Embedding error: {e}")
+            return []
         
-        if not file_hashes:
-            return self._demo_retrieve(query, user_id, top_k)
-        
-        all_results = []
-        
-        for fh in file_hashes:
-            try:
-                vectorstore = Chroma(
-                    collection_name=f"paper_{fh[:16]}",
-                    embedding_function=self.embeddings,
-                    persist_directory=self.chroma_dir
-                )
+        try:
+            # 构建筛选条件
+            search_filters = {}
+            if file_hash:
+                search_filters['file_hash'] = file_hash
+            if user_id:
+                search_filters['user_ids'] = str(user_id)
+            if filters:
+                search_filters.update(filters)
+            
+            # 检索
+            results = vector_repo.search(
+                collection_name=self.COLLECTION_NAME,
+                query_vector=query_vector,
+                limit=top_k,
+                filters=search_filters
+            )
+            
+            formatted_results = []
+            # 格式化结果
+            for point in results:
+                payload = point.payload or {}
+                content = payload.get('page_content', '')
                 
-                # 构建过滤条件
-                where_filter = {'file_hash': fh}
-                if filters:
-                    where_filter.update(filters)
-                
-                # 检索
-                results = vectorstore.similarity_search_with_score(
-                    query=query,
-                    k=top_k,
-                    filter=where_filter if len(where_filter) > 1 else None
-                )
-                
-                # 格式化结果
-                for doc, score in results:
-                    all_results.append({
-                        'content': doc.page_content,
-                        'parent_content': doc.page_content,  # 兼容 agent_service
-                        'page': doc.metadata.get('page', 0),
-                        'section': doc.metadata.get('section', 'content'),
-                        'chunk_index': doc.metadata.get('chunk_index', 0),
-                        'score': float(1 - score),
-                        'metadata': doc.metadata
-                    })
-                
-            except Exception as e:
-                print(f"Retrieval error for {fh}: {e}")
-                continue
-        
-        # 按分数排序，返回 top_k
-        all_results.sort(key=lambda x: x['score'], reverse=True)
-        return all_results[:top_k]
+                formatted_results.append({
+                    'content': content,
+                    'page': payload.get('page', 0),
+                    'section': payload.get('section', 'content'),
+                    'chunk_index': payload.get('chunk_index', 0),
+                    'score': point.score,
+                    'metadata': payload
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            print(f"Retrieval error: {e}")
+            return []
     
-    def _demo_retrieve(self, query: str, user_id: str = None, top_k: int = 4) -> List[Dict]:
+    def _demo_retrieve(self, query: str, user_id: Optional[uuid.UUID] = None, top_k: int = 4) -> List[Dict]:
         """Demo 模式的检索"""
         # 返回模拟结果
         return [
             {
                 'content': f'这是与查询 "{query[:50]}..." 相关的本地文档内容片段。',
-                'parent_content': f'这是与查询 "{query[:50]}..." 相关的本地文档完整内容。在实际使用中，这里会显示从 PDF 中检索到的相关段落。',
                 'page': 1,
                 'section': 'content',
                 'chunk_index': 0,
@@ -458,74 +286,286 @@ class RAGService:
                 'metadata': {'file_hash': 'demo', 'page': 1, 'section': 'content'}
             }
         ]
-    
-    
-    def delete_paper(self, paper_id_or_hash: str, user_id: str = None) -> bool:
+
+
+    def retrieve_related_papers(
+        self,
+        query: str,
+        user_id: Optional[uuid.UUID] = None,
+        exclude_file_hash: Optional[str] = None,
+        top_k: int = 6,
+    ) -> List[Dict]:
         """
-        删除论文的向量数据
+        在用户文献库的 **abstract** 段落中做相似度检索，
+        返回与 query 最相关的论文列表（按论文去重，每篇只保留最高匹配）。
+
+        适用于 Agent 跨文献库 RAG：快速定位相关论文，而非全文检索。
+
+        Args:
+            query:              查询文本
+            user_id:            用户 ID（限定检索范围）
+            exclude_file_hash:  需排除的 file_hash（如当前正在阅读的论文）
+            top_k:              向量检索返回的最大数量（去重前）
+
+        Returns:
+            List[Dict]: 按相似度降序，每篇论文一条记录::
+
+                {
+                    "file_hash":        str,
+                    "abstract_snippet": str,   # 匹配到的摘要片段
+                    "score":            float, # 余弦相似度
+                    "page":             int,
+                    "metadata":         dict   # 完整 payload
+                }
+        """
+        if not self.has_embeddings or not vector_repo.is_available:
+            return []
+
+        # 1. 生成查询向量
+        try:
+            query_vector = self.embeddings.embed_query(query)
+        except Exception as e:
+            print(f"[retrieve_related_papers] Embedding error: {e}")
+            return []
+
+        # 2. 构建过滤条件：仅 abstract 段落 + 用户范围 + 排除当前论文
+        search_filters: Dict[str, Any] = {"section": "abstract"}
+        if user_id:
+            search_filters["user_ids"] = str(user_id)
+        if exclude_file_hash:
+            search_filters["exclude_file_hash"] = exclude_file_hash
+
+        try:
+            results = vector_repo.search(
+                collection_name=self.COLLECTION_NAME,
+                query_vector=query_vector,
+                limit=top_k,
+                filters=search_filters,
+            )
+
+            # 如果 abstract 检索没搜到，尝试全库搜索
+            if not results:
+                fallback_filters = {"user_ids": str(user_id)} if user_id else {}
+                if exclude_file_hash:
+                    fallback_filters["exclude_file_hash"] = exclude_file_hash
+                    
+                results = vector_repo.search(
+                    collection_name=self.COLLECTION_NAME,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    filters=fallback_filters,
+                )
+        except Exception as e:
+            print(f"[retrieve_related_papers] search error: {e}")
+            return []
+
+        # 3. 按 file_hash 去重，只保留每篇论文的最高分结果
+        best_per_paper: Dict[str, Dict] = {}
+        for point in results:
+            payload = point.payload or {}
+            fh = payload.get("file_hash", "")
+
+            # 同一篇论文只保留 score 最高的 chunk
+            if fh in best_per_paper and point.score <= best_per_paper[fh]["score"]:
+                continue
+
+            best_per_paper[fh] = {
+                "file_hash": fh,
+                "abstract_snippet": payload.get("page_content", ""),
+                "score": point.score,
+                "page": payload.get("page", 0),
+                "metadata": payload,
+            }
+
+        # 4. 按 score 降序排列返回
+        return sorted(best_per_paper.values(), key=lambda x: x["score"], reverse=True)
+
+    def delete_paper(self, file_hash: str, user_id: Optional[uuid.UUID] = None) -> bool:
+        """
+        取消论文关联或执行物理清理
         
         Args:
-            paper_id_or_hash: 论文 ID 或文件哈希值
-            user_id: 用户 ID（可选，用于验证权限）
-            
-        Returns:
-            bool: 是否删除成功
+            file_hash: 文件哈希值
+            user_id: 用户 ID (可选)。
+                    - 若提供: 移除该用户的访问权限
+                    - 若不提供: 视为维护清理。会检查是否仍有其他用户关联，若无则执行物理删除。
         """
-        try:
-            # 尝试从缓存中获取 file_hash
-            file_hash = paper_id_or_hash
-            if paper_id_or_hash in self._paper_cache:
-                file_hash = self._paper_cache[paper_id_or_hash].get('file_hash', paper_id_or_hash)
-                # 从缓存中删除
-                del self._paper_cache[paper_id_or_hash]
+        if not vector_repo.is_available:
+            return False
             
-            self._delete_from_chroma(file_hash)
-            return True
+        try:
+            # 1. 获取当前向量点的元数据，检查关联用户情况
+            points = vector_repo.scroll(self.COLLECTION_NAME, {'file_hash': file_hash}, limit=1)
+            if not points:
+                return True # 不存在
+                
+            current_payload = points[0].payload
+            existing_users = current_payload.get('user_ids', [])
+            if not isinstance(existing_users, list):
+                 existing_users = [str(existing_users)] if existing_users else []
+
+            # 2. 如果提供了 user_id，解绑
+            if user_id:
+                user_id_str = str(user_id)
+                if user_id_str in existing_users:
+                    existing_users.remove(user_id_str)
+                    vector_repo.set_payload(
+                        self.COLLECTION_NAME, 
+                        {'user_ids': existing_users}, 
+                        filters={'file_hash': file_hash}
+                    )
+                return True
+
+            # 3. 如果未提供 user_id，检查是否可以物理删除
+            if not existing_users:
+                vector_repo.delete_vectors(self.COLLECTION_NAME, {'file_hash': file_hash})
+                return True
+            else:
+                print(f"Skipping physical delete for {file_hash}: {len(existing_users)} users still associated.")
+                return False
+
         except Exception as e:
-            print(f"Error deleting paper: {e}")
+            print(f"Error in delete_paper operation: {e}")
             return False
     
     
-    def check_exists(self, file_hash: str) -> bool:
+    def check_exists(self, file_hash: str, user_id: Optional[uuid.UUID] = None) -> bool:
         """
         检查论文是否已存储在向量库中
+        """
+        if not vector_repo.is_available:
+            return False
+            
+        filters = {'file_hash': file_hash}
+        if user_id:
+            filters['user_ids'] = str(user_id)
+            
+        return vector_repo.count(self.COLLECTION_NAME, filters) > 0
+    
+    def index_paper_from_db(self, file_hash: str, paragraphs: List[Any], user_id: Optional[uuid.UUID] = None) -> Dict:
+        """
+        从数据库段落索引论文
         
         Args:
-            file_hash: PDF 文件哈希值
+            file_hash: 文件哈希
+            paragraphs: PdfParagraph 对象列表 (需按顺序排列)
+            user_id: 用户 ID
             
         Returns:
-            True if exists, False otherwise
+            Dict: 索引结果
         """
-        if not self.has_embeddings or not HAS_CHROMA:
-            return False
-            
         try:
-            vectorstore = Chroma(
-                collection_name=f"paper_{file_hash[:16]}",
-                embedding_function=self.embeddings,
-                persist_directory=self.chroma_dir
-            )
-            collection = vectorstore._collection
-            return collection.count() > 0
-        except:
-            return False
-    
-    
-    def _delete_from_chroma(self, file_hash: str):
-        """从 Chroma 删除指定论文的所有数据"""
-        if not self.has_embeddings or not HAS_CHROMA:
-            return
+            # 检查是否已存在
+            if self.check_exists(file_hash, user_id):
+                 return {
+                    'success': True,
+                    'message': 'Paper already indexed for this user',
+                    'chunks_created': 0,
+                    'file_hash': file_hash
+                }
+
+            # 从段落对象创建文本块
+            chunks = self._create_chunks_from_paragraphs(paragraphs)
             
-        try:
-            vectorstore = Chroma(
-                collection_name=f"paper_{file_hash[:16]}",
-                embedding_function=self.embeddings,
-                persist_directory=self.chroma_dir
-            )
+            if not chunks:
+                return {
+                    'success': False,
+                    'message': 'No text content found in paragraphs',
+                    'chunks_created': 0,
+                    'file_hash': file_hash
+                }
             
-            # 删除集合
-            vectorstore.delete_collection()
+            # 存储到向量库
+            result = self.store_chunks(file_hash, chunks, user_id)
+            
+            return {
+                'success': result['success'],
+                'message': result['message'],
+                'chunks_created': result.get('chunks_count', 0),
+                'file_hash': file_hash
+            }
             
         except Exception as e:
-            # 如果集合不存在，忽略错误
-            pass
+            return {
+                'success': False,
+                'message': f'Error indexing paper from DB: {str(e)}',
+                'chunks_created': 0,
+                'file_hash': file_hash
+            }
+
+    def _create_chunks_from_paragraphs(self, paragraphs: List[Any], chunk_size: int = 500) -> List[Dict]:
+        """
+        将数据库段落对象合并为文本块
+        
+        Args:
+            paragraphs: PdfParagraph 对象列表 (需包含 original_text, page_number)
+            chunk_size: 目标块大小
+        """
+        chunks = []
+        current_chunk_text = ""
+        current_section = "content"
+        # 记录当前正在构建的chunk的起始页码
+        chunk_start_page = paragraphs[0].page_number if paragraphs else 1
+        
+        for p in paragraphs:
+            text = p.original_text.strip()
+            if not text:
+                continue
+            
+            page_num = p.page_number
+            
+            # 检测是否为新的章节标题
+            if self._is_section_header(text):
+                # 遇到标题，先保存之前的累积内容（如果有）
+                if current_chunk_text:
+                    chunks.append({
+                        'content': current_chunk_text.strip(),
+                        'page': chunk_start_page, 
+                        'section': current_section
+                    })
+                    current_chunk_text = ""
+                
+                # 更新当前章节名 (移除序号，保留核心标题)
+                # 且标题本身不再作为chunk内容重复添加，因为它已作为元数据存在
+                current_section = re.sub(r'^[\d\.\s]+', '', text).strip().lower()
+                chunk_start_page = page_num
+                continue
+            
+            # 如果当前块已经够大，则保存当前块并开始新块
+            if len(current_chunk_text) >= chunk_size:
+                chunks.append({
+                    'content': current_chunk_text.strip(),
+                    'page': chunk_start_page, 
+                    'section': current_section
+                })
+                current_chunk_text = ""
+                chunk_start_page = page_num
+
+            # 追加当前段落文本
+            if current_chunk_text:
+                current_chunk_text += "\n\n" + text
+            else:
+                current_chunk_text = text
+        
+        # 处理剩余内容
+        if current_chunk_text.strip():
+            chunks.append({
+                'content': current_chunk_text.strip(),
+                'page': chunk_start_page,
+                'section': current_section
+            })
+            
+        return chunks
+
+    def _is_section_header(self, text: str) -> bool:
+        """检测是否为章节标题"""
+        headers = [
+            'abstract', 'introduction', 'related work', 'background',
+            'method', 'methodology', 'approach', 'experiment', 'results',
+            'discussion', 'conclusion', 'references', 'acknowledgment'
+        ]
+        text_lower = text.lower().strip()
+        for header in headers:
+            if re.match(rf'^(\d+\.?\s*)?{header}s?$', text_lower):
+                return True
+        return False

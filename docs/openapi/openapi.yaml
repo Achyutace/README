@@ -1,0 +1,91 @@
+openapi: 3.0.0
+info:
+  title: README PDF Reader API
+  description: README的OpenAPI文档
+  version: 1.1.0
+servers:
+  - url: http://localhost:5000/api
+    description: 本地开发环境
+
+# 全局安全配置：所有接口默认需要 JWT Bearer Token
+# 公开接口 (register/login/refresh/health) 在各自定义中用 security: [] 覆盖
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    $ref: './components/security.yaml#/securitySchemes'
+  schemas:
+    ErrorResponse:
+      $ref: './components/schemas/common.yaml#/ErrorResponse'
+
+paths:
+  # --- Auth 相关 API ---
+  /auth/register:
+    $ref: "./paths/auth.yaml#/register"
+  /auth/login:
+    $ref: "./paths/auth.yaml#/login"
+  /auth/refresh:
+    $ref: "./paths/auth.yaml#/refresh"
+  /auth/me:
+    $ref: "./paths/auth.yaml#/me"
+
+  # --- PDF 相关 API ---
+  /pdf/upload:
+    $ref: "./paths/pdf.yaml#/upload"
+  "/pdf/{pdf_id}/status":
+    $ref: "./paths/pdf.yaml#/status"
+  "/pdf/{pdf_id}/info":
+    $ref: "./paths/pdf.yaml#/info"
+  "/pdf/{pdf_id}/paragraphs":
+    $ref: "./paths/pdf.yaml#/paragraphs"
+  "/pdf/{pdf_id}/source":
+    $ref: "./paths/pdf.yaml#/source"
+
+  # --- Chat 相关 API ---
+  /chatbox/new:
+    $ref: "./paths/chat.yaml#/new"
+  /chatbox/message:
+    $ref: "./paths/chat.yaml#/message"
+  /chatbox/simple-chat:
+    $ref: "./paths/chat.yaml#/simple-chat"
+  /chatbox/stream:
+    $ref: "./paths/chat.yaml#/stream"
+  /chatbox/sessions:
+    $ref: "./paths/chat.yaml#/sessions"
+  "/chatbox/session/{session_id}":
+    $ref: "./paths/chat.yaml#/delete-session"
+  "/chatbox/session/{session_id}/messages":
+    $ref: "./paths/chat.yaml#/session-messages"
+  "/chatbox/session/{session_id}/title":
+    $ref: "./paths/chat.yaml#/update-title"
+
+  # --- Notes 相关 API ---
+  /notes:
+    $ref: "./paths/notes.yaml#/create"
+  "/notes/{pdf_id}":
+    $ref: "./paths/notes.yaml#/by-pdf-id"
+  "/notes/{note_id}":
+    $ref: "./paths/notes.yaml#/by-note-id"
+
+  # --- Highlight 相关 API ---
+  /highlight:
+    $ref: "./paths/highlight.yaml#/create"
+  "/highlight/{highlight_id}":
+    $ref: "./paths/highlight.yaml#/by-highlight-id"
+
+  # --- Translate 相关 API ---
+  /translate/paragraph:
+    $ref: "./paths/translate.yaml#/paragraph"
+  /translate/text:
+    $ref: "./paths/translate.yaml#/text"
+  "/translate/page/{pdf_id}/{page_number}":
+    $ref: "./paths/translate.yaml#/page-translations"
+
+  # --- Link 相关 API ---
+  /link/data:
+    $ref: "./paths/link.yaml#/data"
+
+  # --- System 相关 API ---
+  /health:
+    $ref: "./paths/system.yaml#/health"

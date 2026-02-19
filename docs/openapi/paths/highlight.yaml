@@ -1,0 +1,136 @@
+# 所有接口需要 JWT 认证 (require_auth)
+
+create:
+  post:
+    tags: [Highlight]
+    summary: 创建高亮
+    security:
+      - BearerAuth: []
+    description: 前端画了高亮以后，后端要存到数据库。这里的传入坐标是像素坐标。
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/highlight.yaml#/CreateHighlightRequest'
+    responses:
+      200:
+        description: 创建成功，返回归一化后的坐标，也就是0.0-1.0的坐标
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/highlight.yaml#/CreateHighlightResponse'
+      400:
+        description: 缺少必填字段
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      404:
+        description: PDF 不在用户库中
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+  get:
+    tags: [Highlight]
+    summary: 获取某 PDF 的所有高亮
+    security:
+      - BearerAuth: []
+    description: 返回归一化坐标 (0.0-1.0)，前端需乘以当前 Canvas 尺寸渲染
+    parameters:
+      - name: pdfId
+        in: query
+        required: true
+        description: PDF 文件 Hash
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        description: 按页码筛选
+        schema:
+          type: integer
+    responses:
+      200:
+        description: 高亮列表
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/highlight.yaml#/HighlightListResponse'
+      400:
+        description: 缺少 pdfId
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+by-highlight-id:
+  put:
+    tags: [Highlight]
+    summary: 更新高亮颜色
+    security:
+      - BearerAuth: []
+    parameters:
+      - name: highlight_id
+        in: path
+        required: true
+        description: 高亮ID
+        schema:
+          type: integer
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/highlight.yaml#/UpdateHighlightRequest'
+    responses:
+      200:
+        description: 更新成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/highlight.yaml#/SuccessResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+  delete:
+    tags: [Highlight]
+    summary: 删除高亮
+    security:
+      - BearerAuth: []
+    parameters:
+      - name: highlight_id
+        in: path
+        required: true
+        description: 高亮ID
+        schema:
+          type: integer
+    responses:
+      200:
+        description: 删除成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/highlight.yaml#/SuccessResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

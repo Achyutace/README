@@ -1,0 +1,184 @@
+upload:
+  post:
+    tags: [PDF]
+    summary: 上传PDF文件
+    security:
+      - BearerAuth: []
+    requestBody:
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              file:
+                type: string
+                format: binary
+                description: 仅支持上传PDF文件
+            required:
+              - file
+    responses:
+      200:
+        description: 上传成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/pdf.yaml#/UploadResponse'
+      400:
+        description: 请求参数错误 (文件缺失、文件名为空或格式非 PDF)
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+status:
+  get:
+    tags: [PDF]
+    summary: 获取PDF处理状态
+    security:
+      - BearerAuth: []
+    description: 获取PDF处理状态，包括任务状态、处理进度等。目前前端代码还没用这个接口，还没加异步轮询。
+    parameters:
+      - name: pdf_id
+        in: path
+        required: true
+        description: PDF文件Hash
+        schema:
+          type: string
+      - name: from_page
+        in: query
+        required: false
+        description: 从第几页开始返回段落，默认从第一页开始
+        schema:
+          type: integer
+          default: 1
+          example: 1
+    responses:
+      200:
+        description: 获取成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/pdf.yaml#/StatusResponse'
+      400:
+        description: 请求参数错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+info:
+  get:
+    tags: [PDF]
+    summary: 获取PDF信息
+    security:
+      - BearerAuth: []
+    description: 获取PDF信息，包括文件名、页数、元数据等
+    parameters:
+      - name: pdf_id
+        in: path
+        required: true
+        description: PDF文件Hash
+        schema:
+          type: string
+    responses:
+      200:
+        description: 获取成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/pdf.yaml#/InfoResponse'
+      404:
+        description: PDF不存在
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+paragraphs:
+  get:
+    tags: [PDF]
+    summary: 获取PDF段落
+    security:
+      - BearerAuth: []
+    description: 使用场景：在pdf某页前端的段落翻译需要所有的id，bbox和content
+    parameters:
+      - name: pdf_id
+        in: path
+        required: true
+        description: PDF文件Hash
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        description: 指定页码，不传则返回全部页
+        schema:
+          type: integer
+    responses:
+      200:
+        description: 获取成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/pdf.yaml#/ParagraphList'
+      
+      
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+source:
+  get:
+    tags: [PDF]
+    summary: 获取PDF源文件
+    security:
+      - BearerAuth: []
+    description: 获取PDF源文件，用于浏览器直接预览/渲染
+    parameters:
+      - name: pdf_id
+        in: path
+        required: true
+        description: PDF文件Hash
+        schema:
+          type: string
+    responses:
+      200:
+        description: PDF文件二进制流
+        content:
+          application/pdf:
+            schema:
+              type: string
+              format: binary
+      404:
+        description: 文件不存在
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

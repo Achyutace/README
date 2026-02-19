@@ -1,0 +1,92 @@
+# Auth 相关 Schema
+
+RegisterRequest:
+  type: object
+  required: [username, email, password]
+  properties:
+    username:
+      type: string
+      description: 用户名
+      example: "achyut"
+    email:
+      type: string
+      format: email
+      description: 邮箱（不区分大小写）
+      example: "achyut@example.com"
+    password:
+      type: string
+      minLength: 6
+      description: 密码，至少 6 位
+      example: "123456"
+
+LoginRequest:
+  type: object
+  required: [email, password]
+  properties:
+    email:
+      type: string
+      format: email
+      example: "achyut@example.com"
+    password:
+      type: string
+
+RefreshRequest:
+  type: object
+  required: [refreshToken]
+  properties:
+    refreshToken:
+      type: string
+      description: 登录/注册时返回的 Refresh Token
+
+UserInfo:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    username:
+      type: string
+    email:
+      type: string
+      format: email
+
+AuthResponse:
+  type: object
+  description: 注册/登录成功的统一响应
+  properties:
+    message:
+      type: string
+      example: "Login successful"
+    user:
+      $ref: '#/UserInfo'
+    accessToken:
+      type: string
+      description: JWT Access Token
+    refreshToken:
+      type: string
+      description: JWT Refresh Token，用于换取新的 Access Token
+
+RefreshResponse:
+  type: object
+  properties:
+    accessToken:
+      type: string
+      description: 新的 Access Token
+
+MeResponse:
+  type: object
+  properties:
+    user:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time

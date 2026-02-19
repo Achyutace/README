@@ -1,0 +1,134 @@
+# 所有接口需要 JWT 认证 (require_auth)
+
+create:
+  post:
+    tags: [Notes]
+    summary: 创建笔记
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/notes.yaml#/CreateNoteRequest'
+    responses:
+      200:
+        description: 创建成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/notes.yaml#/NoteActionResponse'
+      400:
+        description: 缺少 pdfId
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+
+by-pdf-id:
+  get:
+    tags: [Notes]
+    summary: 获取某 PDF 的所有笔记
+    security:
+      - BearerAuth: []
+    description: "Flask 路由: GET /notes/<pdf_id>"
+    parameters:
+      - name: pdf_id
+        in: path
+        required: true
+        description: PDF 文件 Hash
+        schema:
+          type: string
+    responses:
+      200:
+        description: 笔记列表
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/notes.yaml#/NoteListResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+by-note-id:
+  put:
+    tags: [Notes]
+    summary: 更新笔记
+    security:
+      - BearerAuth: []
+    description: "Flask 路由: PUT /notes/<int:note_id>"
+    parameters:
+      - name: note_id
+        in: path
+        required: true
+        description: 笔记ID
+        schema:
+          type: integer
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/notes.yaml#/UpdateNoteRequest'
+    responses:
+      200:
+        description: 更新成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/notes.yaml#/NoteActionResponse'
+      400:
+        description: 未提供任何可更新字段
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+  delete:
+    tags: [Notes]
+    summary: 删除笔记
+    security:
+      - BearerAuth: []
+    description: "Flask 路由: DELETE /notes/<int:note_id>"
+    parameters:
+      - name: note_id
+        in: path
+        required: true
+        description: 笔记ID
+        schema:
+          type: integer
+    responses:
+      200:
+        description: 删除成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/notes.yaml#/NoteActionResponse'
+      404:
+        description: 笔记不存在
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

@@ -1,0 +1,32 @@
+# 系统公共接口（不需要认证）
+
+health:
+  get:
+    tags: [System]
+    summary: 健康检查
+    security: []
+    description: 用于前端检测后端是否存活，公开接口，不需要认证
+    responses:
+      200:
+        description: 系统状态
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: "ok"
+                services:
+                  type: object
+                  properties:
+                    celery:
+                      type: boolean
+                    rag:
+                      type: boolean
+                    translate:
+                      type: boolean
+                    agent:
+                      type: boolean
+                    chat:
+                      type: boolean

@@ -1,0 +1,141 @@
+# 注册/登录/刷新 不需要认证; /me 需要 JWT
+
+register:
+  post:
+    tags: [Auth]
+    summary: 用户注册
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/auth.yaml#/RegisterRequest'
+    responses:
+      201:
+        description: 注册成功，返回access_token和refresh_token
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/auth.yaml#/AuthResponse'
+      400:
+        description: |
+          请求参数错误，code 可能的值：
+          - `MISSING_BODY` — 请求体为空
+          - `MISSING_FIELDS` — 缺少 username / email / password
+          - `PASSWORD_TOO_SHORT` — 密码少于 6 位
+          - `EMAIL_EXISTS` — 邮箱已被注册
+          - `USERNAME_TAKEN` — 用户名已被占用
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: "code: `SERVER_ERROR`"
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+login:
+  post:
+    tags: [Auth]
+    summary: 用户登录
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/auth.yaml#/LoginRequest'
+    responses:
+      200:
+        description: 登录成功
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/auth.yaml#/AuthResponse'
+      400:
+        description: |
+          请求参数错误，code 可能的值：
+          - `MISSING_BODY` — 请求体为空
+          - `MISSING_FIELDS` — 缺少 email / password
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      401:
+        description: |
+          认证失败，code 的值：
+          - `INVALID_CREDENTIALS` — 邮箱不存在或密码错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+refresh:
+  post:
+    tags: [Auth]
+    summary: 刷新 Access Token
+    security: []
+    description: 用 Refresh Token 换取新的 Access Token，Refresh Token 本身不会更新
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas/auth.yaml#/RefreshRequest'
+    responses:
+      200:
+        description: 新的 access_token 和 refresh_token
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/auth.yaml#/RefreshResponse'
+      400:
+        description: |
+          请求参数错误，code 的值：
+          - `MISSING_TOKEN` — 缺少 refreshToken
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      401:
+        description: |
+          Refresh Token 无效，code 可能的值：
+          - `TOKEN_EXPIRED` — Token 已过期，需要重新登录
+          - `INVALID_TOKEN` — Token 格式错误或签名无效
+          - `USER_NOT_FOUND` — 用户已被删除
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+me:
+  get:
+    tags: [Auth]
+    summary: 获取当前用户信息
+    security:
+      - BearerAuth: []
+    description: 需要有效的 Access Token (require_auth)
+    responses:
+      200:
+        description: 用户信息
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/auth.yaml#/MeResponse'
+      401:
+        description: 未登录或 Token 无效
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      404:
+        description: |
+          code 的值：
+          - `USER_NOT_FOUND` — 用户不存在
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

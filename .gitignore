@@ -33,6 +33,7 @@ backend/.env
 *.sw?
 
 # AI Tools
+claude-root/
 .claude/
 .anthropic/
 
