@@ -1,13 +1,16 @@
 """
 PDF 异步处理任务
 1. 先逐页解析 PDF 段落 + 解析图片元数据：每解析一页就写入 DB，前端可按页轮询
-2. 再逐段落向量化
+2. 通过 MinerU API 提取高质量图�?表格资产
+3. 再逐段落向量化
 状态机:
-    pending → processing → completed / failed
+    pending �?processing �?completed / failed
 """
 import os
+import shutil
 import logging
 import uuid
+from pathlib import Path
 from celery_app import celery
 
 from core.database import db
@@ -17,7 +20,7 @@ from utils import pdf_engine
 
 logger = logging.getLogger(__name__)
 
-# 状态常量 
+# 状态常�?
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
 STATUS_COMPLETED = "completed"
@@ -26,8 +29,8 @@ STATUS_FAILED = "failed"
 
 def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
     """
-    解析 PDF 文件路径。
-    优先读本地 upload_folder，其次从 COS 下载。
+    解析 PDF 文件路径�?
+    优先读本�?upload_folder，其次从 COS 下载�?
     """
     # 1. 本地磁盘
     candidate = os.path.join(upload_folder, file_hash)
@@ -36,7 +39,7 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 
     # 2. COS 下载
     if object_storage.config.enabled:
-        # 使用临时文件防止并发写冲突
+        # 使用临时文件防止并发写冲�?
         tmp_candidate = f"{candidate}.tmp.{uuid.uuid4().hex}"
         try:
             if object_storage.download_file(f"pdffile/{file_hash}", tmp_candidate):
@@ -63,12 +66,12 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 
 def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: uuid.UUID = None):
     """
-    PDF 全流程异步处理任务。
+    PDF 全流程异步处理任务�?
 
     Args:
         file_hash:     pdf_id
         upload_folder: 用户上传目录绝对路径
-        filename:      原始文件名
+        filename:      原始文件�?
         page_count:    页数 
         user_id:       用户 ID (UUID)
     """
@@ -80,7 +83,7 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
         try:
             filepath = _resolve_filepath(file_hash, upload_folder)
 
-            # ================= 逐页解析段落 + 图片元数据 ===========================
+            # ================= 逐页解析段落 + 图片元数�?===========================
             _update_status(file_hash, STATUS_PROCESSING, task_id=task_id)
 
             for page_num in range(1, page_count + 1):
@@ -101,7 +104,7 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
                         logger.error(f"[Task {task_id}] Failed to save paragraphs page {page_num}: {e}")
                         db.session.rollback()
 
-                # 解析图片元数据
+                # 解析图片元数�?
                 try:
                     images_list = pdf_engine.get_images_list(filepath, file_hash, page_numbers=[page_num])
                     if images_list:
@@ -123,7 +126,7 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
                 # 更新进度
                 _update_progress(file_hash, page_num)
 
-                # 更新 Celery 任务元信息
+                # 更新 Celery 任务元信�?
                 self.update_state(state="PROGRESS", meta={
                     "current_page": page_num,
                     "total_pages": page_count,
@@ -131,6 +134,19 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
                 })
 
         # ===================== 逐段落向量化 =======================
+            # ---- MinerU 图片/表格高质量提�?----
+            self.update_state(state="PROGRESS", meta={
+                "current_page": page_count,
+                "total_pages": page_count,
+                "phase": "mineru_extracting",
+            })
+
+            try:
+                _run_mineru_extraction(file_hash, filepath, upload_folder, task_id)
+            except Exception as e:
+                # MinerU 失败不影响主流程，降级为只有 PyMuPDF 的基础图片元数�?
+                logger.warning(f"[Task {task_id}] MinerU extraction failed (non-fatal): {e}")
+
             self.update_state(state="PROGRESS", meta={
                 "current_page": page_count,
                 "total_pages": page_count,
@@ -169,7 +185,7 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
 # ================== 辅助函数 ========================
 
 def _update_status(file_hash: str, status: str, task_id: str = None, error: str = None):
-    """更新 GlobalFile 的处理状态"""
+    """更新 GlobalFile 的处理状�?""
     from celery_app import get_worker_app
     with get_worker_app().app_context():
         repo = SQLRepository(db.session)
@@ -190,7 +206,7 @@ def _update_status(file_hash: str, status: str, task_id: str = None, error: str 
 
 
 def _update_progress(file_hash: str, current_page: int):
-    """更新当前已解析到的页码"""
+    """更新当前已解析到的页�?""
     from celery_app import get_worker_app
     with get_worker_app().app_context():
         repo = SQLRepository(db.session)
@@ -205,7 +221,7 @@ def _update_progress(file_hash: str, current_page: int):
 
 
 def _run_rag_indexing_from_db(file_hash: str, task_id: str, user_id: uuid.UUID):
-    """使用数据库中的已解析段落执行 RAG 向量索引。"""
+    """使用数据库中的已解析段落执行 RAG 向量索引�?""
     repo = SQLRepository(db.session)
     try:
         paragraphs = repo.get_paragraphs(file_hash)
@@ -225,3 +241,71 @@ def _run_rag_indexing_from_db(file_hash: str, task_id: str, user_id: uuid.UUID):
         logger.warning(f"[Task {task_id}] RAG service not available: {e}")
     except Exception as e:
         logger.error(f"[Task {task_id}] Error in RAG indexing: {e}")
+
+
+def _run_mineru_extraction(file_hash: str, filepath: str, upload_folder: str, task_id: str):
+    """
+    使用 MinerU 云端 API 提取 PDF 中的高质量图片和表格�?
+    并将结果持久化到数据库和本地存储�?
+    """
+    from services.mineru_service import MinerUService
+
+    if not MinerUService.is_configured():
+        logger.info(f"[Task {task_id}] MinerU not configured, skipping image/table extraction.")
+        return
+
+    svc = MinerUService()
+
+    # MinerU 结果缓存目录: uploads 同级�?cache/mineru/<file_hash>
+    cache_root = Path(upload_folder).parent / "cache" / "mineru"
+    output_dir = cache_root / file_hash
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"[Task {task_id}] Starting MinerU extraction for {file_hash}...")
+    assets = svc.extract_assets(filepath, file_hash, str(output_dir))
+
+    image_files = assets.get("images", [])
+    table_files = assets.get("tables", [])
+    logger.info(
+        f"[Task {task_id}] MinerU extracted {len(image_files)} images, "
+        f"{len(table_files)} tables for {file_hash}."
+    )
+
+    # ---- 保存图片到数据库 ----
+    if image_files:
+        repo = SQLRepository(db.session)
+        try:
+            images_to_save = []
+            for idx, img_path in enumerate(image_files):
+                page_number = MinerUService.guess_page_number(img_path)
+                # 存储路径: mineru/<file_hash>/images/<filename>
+                relative_path = f"mineru/{file_hash}/images/{img_path.name}"
+                images_to_save.append({
+                    "page_number": page_number,
+                    "image_index": idx,
+                    "bbox": [],
+                    "caption": "",
+                    "image_path": relative_path,
+                })
+            repo.save_images(file_hash, images_to_save)
+            logger.info(f"[Task {task_id}] Saved {len(images_to_save)} MinerU images to DB.")
+        except Exception as e:
+            logger.error(f"[Task {task_id}] Failed to save MinerU images to DB: {e}")
+            db.session.rollback()
+
+    # ---- 保存表格到本地存�?----
+    if table_files:
+        from app import app
+        tables_root = Path(app.config['STORAGE_ROOT']) / 'tables' / file_hash
+        tables_root.mkdir(parents=True, exist_ok=True)
+        for idx, table_path in enumerate(table_files):
+            page_number = MinerUService.guess_page_number(table_path)
+            ext = table_path.suffix.lower() or ".html"
+            dest_name = f"page_{page_number}_table_{idx}{ext}"
+            dest_path = tables_root / dest_name
+            try:
+                shutil.copy2(str(table_path), str(dest_path))
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to copy table {table_path}: {e}")
+        logger.info(f"[Task {task_id}] Saved {len(table_files)} MinerU tables to {tables_root}.")
+

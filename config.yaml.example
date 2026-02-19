@@ -89,3 +89,9 @@ jwt:
   access_expire_minutes: 30
   # Refresh Token 有效期（天）
   refresh_expire_days: 7
+
+# MinerU PDF 解析 API
+# 从 https://mineru.net 获取 Token
+mineru:
+  api_token: "your_mineru_api_token"
+  model_version: "vlm"  # pipeline | vlm
