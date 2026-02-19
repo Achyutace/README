@@ -1,10 +1,9 @@
 from __future__ import annotations
-import os
 import logging
 from typing import Optional
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from flask_sqlalchemy import SQLAlchemy
+from model.db.base import Base
 
 # Vector DB Clients
 try:
@@ -17,19 +16,16 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# 1. PostgreSQL (SQLAlchemy)
+# 1. PostgreSQL (Flask-SQLAlchemy)
 # ==========================================
-# 从配置获取数据库连接
-DATABASE_URL = settings.DATABASE_URL
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+db = SQLAlchemy(model_class=Base)
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
+def init_db(app):
+    """在 Flask app 上初始化 Flask-SQLAlchemy"""
+    app.config["SQLALCHEMY_DATABASE_URI"] = settings.DATABASE_URL
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    db.init_app(app)
 
 # ==========================================
 # 2. Vector Databases (Qdrant)

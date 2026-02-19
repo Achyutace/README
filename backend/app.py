@@ -48,6 +48,10 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=settings.jwt.access_e
 app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=settings.jwt.refresh_expire_days)
 jwt_manager = JWTManager(app)
 
+# ==================== 2.6 Flask-SQLAlchemy ====================
+from core.database import db, init_db
+init_db(app)
+
 # ==================== 3. 基础配置与路径 ====================
 # 获取项目根目录（README 目录）
 BASE_DIR = Path(__file__).resolve().parent.parent  
@@ -122,7 +126,6 @@ def before_request():
     3. 公开接口不携带 JWT 时不设置 g.user_id，由各路由自行判断
     4. 受保护接口由 @jwt_required() 装饰器确保 g.user_id 存在
     """
-    from core.database import SessionLocal
     from repository.sql_repo import SQLRepository
 
     if request.method == 'OPTIONS':
@@ -144,27 +147,12 @@ def before_request():
         # 3. 初始化 PdfService
         g.pdf_service = PdfService(upload_folder=str(upload_folder))
 
-        # 4. 初始化 per-request 服务 (需要 SQLRepository)
-        req_db = SessionLocal()
-        req_repo = SQLRepository(req_db)
-        g._req_db = req_db
-
-        app.chat_service = ChatService(db_repo=req_repo)
-        app.note_service = NoteService(db_repo=req_repo)
-    else:
-        # 未认证请求 — 不初始化用户相关服务
-        # 公开接口不需要这些，受保护接口会被 @jwt_required() 拦截
-        g._req_db = None
-
-@app.teardown_request
-def teardown_request_db(exc):
-    """请求结束时关闭 per-request 的 DB session"""
-    req_db = getattr(g, '_req_db', None)
-    if req_db is not None:
-        try:
-            req_db.close()
-        except Exception:
-            pass
+        # 4. 初始化 per-request 服务 (Flask-SQLAlchemy 自动管理 session 生命周期)
+        repo = SQLRepository(db.session)
+        app.chat_service = ChatService(db_repo=repo)
+        app.note_service = NoteService(db_repo=repo)
+    # 未认证请求 — 不初始化用户相关服务
+    # 公开接口不需要这些，受保护接口会被 @jwt_required() 拦截
 
 # ==================== 5.5 Swagger UI ====================
 # 只有在开发模式下才注册 Swagger

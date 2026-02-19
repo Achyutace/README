@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core.config import settings
 from utils.llm_simple import translate_text
-from core.database import SessionLocal
+from core.database import db
 from repository.sql_repo import SQLRepository
 from utils.pdf_engine import make_paragraph_id
 
@@ -95,32 +95,27 @@ class TranslateService:
         Returns:
             result (dict): {translation: str, cached: bool}
         """
-        db = SessionLocal()
-        try:
-            repo = SQLRepository(db)
-            
-            # 1. 检查缓存
-            if not force:
-                translations = repo.get_paragraph_translations(file_hash, page_number, paragraph_index)
-                if translations and translations[0]:
-                    return {
-                        'translation': translations[0],
-                        'cached': True
-                    }
+        repo = SQLRepository(db.session)
 
-            # 2. 调用翻译
-            translated_text = self.translate(original_text)
-            
-            # 3. 存储结果
-            repo.update_paragraph_translation(file_hash, page_number, paragraph_index, translated_text)
-            
-            return {
-                'translation': translated_text,
-                'cached': False
-            }
-            
-        finally:
-            db.close()
+        # 1. 检查缓存
+        if not force:
+            translations = repo.get_paragraph_translations(file_hash, page_number, paragraph_index)
+            if translations and translations[0]:
+                return {
+                    'translation': translations[0],
+                    'cached': True
+                }
+
+        # 2. 调用翻译
+        translated_text = self.translate(original_text)
+
+        # 3. 存储结果
+        repo.update_paragraph_translation(file_hash, page_number, paragraph_index, translated_text)
+
+        return {
+            'translation': translated_text,
+            'cached': False
+        }
 
     def translate_text(self, text: str, context: str = None) -> Dict:
         """
@@ -153,19 +148,15 @@ class TranslateService:
         Returns:
             dict: { paragraphId: translationText, ... }
         """
-        db = SessionLocal()
-        try:
-            repo = SQLRepository(db)
-            paragraphs = repo.get_paragraphs(file_hash, page_number=page_number)
+        repo = SQLRepository(db.session)
+        paragraphs = repo.get_paragraphs(file_hash, page_number=page_number)
 
-            results = {}
-            for p in paragraphs:
-                if p.translation_text:
-                    p_id = make_paragraph_id(file_hash, p.page_number, p.paragraph_index)
-                    results[p_id] = p.translation_text
-            return results
-        finally:
-            db.close()
+        results = {}
+        for p in paragraphs:
+            if p.translation_text:
+                p_id = make_paragraph_id(file_hash, p.page_number, p.paragraph_index)
+                results[p_id] = p.translation_text
+        return results
 
     def _demo_translate(self, text: str) -> str:
         """演示模式翻译 (无 API Key 时的 fallback)"""

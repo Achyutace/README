@@ -5,7 +5,7 @@
 """
 
 from flask import Blueprint, request, jsonify, g
-from core.database import SessionLocal
+from core.database import db
 from repository.sql_repo import SQLRepository
 from core.security import (
     hash_password,
@@ -52,9 +52,9 @@ def register():
     if len(password) < 6:
         return jsonify({'code': 'PASSWORD_TOO_SHORT', 'error': 'Password must be at least 6 characters'}), 400
 
-    db = SessionLocal()
+    db_session = db.session
     try:
-        repo = SQLRepository(db)
+        repo = SQLRepository(db_session)
 
         # 检查邮箱是否已注册
         if repo.get_user_by_email(email):
@@ -81,8 +81,9 @@ def register():
             **tokens,
         }), 201
 
-    finally:
-        db.close()
+    except Exception:
+        db_session.rollback()
+        raise
 
 
 # ==================== 登录 ====================
@@ -112,9 +113,9 @@ def login():
     if not email or not password:
         return jsonify({'code': 'MISSING_FIELDS', 'error': 'email and password are required'}), 400
 
-    db = SessionLocal()
+    db_session = db.session
     try:
-        repo = SQLRepository(db)
+        repo = SQLRepository(db_session)
         user = repo.get_user_by_email(email)
 
         if not user or not verify_password(password, user.password_hash):
@@ -133,8 +134,9 @@ def login():
             **tokens,
         })
 
-    finally:
-        db.close()
+    except Exception:
+        db_session.rollback()
+        raise
 
 
 # ==================== 刷新令牌 ====================
@@ -163,14 +165,10 @@ def refresh():
 
     # 验证用户仍然存在
     import uuid as _uuid
-    db = SessionLocal()
-    try:
-        repo = SQLRepository(db)
-        user = repo.get_user_by_id(_uuid.UUID(user_id))
-        if not user:
-            return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 401
-    finally:
-        db.close()
+    repo = SQLRepository(db.session)
+    user = repo.get_user_by_id(_uuid.UUID(user_id))
+    if not user:
+        return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 401
 
     # 签发新的 Access Token
     tokens = create_tokens(str(user.id))
@@ -188,21 +186,17 @@ def get_current_user():
     """
     获取当前已登录用户的信息 (需要有效 Access Token)
     """
-    db = SessionLocal()
-    try:
-        repo = SQLRepository(db)
-        user = repo.get_user_by_id(g.user_id)
+    repo = SQLRepository(db.session)
+    user = repo.get_user_by_id(g.user_id)
 
-        if not user:
-            return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 404
+    if not user:
+        return jsonify({'code': 'USER_NOT_FOUND', 'error': 'User not found'}), 404
 
-        return jsonify({
-            'user': {
-                'id': str(user.id),
-                'username': user.username,
-                'email': user.email,
-                'createdAt': user.created_at.isoformat() if user.created_at else None,
-            }
-        })
-    finally:
-        db.close()
+    return jsonify({
+        'user': {
+            'id': str(user.id),
+            'username': user.username,
+            'email': user.email,
+            'createdAt': user.created_at.isoformat() if user.created_at else None,
+        }
+    })

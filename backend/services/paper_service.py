@@ -16,7 +16,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 import shutil
 
-from core.database import SessionLocal
+from core.database import db
 from repository.sql_repo import SQLRepository
 from repository.object_repo import object_storage
 from utils import pdf_engine
@@ -38,11 +38,6 @@ class PdfService:
         os.makedirs(self.upload_folder, exist_ok=True)
 
     # ===================== 内部辅助 =====================
-    
-    def _get_repo(self):
-        """辅助方法：获取 DB session 和 Repository 实例"""
-        db = SessionLocal()
-        return db, SQLRepository(db)
 
     def _find_filepath_by_id(self, pdf_id: str) -> str:
         """
@@ -106,7 +101,7 @@ class PdfService:
         safe_filename = secure_filename(filename)
         
         # 2. 检查 GlobalFile 状态 (查重)
-        db, repo = self._get_repo()
+        repo = SQLRepository(db.session)
         try:
             gf = repo.get_global_file(pdf_id)
             if gf:
@@ -133,8 +128,9 @@ class PdfService:
                     }
                 
                 logger.info(f"[Ingest] File {pdf_id} status={gf.process_status} (stuck/failed), re-dispatching...")
-        finally:
-            db.close()
+        except Exception as e:
+            db.session.rollback()
+            raise
 
         # 3. 物理保存到本地
         filepath = os.path.join(self.upload_folder, pdf_id)
@@ -177,7 +173,7 @@ class PdfService:
         new_task_id = str(uuid.uuid4())
         
         # 6. 更新 GlobalFile (Pending)
-        db, repo = self._get_repo()
+        repo = SQLRepository(db.session)
         try:
             gf = repo.get_global_file(pdf_id)
             if gf:
@@ -201,14 +197,12 @@ class PdfService:
                     dimensions=dimensions,
                 )
                 gf.task_id = new_task_id
-            db.commit()
+            db.session.commit()
         except Exception as e:
-            db.rollback()
+            db.session.rollback()
             logger.error(f"[Ingest] DB transaction failed: {e}")
             raise e
-        finally:
-            db.close()
-            
+
         # 7. 启动 Celery 异步处理
         try:
             process_pdf.apply_async(
@@ -219,15 +213,11 @@ class PdfService:
         except Exception as e:
             logger.error(f"[Ingest] Failed to dispatch Celery task for {pdf_id}: {e}")
             # 如果分发失败，更新状态为 failed
-            db, repo = self._get_repo()
-            try:
-                gf = repo.get_global_file(pdf_id)
-                if gf:
-                    gf.process_status = "failed"
-                    gf.error_message = f"Task dispatch failed: {str(e)}"
-                    db.commit()
-            finally:
-                db.close()
+            gf = repo.get_global_file(pdf_id)
+            if gf:
+                gf.process_status = "failed"
+                gf.error_message = f"Task dispatch failed: {str(e)}"
+                db.session.commit()
             raise e
 
         # 更新内存缓存
@@ -261,18 +251,17 @@ class PdfService:
                 "paragraphs": [...],  // from_page 到 currentPage 的段落
             }
         """
-        db, repo = self._get_repo()
+        repo = SQLRepository(db.session)
         try:
             progress = repo.get_process_progress(pdf_id)
             if not progress:
                 return {"status": "not_found", "error": "PDF not found"}
 
-            status = progress["status"]       # pending / processing / completed / failed
+            status = progress["status"]
             current_page = progress["current_page"]
             total_pages = progress["total_pages"]
             error_msg = progress.get("error")
 
-            # 拉取已解析的段落 (from_page ~ current_page)
             paragraphs = []
             if current_page > 0 and from_page <= current_page:
                 db_paras = repo.get_paragraphs_range(pdf_id, from_page, current_page)
@@ -289,8 +278,6 @@ class PdfService:
         except Exception as e:
             logger.error(f"Failed to get process status for {pdf_id}: {e}")
             return {"status": "error", "error": str(e)}
-        finally:
-            db.close()
 
     def _format_paragraph(self, p, pdf_id: str) -> dict:
         """格式化段落数据"""
@@ -311,7 +298,7 @@ class PdfService:
         获取 PDF 元数据。
         """
         # 1. 尝试从数据库获取
-        db, repo = self._get_repo()
+        repo = SQLRepository(db.session)
         try:
             gf = repo.get_global_file(pdf_id)
             if gf:
@@ -323,8 +310,6 @@ class PdfService:
                 }
         except Exception as e:
             logger.warning(f"DB lookup failed for {pdf_id}: {e}")
-        finally:
-            db.close()
 
         # 2. 数据库没有或获取失败，回退到文件解析
         try:
@@ -341,8 +326,7 @@ class PdfService:
         从数据库获取段落文本信息
         """
         paragraphs = []
-        
-        db, repo = self._get_repo()
+        repo = SQLRepository(db.session)
         try:
             db_paras = repo.get_paragraphs(pdf_id, pagenumber, paraid)
             if db_paras:
@@ -359,8 +343,6 @@ class PdfService:
                     paragraphs.append(para_data)
         except Exception as e:
             logger.warning(f"DB lookup paragraphs failed for {pdf_id}: {e}")
-        finally:
-            db.close()
 
         return paragraphs
 

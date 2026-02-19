@@ -12,7 +12,7 @@ import logging
 import uuid
 from celery import shared_task
 
-from core.database import SessionLocal
+from core.database import db
 from core.config import settings
 from repository.sql_repo import SQLRepository
 from services.chat_service import ChatService
@@ -73,18 +73,14 @@ def generate_session_title_task(session_id: uuid.UUID, user_id: uuid.UUID, user_
         user_id:    用户 ID (UUID)
         user_query: 用户的第一句提问
     """
-    db = SessionLocal()
-    try:
-        repo = SQLRepository(db)
-        chat_service = ChatService(db_repo=repo)
-
-        new_title = _generate_title_via_llm(user_query) or user_query[:20]
-        chat_service.update_title(session_id, user_id, new_title)
-
-        logger.info(f"Title updated for session {session_id}: {new_title}")
-
-    except Exception as e:
-        logger.error(f"Failed to generate title for session {session_id}: {e}")
-        db.rollback()
-    finally:
-        db.close()
+    from app import app
+    with app.app_context():
+        try:
+            repo = SQLRepository(db.session)
+            chat_service = ChatService(db_repo=repo)
+            new_title = _generate_title_via_llm(user_query) or user_query[:20]
+            chat_service.update_title(session_id, user_id, new_title)
+            logger.info(f"Title updated for session {session_id}: {new_title}")
+        except Exception as e:
+            logger.error(f"Failed to generate title for session {session_id}: {e}")
+            db.session.rollback()
