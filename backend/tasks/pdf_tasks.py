@@ -1,13 +1,16 @@
 """
 PDF 异步处理任务
 1. 先逐页解析 PDF 段落 + 解析图片元数据：每解析一页就写入 DB，前端可按页轮询
-2. 再逐段落向量化
+2. 通过 MinerU API 提取高质量图片/表格资产
+3. 再逐段落向量化
 状态机:
     pending → processing → completed / failed
 """
 import os
+import shutil
 import logging
 import uuid
+from pathlib import Path
 from celery import shared_task
 
 from core.database import db
@@ -131,6 +134,19 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
                 })
 
         # ===================== 逐段落向量化 =======================
+            # ---- MinerU 图片/表格高质量提取 ----
+            self.update_state(state="PROGRESS", meta={
+                "current_page": page_count,
+                "total_pages": page_count,
+                "phase": "mineru_extracting",
+            })
+
+            try:
+                _run_mineru_extraction(file_hash, filepath, upload_folder, task_id)
+            except Exception as e:
+                # MinerU 失败不影响主流程，降级为只有 PyMuPDF 的基础图片元数据
+                logger.warning(f"[Task {task_id}] MinerU extraction failed (non-fatal): {e}")
+
             self.update_state(state="PROGRESS", meta={
                 "current_page": page_count,
                 "total_pages": page_count,
@@ -225,3 +241,70 @@ def _run_rag_indexing_from_db(file_hash: str, task_id: str, user_id: uuid.UUID):
         logger.warning(f"[Task {task_id}] RAG service not available: {e}")
     except Exception as e:
         logger.error(f"[Task {task_id}] Error in RAG indexing: {e}")
+
+
+def _run_mineru_extraction(file_hash: str, filepath: str, upload_folder: str, task_id: str):
+    """
+    使用 MinerU 云端 API 提取 PDF 中的高质量图片和表格，
+    并将结果持久化到数据库和本地存储。
+    """
+    from services.mineru_service import MinerUService
+
+    if not MinerUService.is_configured():
+        logger.info(f"[Task {task_id}] MinerU not configured, skipping image/table extraction.")
+        return
+
+    svc = MinerUService()
+
+    # MinerU 结果缓存目录: uploads 同级的 cache/mineru/<file_hash>
+    cache_root = Path(upload_folder).parent / "cache" / "mineru"
+    output_dir = cache_root / file_hash
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"[Task {task_id}] Starting MinerU extraction for {file_hash}...")
+    assets = svc.extract_assets(filepath, file_hash, str(output_dir))
+
+    image_files = assets.get("images", [])
+    table_files = assets.get("tables", [])
+    logger.info(
+        f"[Task {task_id}] MinerU extracted {len(image_files)} images, "
+        f"{len(table_files)} tables for {file_hash}."
+    )
+
+    # ---- 保存图片到数据库 ----
+    if image_files:
+        repo = SQLRepository(db.session)
+        try:
+            images_to_save = []
+            for idx, img_path in enumerate(image_files):
+                page_number = MinerUService.guess_page_number(img_path)
+                # 存储路径: mineru/<file_hash>/images/<filename>
+                relative_path = f"mineru/{file_hash}/images/{img_path.name}"
+                images_to_save.append({
+                    "page_number": page_number,
+                    "image_index": idx,
+                    "bbox": [],
+                    "caption": "",
+                    "image_path": relative_path,
+                })
+            repo.save_images(file_hash, images_to_save)
+            logger.info(f"[Task {task_id}] Saved {len(images_to_save)} MinerU images to DB.")
+        except Exception as e:
+            logger.error(f"[Task {task_id}] Failed to save MinerU images to DB: {e}")
+            db.session.rollback()
+
+    # ---- 保存表格到本地存储 ----
+    if table_files:
+        from app import app
+        tables_root = Path(app.config['STORAGE_ROOT']) / 'tables' / file_hash
+        tables_root.mkdir(parents=True, exist_ok=True)
+        for idx, table_path in enumerate(table_files):
+            page_number = MinerUService.guess_page_number(table_path)
+            ext = table_path.suffix.lower() or ".html"
+            dest_name = f"page_{page_number}_table_{idx}{ext}"
+            dest_path = tables_root / dest_name
+            try:
+                shutil.copy2(str(table_path), str(dest_path))
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to copy table {table_path}: {e}")
+        logger.info(f"[Task {task_id}] Saved {len(table_files)} MinerU tables to {tables_root}.")

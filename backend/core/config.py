@@ -87,6 +87,11 @@ class JWTConfig(BaseModel):
     refresh_expire_days: int = 7
 
 
+class MinerUConfig(BaseModel):
+    api_token: str = ""
+    model_version: str = "vlm"   # pipeline | vlm | MinerU-HTML
+
+
 # ==================== 解析辅助 ====================
 
 def _parse_scene_model(value) -> SceneModelConfig:
@@ -217,9 +222,20 @@ class AppConfig:
         )
         self.jwt_secret = self.jwt.secret
 
+        # MinerU
+        mineru_conf = get_sec("mineru")
+        self.mineru = MinerUConfig(
+            api_token=mineru_conf.get("api_token", ""),
+            model_version=mineru_conf.get("model_version", "vlm"),
+        )
+
     @property
     def has_openai_key(self) -> bool:
         return self.openai is not None and bool(self.openai.api_key)
+
+    @property
+    def has_mineru_token(self) -> bool:
+        return bool(self.mineru.api_token)
 
 
 # Global Instance
