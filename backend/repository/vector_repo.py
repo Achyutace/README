@@ -7,7 +7,7 @@ try:
 except ImportError:
     models = None
 
-from backend.core.database import vector_db
+from core.database import vector_db
 
 logger = logging.getLogger(__name__)
 

@@ -5,8 +5,8 @@ import uuid
 import json
 import logging
 from typing import List, Dict, Optional, Any
-from ..repository.sql_repo import SQLRepository
-from ..model.db.doc_models import UserNote, UserHighlight
+from repository.sql_repo import SQLRepository
+from model.db.doc_models import UserNote, UserHighlight
 
 logger = logging.getLogger(__name__)
 

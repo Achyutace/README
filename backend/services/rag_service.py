@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Any
 
 from core.config import settings
 from core.llm_provider import resolve_llm_profile, get_langchain_embeddings
-from ..repository.vector_repo import vector_repo
+from repository.vector_repo import vector_repo
 from core.logging import get_logger
 
 logger = get_logger(__name__)
