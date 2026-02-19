@@ -12,7 +12,7 @@
 */
 
 import axios from 'axios'
-import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph } from '../types'
+import type { Translation, ChatMessage, Roadmap, PdfParagraph, Highlight, PdfMetadata } from '../types'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
@@ -269,10 +269,82 @@ export const pdfApi = {
     return data
   },
 
-  // 提取某个 PDF 的文本内容（可按页）
-  extractText: async (pdfId: string, pageNumber?: number): Promise<ExtractTextResponse> => {
-    const params = pageNumber ? { page: pageNumber } : {}
-    const { data } = await api.get<ExtractTextResponse>(`/pdf/${pdfId}/text`, { params })
+  // 获取 PDF 处理状态
+  status: async (pdfId: string, fromPage: number = 1): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed'
+    currentPage: number
+    totalPages: number
+    paragraphs: PdfParagraph[]
+    error?: string
+  }> => {
+    const { data } = await api.get(`/pdf/${pdfId}/status`, { params: { from_page: fromPage } })
+    return data
+  },
+
+  // 获取 PDF 信息
+  info: async (pdfId: string): Promise<{
+    id: string
+    pageCount: number
+    metadata: PdfMetadata
+  }> => {
+    const { data } = await api.get(`/pdf/${pdfId}/info`)
+    return data
+  },
+
+  // 获取 PDF 段落（替代 extractText）
+  getParagraphs: async (pdfId: string, page?: number): Promise<{ paragraphs: PdfParagraph[] }> => {
+    const params = page ? { page } : {}
+    const { data } = await api.get(`/pdf/${pdfId}/paragraphs`, { params })
+    return data
+  },
+
+  // 获取 PDF 源文件（Blob）
+  getSource: async (pdfId: string): Promise<Blob> => {
+    const { data } = await api.get(`/pdf/${pdfId}/source`, { responseType: 'blob' })
+    return data
+  },
+}
+
+// -----------------------------
+// 高亮 API
+// 对应后端：router/highlight.py
+// -----------------------------
+export const highlightApi = {
+  // 创建高亮
+  create: async (data: {
+    pdfId: string
+    page: number
+    rects: Array<{ x: number; y: number; width: number; height: number }>
+    pageWidth: number
+    pageHeight: number
+    text?: string
+    color?: string
+  }): Promise<{ success: boolean; id: number; rects: any }> => {
+    const { data: res } = await api.post('/highlight', data)
+    return res
+  },
+
+  // 获取高亮
+  getAll: async (pdfId: string, page?: number): Promise<{
+    success: boolean
+    highlights: Highlight[]
+    total: number
+  }> => {
+    const params: any = { pdfId }
+    if (page) params.page = page
+    const { data } = await api.get('/highlight', { params })
+    return data
+  },
+
+  // 更新高亮 (颜色)
+  update: async (id: number, color: string): Promise<{ success: boolean }> => {
+    const { data } = await api.put(`/highlight/${id}`, { color })
+    return data
+  },
+
+  // 删除高亮
+  delete: async (id: number): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/highlight/${id}`)
     return data
   },
 }
@@ -282,36 +354,38 @@ export const pdfApi = {
 // 对应后端： router/chatbox.py 和 router/translate.py
 // -----------------------------
 export const aiApi = {
-  // 提取关键词（返回 Keyword 数组）
-  // 后端接口：POST /chatbox/keywords
-  extractKeywords: async (pdfId: string): Promise<Keyword[]> => {
-    const { data } = await api.post<{ keywords: Keyword[] }>('/chatbox/keywords', { pdfId })
-    return data.keywords
-  },
-
   // 生成学习路线图（roadmap），返回 Roadmap 数据结构
   // 后端接口：POST /chatbox/roadmap
   generateRoadmap: async (pdfId: string): Promise<Roadmap> => {
-    const { data } = await api.post<{ roadmap: Roadmap }>('/chatbox/roadmap', { pdfId })
-    // 确保每个节点有 position（便于前端可视化），内部会调用 layoutNodes 做简单布局
-    return layoutNodes(data.roadmap)
+    // const { data } = await api.post<{ roadmap: Roadmap }>('/chatbox/roadmap', { pdfId })
+    // FIXME: 后端目前只有 /api/roadmap/ping，还没有实际实现。这里先用 mock 数据或抛出异常，或者前端处理
+    // 暂时保留原调用，但预期会失败或需对应后端修改
+    try {
+      const { data } = await api.post<{ roadmap: Roadmap }>('/chatbox/roadmap', { pdfId })
+      return layoutNodes(data.roadmap)
+    } catch (e) {
+      console.warn('Roadmap API not ready, returning empty/mock')
+      throw e
+    }
   },
 
-  // 生成文档摘要
-  // 后端接口：POST /chatbox/summary
-  generateSummary: async (pdfId: string): Promise<Summary> => {
-    const { data } = await api.post<Summary>('/chatbox/summary', { pdfId })
+  // 翻译任意文本
+  translateText: async (text: string, pdfId?: string): Promise<Translation> => {
+    const { data } = await api.post<Translation>('/translate/text', {
+      text,
+      pdfId,
+      contextParagraphs: 3
+    })
     return data
   },
 
-  // 翻译任意文本（后端应提供通用文本翻译接口）
-  // 备注：目前后端实现中还以段落为单位，若需要翻译任意文本需确保后端支持 /translate/text
-  translateText: async (text: string, pdfId?: string): Promise<Translation> => {
-    const { data } = await api.post<Translation>('/translate/text', { 
-      text,
-      pdfId, // 发送 pdfId 以便后端使用上下文（如检索相关段落）
-      contextParagraphs: 5 // 建议后端在翻译时考虑前后 5 段作为上下文
-    })
+  // 获取某页的历史翻译
+  translatePage: async (pdfId: string, pageNumber: number): Promise<{
+    pdfId: string
+    page: number
+    translations: Record<string, string> // paragraphId -> translation
+  }> => {
+    const { data } = await api.get(`/translate/page/${pdfId}/${pageNumber}`)
     return data
   },
 
@@ -331,13 +405,12 @@ export const aiApi = {
     return data
   },
 
-  // 对话（基于 PDF 的聊天），返回 response 和 citations（引用段落信息）
-  // 后端接口：POST /chatbox/message
+  // 对话（非流式）
   chat: async (
     pdfId: string,
     message: string,
     history: Array<{ role: string; content: string }>
-  ): Promise<{ response: string; citations: ChatMessage['citations'] }> => {
+  ): Promise<{ response: string; citations: ChatMessage['citations']; sessionId: string }> => {
     const { data } = await api.post('/chatbox/message', {
       pdfId,
       message,
@@ -345,6 +418,59 @@ export const aiApi = {
     })
     return data
   },
+
+  // 流式对话
+  streamChat: async (
+    pdfId: string,
+    message: string,
+    sessionId: string,
+    onMessage: (chunk: any) => void,
+    onError: (err: any) => void
+  ): Promise<void> => {
+    const token = getAccessToken()
+    await fetch(`${api.defaults.baseURL}/chatbox/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ pdfId, message, sessionId })
+    }).then(response => {
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+
+      function read() {
+        reader?.read().then(({ done, value }) => {
+          if (done) return
+          const chunk = decoder.decode(value)
+          const lines = chunk.split('\n\n')
+          lines.forEach(line => {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6))
+                onMessage(data)
+              } catch (e) {
+                console.error('SSE parse error:', e)
+              }
+            }
+          })
+          read()
+        }).catch(onError)
+      }
+      read()
+    }).catch(onError)
+  }
+}
+
+// -----------------------------
+// 系统 API
+// -----------------------------
+export const systemApi = {
+  health: async (): Promise<{ status: string; services: any }> => {
+    const { data } = await api.get('/health')
+    return data
+  }
 }
 
 // -----------------------------
@@ -417,7 +543,7 @@ export const chatSessionApi = {
     sessionId: string,
     message: string,
     pdfId?: string,
-    mode: 'agent' | 'simple' = 'agent', 
+    mode: 'agent' | 'simple' = 'agent',
     model?: string, // 可选：覆盖后端默认模型
     apiBase?: string, // 可选：自定义 OpenAI-like 的 base URL
     apiKey?: string // 可选：自定义 API Key（谨慎使用）
@@ -426,14 +552,14 @@ export const chatSessionApi = {
     response: string
     citations?: any[]
   }> => {
-    const endpoint = mode === 'simple' 
-      ? '/chatbox/simple-chat' 
+    const endpoint = mode === 'simple'
+      ? '/chatbox/simple-chat'
       : '/chatbox/message'
     const { data } = await api.post(endpoint, {
       sessionId,
       message,
       pdfId,
-      model, 
+      model,
       apiBase,
       apiKey
     })

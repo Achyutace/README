@@ -2,7 +2,7 @@
 ----------------------------------------------------------------------
                             类型定义
 ----------------------------------------------------------------------
-*/ 
+*/
 // PDF 文档
 export interface PdfDocument {
   id: string    // 文档Hash
@@ -10,6 +10,23 @@ export interface PdfDocument {
   url: string    // 本地预览URL（Blob URL），不应存储在后端
   uploadedAt: Date    // 上传时间
   pageCount?: number    // 可选的页数属性，后端返回时包含
+  metadata?: PdfMetadata // PDF元数据
+}
+
+export interface PdfMetadata {
+  title?: string
+  author?: string
+  subject?: string
+  keywords?: string
+  creator?: string
+  producer?: string
+  creationDate?: string
+  modDate?: string
+  format?: string
+}
+
+export interface DocumentSource {
+  source: Blob
 }
 
 // PDF 段落信息
@@ -46,6 +63,17 @@ export interface Keyword {
   }>
 }
 
+// 高亮 (对应后端 Highlight)
+export interface Highlight {
+  id: number
+  pdfId: string
+  page: number
+  rects: Array<{ x: number; y: number; width: number; height: number }>
+  text?: string
+  color?: string
+  createdAt?: string
+}
+
 // 翻译
 export interface Translation {
   originalText: string    // 原文
@@ -75,7 +103,7 @@ export interface ChatMessage {
 // 路线图
 export interface Roadmap {
   nodes: Array<{
-    id: string  
+    id: string
     type?: string
     data: RoadmapNodeData
     position: { x: number; y: number }
