@@ -89,9 +89,16 @@ export function usePageRender(
   async function renderPage(pageNumber: number, options?: RenderPageOptions): Promise<void> {
     const pdf = pdfDoc.value
     const refs = pageRefs.get(pageNumber)
-    if (!pdf || !refs) return
+    if (!pdf || !refs) {
+      if (!pdf) console.warn(`Cannot render page ${pageNumber}: PDF document not loaded`)
+      if (!refs) console.warn(`Cannot render page ${pageNumber}: page refs not found`)
+      return
+    }
 
-    if (renderTasks.has(pageNumber)) return
+    if (renderTasks.has(pageNumber)) {
+      console.warn(`Render task already in progress for page ${pageNumber}`)
+      return
+    }
 
     const preserveContent = !!options?.preserveContent && renderedPages.value.has(pageNumber)
 
@@ -108,7 +115,10 @@ export function usePageRender(
       alpha: false,
       willReadFrequently: false
     })
-    if (!context) return
+    if (!context) {
+      console.warn(`Failed to get 2D context for page ${pageNumber} canvas`)
+      return
+    }
 
     const outputScale = window.devicePixelRatio || 1
     const cssViewport = page.getViewport({ scale: scale.value })
@@ -181,10 +191,16 @@ export function usePageRender(
         cssViewport,
         refs.linkLayer,
         pdf,
-        (destPage) => {
-          // 内部链接跳转 - 通过事件通知外部处理
-          const event = new CustomEvent('pdf-internal-link', { detail: { page: destPage } })
+        (destCoords, clickX, clickY) => {
+          // 内部链接点击 - 通过事件通知外部处理，传递目标坐标和点击位置
+          const event = new CustomEvent('pdf-internal-link', { 
+            detail: { destCoords, clickX, clickY } 
+          })
           window.dispatchEvent(event)
+        },
+        (destCoords) => {
+          // 直接跳转到目标位置（table, section, figure, appendix 等）
+          scrollToPage(destCoords.page, true)
         }
       )
     } catch (err) {

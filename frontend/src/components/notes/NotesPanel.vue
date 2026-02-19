@@ -27,6 +27,7 @@ interface NoteCard {
   id: string | number  // 本地临时ID（string，如 temp-...）或数据库ID（number）
   title: string        // 笔记标题
   content: string      // 笔记正文（Markdown）
+  keywords: string[]   // 笔记关键词列表
   isEditing: boolean   // 是否处于编辑模式
   isCollapsed: boolean // 在已完成（非编辑）状态下是否折叠显示只读预览
   showRawMd?: boolean  // 编辑模式下是否显示原始 Markdown 文本编辑器
@@ -70,10 +71,11 @@ async function loadNotesFromDB() {
       id: note.id,
       title: note.title || '',
       content: note.content || '',
+      keywords: note.keywords || [],
       isEditing: false,
       isCollapsed: false,
       showRawMd: false,
-      createdAt: new Date(note.created_time).getTime(),
+      createdAt: new Date(note.createdAt).getTime(),
       isLocal: false
     }))
   } catch (error) {
@@ -112,11 +114,12 @@ async function saveNoteToDB(card: NoteCard) {
   
   try {
     if (card.isLocal) {
-      // 新建笔记：发送 pdfId、title、content
+      // 新建笔记：发送 pdfId、title、content、keywords
       const response = await notesApi.createNote({
         pdfId: libraryStore.currentDocument.id,
         title: card.title,
-        content: card.content
+        content: card.content,
+        keywords: card.keywords
       })
       // 将本地临时 ID 更新为后端返回的数据库 ID，并标记为已持久化
       card.id = response.id
@@ -125,7 +128,8 @@ async function saveNoteToDB(card: NoteCard) {
       // 更新笔记
       await notesApi.updateNote(card.id, {
         title: card.title,
-        content: card.content
+        content: card.content,
+        keywords: card.keywords
       })
     }
   } catch (error) {
@@ -146,6 +150,7 @@ function addCard() {
     id: generateTempId(),
     title: '',
     content: '',
+    keywords: [],
     isEditing: true,
     isCollapsed: false,
     showRawMd: false,
@@ -226,6 +231,27 @@ function getFirstLine(text: string): string {
   const cleanText = text.replace(/[#*`]/g, '') 
   const firstLine = cleanText.split('\n')[0] || ''
   return firstLine
+}
+
+// ------------------------- 关键词管理 -------------------------
+/**
+ * 添加关键词
+ * 按回车时触发，将输入的关键词添加到卡片
+ */
+function addKeyword(card: NoteCard, event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = input.value.trim()
+  if (value && !card.keywords.includes(value)) {
+    card.keywords.push(value)
+  }
+  input.value = ''
+}
+
+/**
+ * 移除关键词
+ */
+function removeKeyword(card: NoteCard, index: number) {
+  card.keywords.splice(index, 1)
 }
 
 // ------------------------- 文本域自适应高度 -------------------------
@@ -313,6 +339,35 @@ defineExpose({ addCard })
           <div class="py-0 px-3">
             <div class="border-t border-gray-100 dark:border-gray-700 w-1/4"></div>
           </div>
+          <!-- Keywords Input -->
+          <div class="py-2 px-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span 
+                v-for="(keyword, index) in card.keywords" 
+                :key="index"
+                class="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full"
+              >
+                {{ keyword }}
+                <button
+                  @click="removeKeyword(card, index)"
+                  class="ml-1 hover:text-primary-900 dark:hover:text-primary-100"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+              <input
+                type="text"
+                placeholder="添加关键词，回车确认"
+                @keyup.enter="addKeyword(card, $event)"
+                class="flex-1 min-w-[120px] text-xs bg-transparent border-none outline-none text-gray-600 dark:text-gray-400 placeholder-gray-400"
+              />
+            </div>
+          </div>
+          <div class="py-0 px-3">
+            <div class="border-t border-gray-100 dark:border-gray-700 w-full"></div>
+          </div>
           <div class="py-2 px-3">
             <textarea
               v-if="card.showRawMd"
@@ -340,8 +395,20 @@ defineExpose({ addCard })
             @click="toggleEdit(card)"
           >
             <div class="py-2 flex items-center justify-between">
-              <div class="flex-1 px-3 text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                {{ card.title || '无标题' }}
+              <div class="flex-1 px-3">
+                <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                  {{ card.title || '无标题' }}
+                </div>
+                <!-- Keywords Display -->
+                <div v-if="card.keywords.length > 0" class="flex flex-wrap gap-1 mt-1">
+                  <span 
+                    v-for="(keyword, index) in card.keywords" 
+                    :key="index"
+                    class="inline-block px-1.5 py-0.5 text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
+                  >
+                    {{ keyword }}
+                  </span>
+                </div>
               </div>
               <div class="flex items-center">
                 <!-- Delete Button -->

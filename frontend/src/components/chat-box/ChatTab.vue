@@ -427,7 +427,7 @@ async function sendMessage(message?: string) {  // 发送消息的主要函数
   if (!content) return  // 如果内容为空，直接返回
   const pdfId = libraryStore.currentDocument?.id  // 获取当前 PDF ID
   if (!pdfId) {  // 如果没有 PDF ID
-    console.error('No PDF selected')  // 记录错误
+    console.warn('Cannot send message: no PDF document selected')  // 记录警告
     return
   }
   // 如果没有会话ID，先创建一个

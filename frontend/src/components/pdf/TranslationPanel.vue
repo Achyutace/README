@@ -218,7 +218,10 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
 
     // --- 2. 段落翻译面板处理 ---
     const panel = translationStore.translationPanels.find(p => p.id === currentId)
-    if (!panel) return
+    if (!panel) {
+      console.warn(`Translation panel ${currentId} not found during drag`)
+      return
+    }
     
     // 吸附检测逻辑
     const distanceToRight = window.innerWidth - (newPos.x + panel.size.width)
@@ -299,6 +302,8 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
                     width: clamp(snapTargetRect.value.width, MIN_WIDTH, MAX_WIDTH),
                     height: panel.size.height
                 })
+             } else if (draggingPanelId.value) {
+                console.warn(`Panel ${draggingPanelId.value} not found when applying snap resize`)
              }
         }
     }
@@ -320,7 +325,10 @@ function startDrag(e: MouseEvent, panelId: string) {
     setDragPosition(translationStore.translationPanel.position)
   } else {
     const panel = translationStore.translationPanels.find(p => p.id === panelId)
-    if (!panel) return
+    if (!panel) {
+      console.warn(`Translation panel ${panelId} not found when starting drag`)
+      return
+    }
     setDragPosition(panel.position)
     translationStore.setPanelSnapMode(panelId, 'none')
     translationStore.bringPanelToFront(panelId)
@@ -354,7 +362,10 @@ const { startResize: initResize, setSize: setResizeSize } = useResizableWindow({
 
     // 2. 段落翻译面板
     const panel = translationStore.translationPanels.find(p => p.id === id)
-    if (!panel) return
+    if (!panel) {
+      console.warn(`Translation panel ${id} not found during resize`)
+      return
+    }
 
     translationStore.updatePanelSize(id, size)
     if (delta.x !== 0 || delta.y !== 0) {
@@ -375,10 +386,13 @@ function startResize(e: MouseEvent, panelId: string, direction: string) {
   if (panelId === TEXT_PANEL_ID) {
     setResizeSize(textPanelSize.value)
   } else {
-      const panel = translationStore.translationPanels.find(p => p.id === panelId)
-      if (!panel) return
-      setResizeSize(panel.size)
-      translationStore.bringPanelToFront(panelId)
+    const panel = translationStore.translationPanels.find(p => p.id === panelId)
+    if (!panel) {
+      console.warn(`Translation panel ${panelId} not found when starting resize`)
+      return
+    }
+    setResizeSize(panel.size)
+    translationStore.bringPanelToFront(panelId)
   }
   
   initResize(e, direction)

@@ -5,6 +5,20 @@
 
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { LinkOverlayRect, PageRef } from '../types/pdf'
+import { 
+  appendInternalLinkOverlay, 
+  resolveDestination, 
+  type DestinationCoords 
+} from './InternalLink'
+
+export { 
+  fetchInternalLinkData, 
+  appendInternalLinkOverlay, 
+  getParagraphByCoords, 
+  resolveDestination, 
+  type DestinationCoords, 
+  type InternalLinkResult 
+} from './InternalLink'
 
 /**
  * 添加外部链接覆盖层
@@ -32,76 +46,6 @@ export function appendLinkOverlay(
 }
 
 /**
- * 添加内部链接覆盖层
- */
-export function appendInternalLinkOverlay(
-  container: HTMLElement,
-  rect: LinkOverlayRect,
-  destPage: number,
-  onClick: (page: number) => void,
-  title?: string
-): void {
-  const link = document.createElement('div')
-  link.dataset.destPage = String(destPage)
-  link.title = title || `跳转到第 ${destPage} 页`
-  link.style.display = 'block'
-  link.style.left = `${rect.left}px`
-  link.style.top = `${rect.top}px`
-  link.style.width = `${rect.width}px`
-  link.style.height = `${rect.height}px`
-  link.style.position = 'absolute'
-  link.className = 'hover:bg-blue-200/30 cursor-pointer internal-link'
-
-  // 防止与容器的点击处理冲突
-  link.addEventListener('mousedown', (e) => {
-    e.stopPropagation()
-  })
-
-  link.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    onClick(destPage)
-  })
-  container.appendChild(link)
-}
-
-/**
- * 解析 PDF 内部链接目标页码
- */
-export async function resolveDestination(
-  pdfDoc: PDFDocumentProxy,
-  dest: unknown
-): Promise<number | null> {
-  if (!pdfDoc) return null
-
-  try {
-    let destArray = dest
-
-    // 如果目标是 String，需要先解析
-    if (typeof dest === 'string') {
-      destArray = await pdfDoc.getDestination(dest)
-    }
-
-    // 确保目标是数组
-    if (!destArray || !Array.isArray(destArray)) return null
-
-    // 目标数组的第一个元素是页面引用
-    const pageRef = destArray[0]
-    if (!pageRef) return null
-
-    // 获取页码
-    const pageIndex = await pdfDoc.getPageIndex(pageRef)
-
-    // 页码从 1 开始
-    return pageIndex + 1
-
-  } catch (err) {
-    console.error('Error resolving destination:', err)
-    return null
-  }
-}
-
-/**
  * 渲染 Link Layer
  */
 export async function renderLinkLayer(
@@ -109,7 +53,8 @@ export async function renderLinkLayer(
   viewport: { convertToViewportRectangle: (rect: number[]) => number[] },
   container: HTMLElement,
   pdfDoc: PDFDocumentProxy,
-  onInternalLinkClick: (page: number) => void
+  onInternalLinkClick: (dest: DestinationCoords, clickX: number, clickY: number) => void,
+  onDirectJump?: (dest: DestinationCoords) => void
 ): Promise<void> {
   container.innerHTML = ''
 
@@ -139,29 +84,27 @@ export async function renderLinkLayer(
       // 外部链接
       appendLinkOverlay(container, overlayRect, annot.url, annot.url || 'External Link')
     } else if (annot.dest) {
-      // 内部链接（如论文引用）
-      const destPage = await resolveDestination(pdfDoc, annot.dest)
-      if (destPage) {
-        appendInternalLinkOverlay(
-          container,
-          overlayRect,
-          destPage,
-          onInternalLinkClick,
-          `跳转到第 ${destPage} 页`
-        )
-      }
+      // 内部链接（如论文引用）- 延迟解析目标坐标到点击时
+      appendInternalLinkOverlay(
+        container,
+        overlayRect,
+        annot.dest,
+        pdfDoc,
+        onInternalLinkClick,
+        onDirectJump,
+        '点击跳转到引用位置'
+      )
     } else if (annot.action?.dest) {
-      // 带 action 的内部链接
-      const destPage = await resolveDestination(pdfDoc, annot.action.dest)
-      if (destPage) {
-        appendInternalLinkOverlay(
-          container,
-          overlayRect,
-          destPage,
-          onInternalLinkClick,
-          `跳转到第 ${destPage} 页`
-        )
-      }
+      // 带 action 的内部链接 - 延迟解析目标坐标到点击时
+      appendInternalLinkOverlay(
+        container,
+        overlayRect,
+        annot.action.dest,
+        pdfDoc,
+        onInternalLinkClick,
+        onDirectJump,
+        '点击跳转到引用位置'
+      )
     }
   }
 }

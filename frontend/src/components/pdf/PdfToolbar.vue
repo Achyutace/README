@@ -41,6 +41,8 @@ function handlePageInput() {
   const page = parseInt(pageInput.value)  // 将输入转换为整数
   if (!isNaN(page)) {  // 如果转换成功
     pdfStore.goToPage(page)  // 调用 store 方法跳转到指定页面
+  } else {
+    console.warn(`Invalid page input: "${pageInput.value}"`)
   }
   pageInput.value = ''  // 清空输入框
 }
