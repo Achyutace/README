@@ -1,65 +1,49 @@
 # README
 
-## 运行指南
+## 前端开发
 
-请按照以下步骤分别启动后端和前端服务。
+> 无需启动后端，使用 Prism 根据 OpenAPI 文档自动生成 Mock 数据。
 
-### 1. 后端启动 (Backend)
-
-建议使用 Python 3.10+ 环境。
-
-#### Windows
-```powershell
-# 进入后端目录
-cd backend
-
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-.\venv\Scripts\activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动服务
-python app.py
-```
-
-#### macOS / Linux
 ```bash
-# 进入后端目录
-cd backend
-
-# 创建虚拟环境
-python3 -m venv venv
-
-# 激活虚拟环境
-source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动服务
-python3 app.py
+npm install -g @stoplight/prism-cli
 ```
+
+**每次开发：** 分别在两个终端运行：
+
+```bash
+# 终端 1：启动 Mock Server（项目根目录）
+prism mock docs/openapi/openapi.yaml
+
+# 终端 2：启动前端
+cd frontend && npm install && npm run dev:mock
+```
+
+联调阶段（后端已部署），修改 `frontend/.env.production` 中的域名后运行 `npm run dev` 即可。
 
 ---
 
-### 2. 前端启动 (Frontend)
+## 后端开发
 
-需要安装 [Node.js](https://nodejs.org/) (推荐 v18+)。
+**前提：** Python 3.10+，以及获取 `config.yaml`（含云服务连接信息，不入库）。
 
-#### 所有系统 (Windows/macOS/Linux)
 ```bash
-# 进入前端目录
-cd frontend
+# Windows
+cd backend
+python -m venv venv && .\venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
 
-# 安装依赖 (如果尚未安装)
-npm install
+# macOS / Linux
+cd backend
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python3 app.py
+```
 
-# 启动开发服务器
-npm run dev
+服务启动在 `http://localhost:5000`，需同时启动 Celery Worker：
+
+```bash
+celery -A celery_app worker --loglevel=info --pool=solo
 ```
 
 ---

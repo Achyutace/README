@@ -11,7 +11,7 @@ highlight_bp = Blueprint('highlight', __name__, url_prefix='/api/highlight')
 
 # ==================== 路由接口 ====================
 
-@highlight_bp.route('/', methods=['POST'])
+@highlight_bp.route('', methods=['POST'])
 @jwt_required()
 def create_highlight():
     """
@@ -66,7 +66,7 @@ def create_highlight():
     })
 
 
-@highlight_bp.route('/', methods=['GET'])
+@highlight_bp.route('', methods=['GET'])
 @jwt_required()
 def get_highlights():
     """

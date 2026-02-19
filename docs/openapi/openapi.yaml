@@ -63,8 +63,10 @@ paths:
   # --- Notes 相关 API ---
   /notes:
     $ref: "./paths/notes.yaml#/create"
-  "/notes/{id}":
-    $ref: "./paths/notes.yaml#/by-id"
+  "/notes/{pdf_id}":
+    $ref: "./paths/notes.yaml#/by-pdf-id"
+  "/notes/{note_id}":
+    $ref: "./paths/notes.yaml#/by-note-id"
 
   # --- Highlight 相关 API ---
   /highlight:

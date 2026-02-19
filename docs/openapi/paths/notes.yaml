@@ -33,15 +33,15 @@ create:
               $ref: '../components/schemas/common.yaml#/ErrorResponse'
 
 
-by-id:
+by-pdf-id:
   get:
     tags: [Notes]
     summary: 获取某 PDF 的所有笔记
     security:
       - BearerAuth: []
-    description: "Flask 路由: GET /notes/<pdf_id>，此处 id 为 PDF 文件 Hash (string)"
+    description: "Flask 路由: GET /notes/<pdf_id>"
     parameters:
-      - name: id
+      - name: pdf_id
         in: path
         required: true
         description: PDF 文件 Hash
@@ -60,17 +60,19 @@ by-id:
           application/json:
             schema:
               $ref: '../components/schemas/common.yaml#/ErrorResponse'
+
+by-note-id:
   put:
     tags: [Notes]
     summary: 更新笔记
     security:
       - BearerAuth: []
-    description: "Flask 路由: PUT /notes/<int:note_id>，此处 id 为笔记 ID (integer)"
+    description: "Flask 路由: PUT /notes/<int:note_id>"
     parameters:
-      - name: id
+      - name: note_id
         in: path
         required: true
-        description: 笔记ID (integer)
+        description: 笔记ID
         schema:
           type: integer
     requestBody:
@@ -103,12 +105,12 @@ by-id:
     summary: 删除笔记
     security:
       - BearerAuth: []
-    description: "Flask 路由: DELETE /notes/<int:note_id>，此处 id 为笔记 ID (integer)"
+    description: "Flask 路由: DELETE /notes/<int:note_id>"
     parameters:
-      - name: id
+      - name: note_id
         in: path
         required: true
-        description: 笔记ID (integer)
+        description: 笔记ID
         schema:
           type: integer
     responses:
