@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+
+  # Message Broker & Task Result Backend
+  redis:
+    image: redis:7-alpine
+    container_name: paper_agent_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Main API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: paper_agent_backend
+    volumes:
+      # Map host storage directory to container storage
+      # We put this mapped volume here so uploaded PDFs persist
+      - ./storage:/app/storage
+      # You might also want to map the config.yaml if you want to edit it easily without rebuilding
+      - ./config.yaml:/app/config.yaml
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Asynchronous Task Worker
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: paper_agent_celery
+    command: celery -A celery_app worker --loglevel=info
+    volumes:
+      - ./storage:/app/storage
+      - ./config.yaml:/app/config.yaml
+    environment:
+      - FLASK_ENV=production
+    depends_on:
+      - backend
+      - redis
+    restart: unless-stopped
+
+  # Web Frontend using Nginx (Vue3 SPA)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: paper_agent_frontend
+    ports:
+      - "80:80" # Host port 80 matches Nginx listening port
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  redis_data:
