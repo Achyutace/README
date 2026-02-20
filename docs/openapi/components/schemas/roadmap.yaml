@@ -1,0 +1,66 @@
+# Roadmap 相关 Schema
+
+RoadmapPaper:
+  type: object
+  properties:
+    title:
+      type: string
+    link:
+      type: string
+    year:
+      type: string
+
+RoadmapNodeData:
+  type: object
+  properties:
+    label:
+      type: string
+    description:
+      type: string
+    papers:
+      type: array
+      items:
+        $ref: '#/RoadmapPaper'
+
+RoadmapNode:
+  type: object
+  properties:
+    id:
+      type: string
+    type:
+      type: string
+    label:
+      type: string
+    position:
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+    data:
+      $ref: '#/RoadmapNodeData'
+
+RoadmapEdge:
+  type: object
+  properties:
+    id:
+      type: string
+    source:
+      type: string
+    target:
+      type: string
+    label:
+      type: string
+
+Roadmap:
+  type: object
+  properties:
+    nodes:
+      type: array
+      items:
+        $ref: '#/RoadmapNode'
+    edges:
+      type: array
+      items:
+        $ref: '#/RoadmapEdge'

@@ -5,19 +5,17 @@
 
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { LinkOverlayRect, PageRef } from '../types/pdf'
-import { 
-  appendInternalLinkOverlay, 
-  resolveDestination, 
-  type DestinationCoords 
+import {
+  appendInternalLinkOverlay,
+  type DestinationCoords
 } from './InternalLink'
 
-export { 
-  fetchInternalLinkData, 
-  appendInternalLinkOverlay, 
-  getParagraphByCoords, 
-  resolveDestination, 
-  type DestinationCoords, 
-  type InternalLinkResult 
+export {
+  fetchInternalLinkData,
+  appendInternalLinkOverlay,
+  getParagraphByCoords,
+  type DestinationCoords,
+  type InternalLinkResult
 } from './InternalLink'
 
 /**

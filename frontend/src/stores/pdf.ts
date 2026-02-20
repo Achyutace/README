@@ -2,19 +2,15 @@
 ----------------------------------------------------------------------
                     PDF状态，翻译面板等相关状态管理
 ----------------------------------------------------------------------
-*/ 
+*/
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import type { PdfParagraph } from '../types'
 import type { PageSize } from '../types/pdf'
-import type { InternalLinkData } from '../api'
+import { highlightApi, type InternalLinkData } from '../api'
 
- // 实际缩放 150%，显示为 100%
+// 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
-
-// 用于在 localStorage 中存储高亮数据的 key
-const HIGHLIGHTS_STORAGE_KEY = 'pdf-highlights' 
-
 // 矩形框（左上角坐标 + 宽高）
 type NormalizedRect = {
   left: number
@@ -66,13 +62,13 @@ export const usePdfStore = defineStore('pdf', () => {
   })
 
   // 默认高亮颜色（亮黄色）
-  const highlightColor = ref('#F6E05E') 
+  const highlightColor = ref('#F6E05E')
 
   // 当前选中高亮（用于编辑或删除）
-  const selectedHighlight = ref<Highlight | null>(null) 
+  const selectedHighlight = ref<Highlight | null>(null)
 
   // 是否处于高亮编辑模式
-  const isEditingHighlight = ref(false) 
+  const isEditingHighlight = ref(false)
 
   // 所有文档的段落数据（用于翻译/定位等功能）
   const allParagraphs = ref<Record<string, PdfParagraph[]>>({})
@@ -92,38 +88,6 @@ export const usePdfStore = defineStore('pdf', () => {
   // UI 显示的缩放百分比
   const scalePercent = computed(() => Math.round((scale.value / DEFAULT_SCALE) * 100))
 
-  // ---------------------- 本地存储（localStorage）读写 ----------------------
-  // 从 localStorage 加载高亮数据，避免每次刷新丢失高亮
-  function loadHighlightsFromStorage() {
-    try {
-      const stored = localStorage.getItem(HIGHLIGHTS_STORAGE_KEY)
-      if (stored) {
-        allHighlights.value = JSON.parse(stored)
-      }
-    } catch (err) {
-      // 读取失败则记录错误，但不影响主流程
-      console.error('Failed to load highlights from storage:', err)
-    }
-  }
-
-  // 将高亮数据保存到 localStorage
-  function saveHighlightsToStorage() {
-    try {
-      localStorage.setItem(HIGHLIGHTS_STORAGE_KEY, JSON.stringify(allHighlights.value))
-    } catch (err) {
-      // 保存失败通常是因为浏览器存储空间或隐私策略
-      console.error('Failed to save highlights to storage:', err)
-    }
-  }
-
-  // 初始化时从 localStorage 加载已有高亮
-  loadHighlightsFromStorage()
-
-  // 监听高亮对象变化并自动保存（深度观察）
-  watch(allHighlights, () => {
-    saveHighlightsToStorage()
-  }, { deep: true })
-
   // ---------------------- 文档与页面控制 ----------------------
   // 设置当前打开的 PDF（可包含 documentId 用于区分不同文档）
   function setCurrentPdf(url: string, documentId?: string) {
@@ -138,8 +102,12 @@ export const usePdfStore = defineStore('pdf', () => {
     isLoading.value = true
 
     // 确保当前文档在高亮存储中存在对应数组（避免未定义访问）
-    if (documentId && !allHighlights.value[documentId]) {
-      allHighlights.value[documentId] = []
+    if (documentId) {
+      if (!allHighlights.value[documentId]) {
+        allHighlights.value[documentId] = []
+      }
+      // 触发初始的后台抓取尝试
+      fetchHighlightsForPdf(documentId)
     }
   }
 
@@ -210,7 +178,7 @@ export const usePdfStore = defineStore('pdf', () => {
   }
 
   // 从当前选择创建一个高亮并保存到当前文档
-  function addHighlightFromSelection() {
+  async function addHighlightFromSelection() {
     // 需要有选择信息、选中文本且存在当前文档 ID
     if (!selectionInfo.value || !selectedText.value || !currentDocumentId.value) {
       if (!selectionInfo.value) console.warn('Cannot add highlight: no selection info')
@@ -220,19 +188,35 @@ export const usePdfStore = defineStore('pdf', () => {
     }
 
     const docId = currentDocumentId.value
-    if (!allHighlights.value[docId]) {
-      allHighlights.value[docId] = []
-    }
+    const page = selectionInfo.value.page
+    const pageData = pageSizesArray.value?.[page - 1] || pageSizesConstant.value
+    const pageWidth = pageData?.width || 800
+    const pageHeight = pageData?.height || 1200
 
-    // 生成一个唯一 id（时间戳 + 随机片段）
-    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    allHighlights.value[docId].push({
-      id,
-      page: selectionInfo.value.page,
-      rects: selectionInfo.value.rects,
-      text: selectedText.value,
-      color: highlightColor.value
-    })
+    try {
+      const res = await highlightApi.createHighlight({
+        pdfId: docId,
+        page,
+        rects: selectionInfo.value.rects, // contains { left, top, width, height }
+        pageWidth,
+        pageHeight,
+        text: selectedText.value,
+        color: highlightColor.value
+      })
+      if (res.success) {
+        // 请求成功后直接从服务端反向刷新，确保本地数据归一化格式及结构对应最新值
+        await fetchHighlightsForPdf(docId)
+
+        // 发送广播
+        import('../utils/broadcast').then(({ broadcastSync }) => {
+          broadcastSync('RELOAD_HIGHLIGHTS', docId)
+        })
+      }
+    } catch (error) {
+      console.error('Failed to create highlight remotely', error)
+    }
+    // 隐藏浮层与预选择
+    clearSelection()
   }
 
   // 获取指定页面的高亮列表
@@ -260,38 +244,49 @@ export const usePdfStore = defineStore('pdf', () => {
   }
 
   // 删除当前文档下的某条高亮
-  function removeHighlight(id: string) {
+  async function removeHighlight(id: string) {
     if (!currentDocumentId.value) {
       console.warn('Cannot remove highlight: no current document')
       return
     }
 
     const docId = currentDocumentId.value
-    if (allHighlights.value[docId]) {
-      const beforeLength = allHighlights.value[docId].length
-      allHighlights.value[docId] = allHighlights.value[docId].filter(h => h.id !== id)
-      if (allHighlights.value[docId].length === beforeLength) {
-        console.warn(`Highlight ${id} not found in document ${docId}`)
+    try {
+      await highlightApi.deleteHighlight(id)
+      // 后台删除成功后同步本地缓存
+      if (allHighlights.value[docId]) {
+        allHighlights.value[docId] = allHighlights.value[docId].filter(h => String(h.id) !== String(id))
       }
-    } else {
-      console.warn(`No highlights found for document ${docId}`)
+
+      clearHighlightSelection()
+      import('../utils/broadcast').then(({ broadcastSync }) => {
+        broadcastSync('RELOAD_HIGHLIGHTS', docId)
+      })
+    } catch (e) {
+      console.error("Failed to delete remote highlight:", e)
     }
-    clearHighlightSelection()
   }
 
   // 更新某条高亮的颜色
-  function updateHighlightColor(id: string, color: string) {
+  async function updateHighlightColor(id: string, color: string) {
     if (!currentDocumentId.value) {
       console.warn('Cannot update highlight color: no current document')
       return
     }
 
     const docId = currentDocumentId.value
-    const highlight = allHighlights.value[docId]?.find(h => h.id === id)
-    if (highlight) {
-      highlight.color = color
-    } else {
-      console.warn(`Highlight ${id} not found in document ${docId} for color update`)
+    try {
+      await highlightApi.updateHighlight(id, color)
+      // 更新成功后，改本地样式
+      const highlight = allHighlights.value[docId]?.find(h => String(h.id) === String(id))
+      if (highlight) {
+        highlight.color = color
+        import('../utils/broadcast').then(({ broadcastSync }) => {
+          broadcastSync('RELOAD_HIGHLIGHTS', docId)
+        })
+      }
+    } catch (e) {
+      console.error("Failed to update remote highlight:", e)
     }
   }
 
@@ -301,7 +296,7 @@ export const usePdfStore = defineStore('pdf', () => {
       if (h.page !== page) return false
       return h.rects.some(rect => {
         return x >= rect.left && x <= rect.left + rect.width &&
-               y >= rect.top && y <= rect.top + rect.height
+          y >= rect.top && y <= rect.top + rect.height
       })
     })
   }
@@ -310,7 +305,9 @@ export const usePdfStore = defineStore('pdf', () => {
   function removeDocumentHighlights(documentId: string) {
     if (allHighlights.value[documentId]) {
       delete allHighlights.value[documentId]
-      saveHighlightsToStorage() // 删除后立即持久化
+      import('../utils/broadcast').then(({ broadcastSync }) => {
+        broadcastSync('RELOAD_HIGHLIGHTS', documentId)
+      })
     }
   }
 
@@ -468,6 +465,41 @@ export const usePdfStore = defineStore('pdf', () => {
   function setInternalLinkLoading(loading: boolean) {
     internalLinkPopup.value.isLoading = loading
   }
+
+  // 从后端批量同步高亮数据
+  async function fetchHighlightsForPdf(pdfId: string) {
+    try {
+      const { success, highlights: hList } = await highlightApi.getHighlights(pdfId)
+      if (success && Array.isArray(hList)) {
+        // 由于从后端获取的坐标已经是一组包含 {x,y,width,height} 的列表。
+        // 而前端预设为 NormalizedRect (left, top, width, height)
+        allHighlights.value[pdfId] = hList.map(item => ({
+          id: String(item.id),
+          page: item.page_number,
+          rects: Array.isArray(item.rects)
+            ? item.rects.map((r: any) => ({ left: r.x, top: r.y, width: r.width, height: r.height }))
+            : [],
+          text: item.selected_text || '',
+          color: item.color || '#FFFF00'
+        }))
+      }
+    } catch (e) {
+      console.error('Failed to reload highlights', e)
+    }
+  }
+
+  // ---------------------- 跨标签监听 ----------------------
+  import('../utils/broadcast').then(({ syncChannel }) => {
+    syncChannel.addEventListener('message', (event) => {
+      const { type, payload } = event.data
+      if (type === 'RELOAD_HIGHLIGHTS') {
+        if (payload && payload === currentDocumentId.value) {
+          fetchHighlightsForPdf(payload)
+          console.log(`[Broadcast] Required reloading highlights for PDF: ${payload}`)
+        }
+      }
+    })
+  }).catch(e => console.error("Broadcast init failed in PDF store", e))
 
   // ---------------------- 导出 store 接口 ----------------------
   return {

@@ -40,9 +40,9 @@ export const useAiStore = defineStore('ai', () => {
   const summary = ref<Summary | null>(null) // 文档摘要
   const currentTranslation = ref<Translation | null>(null) // 当前选中的翻译结果
   const chatMessages = ref<ChatMessage[]>([]) // 当前会话的消息（显示在聊天窗口）
-  
+
   // 会话管理
-  const currentSessionId = ref<string | null>(null) // 当前激活的会话 ID（null 表示未选择会话）
+  const currentSessionId = ref<string | null>(localStorage.getItem('readme_current_session') || null) // 当前激活的会话 ID（null 表示未选择会话）
   const chatSessions = ref<ChatSession[]>([]) // 所有会话（可能包含来自不同 PDF 的会话）
 
   // 加载状态标志，用于显示 loading 指示器
@@ -52,42 +52,17 @@ export const useAiStore = defineStore('ai', () => {
   const isLoadingChat = ref(false)
 
   // -----------------------------
-  // 本地缓存（sessionStorage）相关逻辑
+  // 本地缓存（只有极轻量状态 ID）相关逻辑
   // -----------------------------
-  // 从 sessionStorage 加载聊天会话缓存（仅在标签页/窗口内有效，浏览器关闭后清除）
-  function loadSessionsFromStorage() {
-    try {
-      const stored = sessionStorage.getItem('chatSessions')
-      if (stored) {
-        const sessions = JSON.parse(stored)
-        // 将序列化后的 timestamp 恢复为 Date 对象
-        chatSessions.value = sessions.map((s: any) => ({
-          ...s,
-          messages: s.messages.map((m: any) => ({
-            ...m,
-            timestamp: new Date(m.timestamp)
-          }))
-        }))
-      }
-    } catch (error) {
-      // 加载失败时记录错误，不让异常中断应用
-      console.error('Failed to load chat sessions from cache:', error)
-    }
-  }
 
-  // 将当前会话数组保存到 sessionStorage（字符串化）
-  function saveSessionsToStorage() {
-    try {
-      sessionStorage.setItem('chatSessions', JSON.stringify(chatSessions.value))
-    } catch (error) {
-      console.error('Failed to cache chat sessions:', error)
+  // 监听当前会话 ID 的变化并持久化至 localStorage，以保障刷新不断代
+  watch(currentSessionId, (newId) => {
+    if (newId) {
+      localStorage.setItem('readme_current_session', newId)
+    } else {
+      localStorage.removeItem('readme_current_session')
     }
-  }
-
-  // 监听 chatSessions 的变化并自动触发保存（使用 deep 递归监听以捕获内部数组/对象变更）
-  watch(chatSessions, () => {
-    saveSessionsToStorage()
-  }, { deep: true })
+  })
 
   // -----------------------------
   // 与后端交互：加载会话列表
@@ -116,12 +91,20 @@ export const useAiStore = defineStore('ai', () => {
           chatSessions.value = backendSessions
         }
 
+        // 校验：如果当前 currentSessionId 不在新列表中，说明该会话已被后端删除，重置状态
+        if (currentSessionId.value) {
+          const stillExists = chatSessions.value.some(s => s.id === currentSessionId.value)
+          if (!stillExists) {
+            console.warn(`[AI Store] Session ${currentSessionId.value} no longer exists on backend. Resetting.`)
+            clearChat()
+          }
+        }
+
         console.log(`Loaded ${response.sessions.length} sessions from backend for pdfId: ${pdfId || 'all'}`)
       }
     } catch (error) {
       console.error('Failed to load sessions from backend:', error)
-      // 后端不可用时，回退到本地缓存以保证离线体验
-      loadSessionsFromStorage()
+      // 后端不可达时保留本地缓存数据，不做清除（离线降级）
     }
   }
 
@@ -152,8 +135,7 @@ export const useAiStore = defineStore('ai', () => {
           chatMessages.value = messages
         }
 
-        // 同步缓存
-        saveSessionsToStorage()
+        // 去掉了本地粗放的 json 保存，只用负责内存更新和呈现
         console.log(`Loaded ${messages.length} messages for session: ${sessionId}`)
         return messages
       }
@@ -162,9 +144,6 @@ export const useAiStore = defineStore('ai', () => {
     }
     return []
   }
-
-  // 组件初始化时尝试从本地缓存加载（真正从后端加载会话在 PDF 切换时由组件触发）
-  loadSessionsFromStorage()
 
   // -----------------------------
   // 面板标签定义（用于 UI）
@@ -206,7 +185,7 @@ export const useAiStore = defineStore('ai', () => {
       timestamp: new Date(),        // 生成消息时间戳
     }
     chatMessages.value.push(newMessage)
-    
+
     // 如果当前有会话，更新该会话的消息数组并刷新 updatedAt
     if (currentSessionId.value) {
       const session = chatSessions.value.find(s => s.id === currentSessionId.value)
@@ -229,7 +208,7 @@ export const useAiStore = defineStore('ai', () => {
     chatMessages.value = []
     currentSessionId.value = null
   }
-  
+
   // -----------------------------
   // 会话创建 / 加载 / 删除
   // -----------------------------
@@ -238,7 +217,7 @@ export const useAiStore = defineStore('ai', () => {
     try {
       // 请求后端创建会话
       const data = await chatSessionApi.createSession()
-      
+
       const newSession: ChatSession = {
         id: data.sessionId, // 使用后端返回的 ID
         pdfId,
@@ -247,22 +226,24 @@ export const useAiStore = defineStore('ai', () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }
-      
+
       // 将新会话插入到本地会话列表（靠前显示）并设置为当前会话
       chatSessions.value.unshift(newSession)
-      currentSessionId.value = data.sessionId
+      currentSessionId.value = data.sessionId!
       chatMessages.value = []
-      return data.sessionId
+
+      // 发送全局跨标签广播，通知更新会话列表
+      import('../utils/broadcast').then(({ broadcastSync }) => {
+        broadcastSync('RELOAD_SESSIONS', pdfId)
+      })
+
+      return data.sessionId!
     } catch (error) {
       console.error('Failed to create session on backend:', error)
-      // 后端创建失败时，前端生成临时 ID 以继续会话（离线体验）
-      const tempId = crypto.randomUUID()
-      currentSessionId.value = tempId
-      chatMessages.value = []
-      return tempId
+      throw error // 移除了“向后兼容”的伪离线建立功能，直接抛错
     }
   }
-  
+
   // 加载某个会话：如果本地没有消息，则从后端拉取；否则直接使用本地消息
   async function loadSession(sessionId: string) {
     const session = chatSessions.value.find(s => s.id === sessionId)
@@ -282,47 +263,43 @@ export const useAiStore = defineStore('ai', () => {
         chatMessages.value = [...session.messages]
       }
     } else {
-      console.warn(`Session ${sessionId} not found in local cache`)
+      // 会话在本地列表中不存在（可能后端已删除但本地 ID 仍残留）
+      console.warn(`[AI Store] Session ${sessionId} not found in local cache. Clearing stale session ID.`)
+      // 清空残留的脏 ID，防止后续发送消息时带上无效 sessionId
+      currentSessionId.value = null
+      chatMessages.value = []
     }
   }
-  
+
   // 根据 pdfId 筛选出该文档的所有会话
   function getSessionsByPdfId(pdfId: string): ChatSession[] {
     return chatSessions.value.filter(s => s.pdfId === pdfId)
   }
-  
+
   // 删除会话：调用后端接口删除，同时从本地移除；若后端返回 404（会话不存在）也会本地删除
   async function deleteSession(sessionId: string) {
     try {
       const response = await chatSessionApi.deleteSession(sessionId)
-      
+
       if (response.success) {
         const index = chatSessions.value.findIndex(s => s.id === sessionId)
-        if (index !== -1) {
+        const sessionToRemove = chatSessions.value[index]
+        if (index !== -1 && sessionToRemove) {
+          const pdfId = sessionToRemove.pdfId
           chatSessions.value.splice(index, 1)
           if (currentSessionId.value === sessionId) {
             clearChat()
           }
+
+          import('../utils/broadcast').then(({ broadcastSync }) => {
+            broadcastSync('RELOAD_SESSIONS', pdfId)
+          })
         }
         console.log(`Session ${sessionId} deleted. ${response.deletedMessages} messages removed.`)
       }
     } catch (error: any) {
       console.error('Failed to delete session:', error)
-      
-      // 如果后端返回 404（会话不存在），从本地也删除以保持一致性
-      if (error?.response?.status === 404) {
-        console.warn(`Session ${sessionId} not found in backend, removing from cache`)
-        const index = chatSessions.value.findIndex(s => s.id === sessionId)
-        if (index !== -1) {
-          chatSessions.value.splice(index, 1)
-          if (currentSessionId.value === sessionId) {
-            clearChat()
-          }
-        }
-      } else {
-        // 其他错误向上抛出以便上层处理（比如显示错误通知）
-        throw error
-      }
+      throw error
     }
   }
 
@@ -368,7 +345,7 @@ export const useAiStore = defineStore('ai', () => {
   function layoutNodes(data: Roadmap): Roadmap {
     // 如果节点已经有明确 position，则保留原样
     if (data.nodes.some(n => n.position && (n.position.x !== 0 || n.position.y !== 0))) {
-        return data;
+      return data;
     }
 
     const nodes = data.nodes.map((node, index) => ({
@@ -378,6 +355,32 @@ export const useAiStore = defineStore('ai', () => {
     }))
     return { ...data, nodes }
   }
+
+  // -----------------------------
+  // 事件监听：跨标签页广播同步
+  // -----------------------------
+  import('../utils/broadcast').then(({ syncChannel }) => {
+    syncChannel.addEventListener('message', (event) => {
+      const { type, payload } = event.data
+
+      switch (type) {
+        case 'RELOAD_SESSIONS':
+          // 如果广播发来了 pdfId，我们默默地更新对应的后台列表
+          if (payload) {
+            loadSessionsFromBackend(payload)
+          } else {
+            loadSessionsFromBackend()
+          }
+          break
+        case 'RELOAD_MESSAGES':
+          // 重载当前消息（别人在这个会话里发了消息或者更新）
+          if (payload && payload === currentSessionId.value) {
+            loadSessionMessagesFromBackend(payload)
+          }
+          break
+      }
+    })
+  }).catch(e => console.error("Broadcast init failed in AI store", e))
 
   // -----------------------------
   // 对外暴露的状态与方法

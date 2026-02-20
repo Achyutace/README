@@ -57,7 +57,7 @@ function generateTempId() {
  * - 捕获并打印错误以便查错
  */
 async function loadNotesFromDB() {
-  if (!libraryStore.currentDocument?.id) {
+  if (!libraryStore.currentDocumentId) {
     cards.value = []
     return
   }
@@ -65,7 +65,7 @@ async function loadNotesFromDB() {
   isLoading.value = true
   try {
     // 请求后端 API：根据当前文档 id 获取笔记
-    const response = await notesApi.getNotes(libraryStore.currentDocument.id)
+    const response = await notesApi.getNotes(libraryStore.currentDocumentId)
     // 将后端返回的 Note 转换为 UI 使用的 NoteCard 格式
     cards.value = response.notes.map((note: Note) => ({
       id: note.id,
@@ -94,7 +94,7 @@ async function loadNotesFromDB() {
  * - 否则清空笔记列表
  * - immediate: true 确保组件初始化时立即执行一次
  */
-watch(() => libraryStore.currentDocument?.id, (newId) => {
+watch(() => libraryStore.currentDocumentId, (newId) => {
   if (newId) {
     loadNotesFromDB()
   } else {
@@ -110,19 +110,19 @@ watch(() => libraryStore.currentDocument?.id, (newId) => {
  * - 抛出异常由调用方处理（例如恢复编辑状态）
  */
 async function saveNoteToDB(card: NoteCard) {
-  if (!libraryStore.currentDocument?.id) return
+  if (!libraryStore.currentDocumentId) return
   
   try {
     if (card.isLocal) {
       // 新建笔记：发送 pdfId、title、content、keywords
       const response = await notesApi.createNote({
-        pdfId: libraryStore.currentDocument.id,
+        pdfId: libraryStore.currentDocumentId,
         title: card.title,
         content: card.content,
         keywords: card.keywords
       })
       // 将本地临时 ID 更新为后端返回的数据库 ID，并标记为已持久化
-      card.id = response.id
+      if (response.id !== undefined) card.id = response.id
       card.isLocal = false
     } else if (typeof card.id === 'number') {
       // 更新笔记

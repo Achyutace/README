@@ -293,7 +293,7 @@ onBeforeUnmount(() => {
 
         <!-- Right Panel Container (Split View) - hidden when both panels are hidden -->
         <aside
-          v-if="libraryStore.currentDocument"
+          v-if="libraryStore.currentDocumentId"
           v-show="sidebarVisible"
           ref="sidebarRef"
           class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"

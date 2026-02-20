@@ -2,7 +2,7 @@
 ----------------------------------------------------------------------
                             类型定义
 ----------------------------------------------------------------------
-*/ 
+*/
 // PDF 文档
 export interface PdfDocument {
   id: string    // 文档Hash
@@ -63,19 +63,37 @@ export interface Summary {
   generatedAt: Date    // 时间戳
 }
 
+// 聊天引用来源
+export interface Citation {
+  id: number              // 引用序号
+  title: string           // 来源标题
+  snippet: string         // 摘要片段
+  source_type: 'local' | 'external'  // 本地文档 / 外部网络
+  page?: number           // 页码（本地文档）
+  url?: string            // 链接（外部来源）
+}
+
 // 聊天
 export interface ChatMessage {
   id: string    // 消息ID
   role: 'user' | 'assistant'    // 消息角色
   content: string    // 消息内容
   timestamp: Date    // 时间戳
-  citations?: any[]    // 引用的信息（可选）
+  citations?: Citation[]    // 引用的信息（可选）
+}
+
+// 自定义模型配置
+export interface CustomModel {
+  id: string       // 模型 ID
+  name: string     // 模型名称
+  apiBase: string  // API 基础 URL
+  apiKey: string   // API 密钥
 }
 
 // 路线图
 export interface Roadmap {
   nodes: Array<{
-    id: string  
+    id: string
     type?: string
     data: RoadmapNodeData
     position: { x: number; y: number }
@@ -130,4 +148,47 @@ export interface TranslationPanelInstance {
   snapMode: 'none' | 'paragraph' | 'sidebar'  // 吸附模式
   snapTargetParagraphId: string | null        // 吸附到的目标段落ID（可与原始paragraphId不同）
   isSidebarDocked: boolean                    // 是否停靠到侧边栏
+}
+
+// -----------------------------
+// Notes (笔记) 相关接口
+// -----------------------------
+
+// 笔记对象
+export interface Note {
+  id: number
+  title: string
+  content: string
+  keywords: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+// 创建笔记请求
+export interface CreateNoteRequest {
+  pdfId: string
+  title?: string
+  content: string
+  keywords?: string[]
+}
+
+// 更新笔记请求
+export interface UpdateNoteRequest {
+  title?: string
+  content?: string
+  keywords?: string[]
+}
+
+// 笔记操作响应 (创建/更新/删除)
+export interface NoteActionResponse {
+  success: boolean
+  message: string
+  id?: number // 仅在创建时返回
+}
+
+// 笔记列表响应
+export interface NoteListResponse {
+  success: boolean
+  notes: Note[]
+  total: number
 }

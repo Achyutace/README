@@ -4,10 +4,10 @@
  */
 
 import { ref } from 'vue'
-import type { Note } from '../api'
+import type { Note, NoteListResponse } from '../api'
 
 export interface UseNotesLookupOptions {
-  getNotes: (docId: string) => Promise<{ notes: Note[] }>
+  getNotes: (docId: string) => Promise<NoteListResponse>
   getCurrentDocumentId: () => string | undefined
   onNoteFound?: (note: Note, position: { x: number; y: number }) => void
 }

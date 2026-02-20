@@ -1,0 +1,41 @@
+# Roadmap 相关接口
+roadmap:
+  post:
+    tags: [Roadmap]
+    summary: 生成路线图
+    security:
+      - BearerAuth: []
+    description: 从 PDF 内容生成学习路线图
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - pdfId
+            properties:
+              pdfId:
+                type: string
+    responses:
+      200:
+        description: 路线图数据
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roadmap:
+                  $ref: '../components/schemas/roadmap.yaml#/Roadmap'
+      400:
+        description: 缺少 pdfId
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'
+      500:
+        description: 服务器错误
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas/common.yaml#/ErrorResponse'

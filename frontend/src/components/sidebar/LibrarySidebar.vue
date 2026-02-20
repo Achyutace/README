@@ -70,17 +70,13 @@ async function handleFileUpload(event: Event) {
     // 只处理 PDF 文件
     if (file && file.type === 'application/pdf') {
       try {
-        // 添加文档到库中（见 library.ts）
+        aiStore.resetForNewDocument() // 应该在改变前重置状态
+
+        // 添加文档到库中
         const doc = await libraryStore.addDocument(file)
 
-        // 选择刚上传的文档（见 library.ts）
-        libraryStore.selectDocument(doc.id)
-
-        // 设置当前 PDF 文档（见 pdf.ts）
+        // 设置当前 PDF 文档
         pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID
-
-        // 重置 AI Store 的状态（见 ai.ts）
-        aiStore.resetForNewDocument()
 
         // 上传成功后自动收起左侧边栏
         isCollapsed.value = true
@@ -97,14 +93,14 @@ async function handleFileUpload(event: Event) {
 
 // ------------------------- 文档选择与删除 -------------------------
 // 选择文档
-function selectDocument(id: string) {
+async function selectDocument(id: string) {
   // 去库中查找对应文档
   const doc = libraryStore.documents.find((d: { id: string }) => d.id === id)
   // 如果找到则选择该文档
   if (doc) {
-    libraryStore.selectDocument(id) // 选择该文档（见 library.ts）
-    pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID（见 pdf.ts）
-    aiStore.resetForNewDocument() // 重置 AI Store 状态（见 ai.ts）
+    aiStore.resetForNewDocument() // 重置 AI Store 状态，要在更改 id 前重置避免清空 watcher 的结果
+    await libraryStore.selectDocument(id) // 可能是异步，先拉取 blob
+    pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID和最新的 url
   }
 }
 

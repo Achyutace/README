@@ -18,6 +18,8 @@ components:
   schemas:
     ErrorResponse:
       $ref: './components/schemas/common.yaml#/ErrorResponse'
+    Roadmap:
+      $ref: './components/schemas/roadmap.yaml#/Roadmap'
 
 paths:
   # --- Auth 相关 API ---
@@ -89,3 +91,7 @@ paths:
   # --- System 相关 API ---
   /health:
     $ref: "./paths/system.yaml#/health"
+
+  # --- Roadmap 相关 API ---
+  /roadmap:
+    $ref: "./paths/roadmap.yaml#/roadmap"
