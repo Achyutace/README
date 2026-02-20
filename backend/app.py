@@ -10,7 +10,6 @@ from core.config import settings
 from core.exceptions import APIError
 from core.logging import setup_logging, get_logger
 from core.security import try_get_current_user_id
-# TODO：自动化测试
 
 # ==================== 0. 全局日志配置 ====================
 setup_logging()

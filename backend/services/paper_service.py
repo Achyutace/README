@@ -331,16 +331,7 @@ class PdfService:
             db_paras = repo.get_paragraphs(pdf_id, pagenumber, paraid)
             if db_paras:
                 for p in db_paras:
-                    # TODO 根据schema修改返回内容
-                    para_data = {
-                        "id": p.id,
-                        "file_hash": p.file_hash,
-                        "page_number": p.page_number,
-                        "paragraph_index": p.paragraph_index,
-                        "original_text": p.original_text,
-                        "bbox": p.bbox
-                    }
-                    paragraphs.append(para_data)
+                    paragraphs.append(self._format_paragraph(p, pdf_id))
         except Exception as e:
             logger.warning(f"DB lookup paragraphs failed for {pdf_id}: {e}")
 
