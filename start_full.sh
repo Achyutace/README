@@ -1,60 +1,56 @@
 #!/bin/bash
 
-# README PDF Reader - Start Script
+# README PDF Reader - Full Stack Start Script (macOS / Linux)
 
-echo "Starting README PDF Reader..."
+echo "Starting README PDF Reader Full Stack Environment..."
 
-# Check config file
+# 1. 检查配置
 if [ ! -f "config.yaml" ]; then
     echo "Warning: config.yaml not found."
-    echo "Please copy config_example.yaml to config.yaml and fill in your API keys."
+    echo "Please copy config.yaml.example to config.yaml and fill in your API keys."
     exit 1
 fi
 
-# Clean and create uploads directory
+# 2. 后端：清理上传目录
 rm -rf backend/uploads
 mkdir -p backend/uploads
 
-# Install frontend dependencies
-cd frontend
-echo "Installing frontend dependencies..."
-npm install
-cd ..
-
-# Start backend
+# 3. 启动后端
 echo "Starting backend server..."
 cd backend
 if [ ! -d "venv" ]; then
-    echo "Creating Python virtual environment..."
+    echo "Creating Python virtual environment in venv..."
     python3 -m venv venv
 fi
 source venv/bin/activate
+echo "Installing backend dependencies..."
 pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
-python app.py &
+
+python3 app.py &
 BACKEND_PID=$!
 cd ..
 
-# Wait for backend to start
 sleep 2
 
-# Start frontend
+# 4. 启动前端
 echo "Starting frontend server..."
 cd frontend
+npm install
 npm run dev &
 FRONTEND_PID=$!
 cd ..
 
 echo ""
 echo "==================================="
-echo "README PDF Reader is running!"
+echo "Full Stack Environment is running!"
 echo "Frontend: http://localhost:5173"
 echo "Backend:  http://localhost:5000"
 echo "==================================="
 echo ""
 echo "Press Ctrl+C to stop all servers"
 
-# Handle Ctrl+C
-trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT
+# 处理 Ctrl+C
+trap "echo 'Stopping servers...'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT
 
-# Wait for processes
+# 等待进程
 wait

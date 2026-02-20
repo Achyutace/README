@@ -44,4 +44,4 @@ storage/
 
 # Config (contains API keys)
 config.yaml
-.env
+*.env
