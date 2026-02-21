@@ -26,7 +26,7 @@ readme/
 │   │   ├── db/                     # SQLAlchemy ORM 模型 (对应数据库表)
 │   │   │   ├── base.py             # Declarative Base
 │   │   │   ├── user_models.py      # User
-│   │   │   ├── doc_models.py       # Paper, Note, Highlight, Image
+│   │   │   ├── doc_models.py       # Paper, Note, Highlight, Image, Formula
 │   │   │   └── graph_models.py     # RoadmapJSON, Node, Edge
 │   │   └── schemas.py                # Pydantic 模型 (对应 API 输入输出 & 工具结构)
 │   ├── repository/                 # 数据层：直接操作数据库，提供接口给上层

@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 # Using relative imports suitable for the package structure
 from ..model.db.base import Base
 from ..model.db.doc_models import (
-    GlobalFile, PdfParagraph, PdfImage, UserPaper, 
+    GlobalFile, PdfParagraph, PdfImage, PdfFormula, UserPaper, 
     UserNote, UserHighlight
 )
 from ..model.db.chat_models import ChatSession, ChatMessage, ChatAttachment
@@ -286,6 +286,96 @@ class SQLRepository:
             stmt = stmt.where(PdfImage.image_index == image_index)
         stmt = stmt.order_by(PdfImage.page_number, PdfImage.image_index)
         return self.db.execute(stmt).scalars().all()
+
+    # ==================== PDF 公式 ====================
+
+    def save_formulas(self, file_hash: str, formulas: List[Dict]):
+        """
+        批量保存PDF公式信息
+        formulas: 包含 page_number, formula_index, bbox, latex_content 的字典列表
+        """
+        objects = []
+        for form in formulas:
+            obj = PdfFormula(
+                file_hash=file_hash,
+                page_number=form.get("page_number"),
+                formula_index=form.get("formula_index"),
+                bbox=form.get("bbox"),
+                latex_content=form.get("latex_content")
+            )
+            objects.append(obj)
+            
+        if objects:
+            self.db.add_all(objects)
+            self.db.commit()
+
+    def get_formulas(self, file_hash: str, page_number: Optional[int] = None, formula_index: Optional[int] = None) -> List[PdfFormula]:
+        """按文件哈希、页码或公式索引获取公式信息"""
+        stmt = select(PdfFormula).where(PdfFormula.file_hash == file_hash)
+        if page_number is not None:
+            stmt = stmt.where(PdfFormula.page_number == page_number)
+        if formula_index is not None:
+            stmt = stmt.where(PdfFormula.formula_index == formula_index)
+        stmt = stmt.order_by(PdfFormula.page_number, PdfFormula.formula_index)
+        return self.db.execute(stmt).scalars().all()
+
+    def add_formula(self, file_hash: str, page_number: int, bbox: List[float], latex_content: str) -> PdfFormula:
+        """添加单个公式"""
+        # 查找当前页的最大的 formula_index
+        stmt = select(func.max(PdfFormula.formula_index)).where(
+            and_(PdfFormula.file_hash == file_hash, PdfFormula.page_number == page_number)
+        )
+        max_idx = self.db.execute(stmt).scalar() or 0
+        
+        formula = PdfFormula(
+            file_hash=file_hash,
+            page_number=page_number,
+            formula_index=max_idx + 1,
+            bbox=bbox,
+            latex_content=latex_content
+        )
+        self.db.add(formula)
+        self.db.commit()
+        self.db.refresh(formula)
+        return formula
+
+    def update_formula(self, formula_id: int, latex_content: str = None, bbox: List[float] = None):
+        """更新公式信息(按主键id)"""
+        values = {}
+        if latex_content is not None:
+            values['latex_content'] = latex_content
+        if bbox is not None:
+            values['bbox'] = bbox
+            
+        if values:
+            stmt = update(PdfFormula).where(PdfFormula.id == formula_id).values(**values)
+            self.db.execute(stmt)
+            self.db.commit()
+
+    def update_formula_by_location(self, file_hash: str, page_number: int, formula_index: int, latex_content: str = None, bbox: List[float] = None):
+        """更新公式信息(按联合索引位置定位)"""
+        values = {}
+        if latex_content is not None:
+            values['latex_content'] = latex_content
+        if bbox is not None:
+            values['bbox'] = bbox
+            
+        if values:
+            stmt = update(PdfFormula).where(
+                and_(
+                    PdfFormula.file_hash == file_hash,
+                    PdfFormula.page_number == page_number,
+                    PdfFormula.formula_index == formula_index
+                )
+            ).values(**values)
+            self.db.execute(stmt)
+            self.db.commit()
+
+    def delete_formula(self, formula_id: int):
+        """删除公式(按主键id)"""
+        stmt = delete(PdfFormula).where(PdfFormula.id == formula_id)
+        self.db.execute(stmt)
+        self.db.commit()
 
     # ==================== 笔记 ====================
 

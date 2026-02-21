@@ -3,6 +3,7 @@ erDiagram
     Users ||--o{ UserPaper : "owns"
     GlobalFile ||--o{ UserPaper : "referenced_by"
     GlobalFile ||--o{ PdfParagraph : "contains"
+    GlobalFile ||--o{ PdfFormula : "contains"
     UserPaper ||--o{ UserNote : "has"
     UserPaper ||--o{ UserHighlight : "has"
     

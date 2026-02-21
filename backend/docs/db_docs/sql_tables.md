@@ -19,6 +19,7 @@
 | `global_files` | PDF 物理文件信息 | `file_hash` (PK), `file_path`, `file_size`, `total_pages`, `metadata_info`, `process_status`, `error_message`, `task_id`, `dimensions` |
 | `pdf_paragraphs` | 解析后的段落文本 | `id` (PK), `file_hash` (FK), `page_number`, `paragraph_index`, `original_text`, `translation_text`, `bbox` |
 | `pdf_images` | 提取的图片 | `id` (PK), `file_hash` (FK), `page_number`, `image_index`, `image_path`, `bbox`, `caption` |
+| `pdf_formulas` | 解析后的公式内容 | `id` (PK), `file_hash` (FK), `page_number`, `formula_index`, `latex_content`, `bbox` |
 
 ## 3. 用户文献库 (User Library)
 

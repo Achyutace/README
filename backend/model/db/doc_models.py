@@ -42,6 +42,7 @@ class GlobalFile(Base):
     # 关系
     paragraphs = relationship("PdfParagraph", back_populates="file", cascade="all, delete-orphan")
     images = relationship("PdfImage", back_populates="file", cascade="all, delete-orphan")
+    formulas = relationship("PdfFormula", back_populates="file", cascade="all, delete-orphan")
     ref_user_papers = relationship("UserPaper", back_populates="global_file")
 
 
@@ -94,6 +95,32 @@ class PdfImage(Base):
     caption = Column(Text, nullable=True)
     
     file = relationship("GlobalFile", back_populates="images")
+
+
+class PdfFormula(Base):
+    """
+    公式元数据表：坐标和LaTeX内容
+    """
+    __tablename__ = "pdf_formulas"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_hash = Column(String(64), ForeignKey("global_files.file_hash"), nullable=False, index=True)
+    
+    page_number = Column(Integer, nullable=False)
+    formula_index = Column(Integer, nullable=False)
+    
+    # 坐标
+    bbox = Column(JSONB, nullable=False, comment="[x, y, w, h]")
+
+    # LaTeX 公式内容
+    latex_content = Column(Text, nullable=False, comment="LaTeX公式内容")
+
+    # 复合唯一索引
+    __table_args__ = (
+        UniqueConstraint('file_hash', 'page_number', 'formula_index', name='uix_formula_loc'),
+    )
+    
+    file = relationship("GlobalFile", back_populates="formulas")
 
 
 class UserPaper(Base):
