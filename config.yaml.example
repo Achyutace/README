@@ -48,7 +48,7 @@ scientific:
 
 # Database Configuration (PostgreSQL)
 database:
-  url: "postgresql://user:password@localhost:5432/paper_agent_db"
+  url: "postgresql://user:password@db:5432/paper_agent_db"
 
 # HTTP Proxy Configuration (Optional)
 proxy:
@@ -64,7 +64,7 @@ vector_store:
   enable_qdrant: true
 
   qdrant:
-    url: "http://localhost:6333"
+    url: "http://qdrant:6333"
     api_key: ""
     prefer_grpc: true
 
@@ -73,25 +73,14 @@ cos:
   enabled: false # Set to true to enable Cloud Object Storage
   secret_id: "your-secret-id"
   secret_key: "your-secret-key"
-  region: "ap-guangzhou"
+  region: "ap-guangzhou" # e.g., ap-guangzhou, ap-shanghai
   bucket: "your-bucket-name-1250000000"
   scheme: "https"
 
-
-# 对象存储库配置 
-# Object Storage Configuration (Tencent COS)
-cos:
-  enabled: false # Set to true to enable Cloud Object Storage
-  secret_id: "your-secret-id"
-  secret_key: "your-secret-key"
-  region: "ap-guangzhou" # e.g., ap-guangzhou, ap-shanghai
-  bucket: "your-bucket-name-1250000000"
-  scheme: "https" 
-
 # Celery 任务队列
 celery:
-  broker_url: "redis://127.0.0.1:6379/0"
-  result_backend: "redis://127.0.0.1:6379/1"
+  broker_url: "redis://redis:6379/0"
+  result_backend: "redis://redis:6379/1"
 
 # JWT 认证配置
 jwt:

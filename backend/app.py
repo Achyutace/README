@@ -164,7 +164,8 @@ if settings.env == "development" or settings.debug:
 
     @app.route('/api/openapi.yaml')
     def send_openapi():
-        return send_from_directory('.', 'openapi.yaml')
+        openapi_dir = BASE_DIR / "docs" / "openapi"
+        return send_from_directory(str(openapi_dir), 'openapi.yaml')
 
 # ==================== 5.5 全局错误处理 ====================
 

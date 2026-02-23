@@ -1,114 +1,73 @@
-# 生产环境部署指南
-
-将 README 的前端（Vue3 + Nginx）和后端核心业务（Flask + Celery）统一使用 Docker Compose 部署于你的腾讯云服务器上。同时结合腾讯云 PostgreSQL、腾讯云 COS 和 Qdrant Cloud 实现高可用体系。
-
-## 1. 架构总览
-
-*   **云服务器 (应用层)**：腾讯云标准实例。统一运行 `frontend` (Nginx), `backend` (Flask), `celery_worker` (异步引擎) 和 `redis` (消息队列)。
-*   **云数据库 (数据层)**：腾讯云 PostgreSQL，持久化结构性业务数据。
-*   **对象存储 (文件层)**：腾讯云 COS，存 PDF 物理文件。
-*   **向量检索 (AI 层)**：Qdrant Cloud 免费托管版，大模型切片检索 (后续改用腾讯云付费向量存储服务/另买服务器使用部署qdrant)。
+# 项目部署指南
 
 ---
 
-## 2. 部署前环境准备
+## 阶段一：当前开发测试部署（开箱即用）
 
-1. **准备云服务器并开放端口**：
-   - 服务器安装 [Docker](https://docs.docker.com/engine/install/) 和 [Docker Compose](https://docs.docker.com/compose/install/)。
-   - 在腾讯云控制台的“安全组”或“防火墙”中，开放服务器的公网 **80** (HTTP) 和 **443** (HTTPS) 端口给全网访问。
-2. **云服务凭证**：
-   - PostgreSQL 数据库连接地址和账号密码。
-   - 腾讯云 COS 的 SecretId、SecretKey、Region 和 Bucket Name。
-   - Qdrant Cloud 的集群 URL 和 API Key。
-   - 购买的专属域名（在 DNS 控制台将 A 记录解析到这台腾讯云服务器的公网 IP）。
+在这个阶段，为了方便快速跑通整个系统，我们使用 Docker Compose 在主服务器上一键启动所有服务，**包括 PostgreSQL 数据库**。
 
----
+### 部署步骤
 
-## 3. 代码配置
+1. **准备配置文件**
+   在主服务器的项目根目录下，复制配置文件模板：
+   ```bash
+   cp config.yaml.example config.yaml
+   ```
 
-在服务器项目根目录下，复制配置文件模板并进行修改：
+2. **编辑配置**
+   打开 `config.yaml`，填入大模型 API 凭证及其他第三方服务密钥。
+   *由于使用了测试环境配置，数据库和 Celery 的链接地址无需修改，保持默认（例如指向 `db` 和 `redis`）即可被 Docker 自动接管。*
 
-```bash
-cp config.yaml.example config.yaml
-```
+3. **一键启动**
+   使用专为开发阶段准备的 Compose 文件启动：
+   ```bash
+   docker-compose -f docker-compose.dev.yml up -d --build
+   ```
 
-按照实际情况修改 `config.yaml` 里的参数：
+### 如何访问
 
-```yaml
-# 1. 配置腾讯云 PostgreSQL (同地域尽量用内网 IP)
-database:
-  url: "postgresql://<你的用户名>:<你的密码>@<腾讯云DB_IP>:5432/paper_agent_db"
-
-# 2. Redis 保持默认 (Docker 内部解析)
-celery:
-  broker_url: "redis://paper_agent_redis:6379/0"
-  result_backend: "redis://paper_agent_redis:6379/1"
-
-# 3. 配置 Qdrant Cloud (海外节点)
-vector_store:
-  enable_qdrant: true
-  qdrant:
-    url: "https://<你的集群id>.eu-central-1-0.aws.cloud.qdrant.io:6333"
-    api_key: "<你的API_Key>"
-    prefer_grpc: false  # 跨国网络请设为 false 走 HTTP 请求防丢包
-
-# 4. 配置腾讯云 COS
-cos:
-  enabled: true
-  secret_id: "<你的SecretId>"
-  ...
-
-# 5. 配置模型凭证与安全
-jwt:
-  secret: "<自己随便写个复杂字符串>" 
-openai:
-  api_key: "sk-xxxxxx"  
-```
+部署成功后，服务已经在主服务器后台运行。
+*   **普通用户访问**：使用浏览器直接打开 `http://<你的主服务器公网IP>:8080` 即可使用完整网站功能。
+*   **开发人员本地调试**：本地的 Python 代码若需直连数据库测试，可在自己电脑上的 `config.yaml` 中将数据库的 IP 改为主服务器的公网 IP（需确保主服务器开放了 5432 和 6379 端口）。
 
 ---
 
-## 4. 构建启动
+## 阶段二：未来生产部署（高可用架构）
 
-```bash
-docker-compose up -d --build
-```
-*首次运行会非常慢*
+当项目正式上线，为了保证数据的稳定和安全，我们将不再把数据库跑在容器里，而是使用腾讯云托管的云数据库 PostgreSQL 及 COS 对象存储服务。主服务器上只运行跑核心业务的 Docker 容器。
 
-启动完毕检查：
-```bash
-# 所有服务应为 Up 状态
-docker-compose ps
+### 部署步骤
 
-# 看看后端有没有连错数据库的各种报错
-docker-compose logs -f backend
-```
+1. **云服务资源**
+   *   购买并开通腾讯云 PostgreSQL 实例，记录下内网或公网连接地址及账号密码。
+   *   开通腾讯云 COS，获取 SecretId、SecretKey 等凭证。
 
----
+2. **配置文件**
+   在主服务器的项目根目录下：
+   ```bash
+   cp config.yaml.example config.yaml
+   ```
 
-## 5. 用户通过浏览器访问？
+3. **彻底修改配置**
+   打开 `config.yaml`，必须填写真实的云端服务信息：
+   ```yaml
+   database:
+     # 填入腾讯云 PostgreSQL 的真实地址
+     url: "postgresql://<用户名>:<密码>@<腾讯云DB_IP>:5432/paper_agent_db"
+   
+   # Celery / Redis 保持默认，由正式版的 docker-compose 内部提供
+   celery:
+     broker_url: "redis://paper_agent_redis:6379/0"
+     result_backend: "redis://paper_agent_redis:6379/1"
+   ```
+   *别忘了填写其他的 COS、Qdrant 及大模型的配置。*
 
-容器启动后，用户只需在浏览器输入：`http://你的服务器IP` 或者 `http://你的域名`。
+4. **一键启动**
+   使用正式环境的 Compose 文件启动（它不会启动 postgres 容器）：
+   ```bash
+   docker-compose up -d --build
+   ```
 
----
+### 如何访问
 
-## 6. 后续处理 (HTTPS 配置)
-当系统跑通后，你可以在服务器上安装 Nginx 宿主机服务或使用 [Nginx Proxy Manager](https://nginxproxymanager.com/) 工具为你的域名快速签发免费 SSL 证书，再把流量完整转发进 Docker 的 `80` 端口，实现安全加密传输。
-
----
-
-## 7. 开发阶段主服务器部署 (Development Phase)
-
-为了在开发阶段能够开箱即用并提供 PostgreSQL 数据库实例，我们新增了 `docker-compose.dev.yml` 文件。该文件除了包含前端、后端和 Redis，还内置了一个 PostgreSQL 15 容器。
-
-### 7.1 启动方式
-在项目根目录运行以下命令来启动开发阶段包含数据库的整套服务：
-
-```bash
-docker-compose -f docker-compose.dev.yml up -d --build
-```
-
-**主服务器端口映射情况说明：**
-- **前端 (Frontend)**: `8080:80` (通过 `http://主服务器IP:8080` 访问，避免与生产环境的 80 端口冲突)
-- **后端 (Backend)**: `5000:5000` (如果需要直接调试后端接口)
-- **PostgreSQL 数据库**: `5432:5432` (供其他开发人员的本地代码远程直连此数据库测试)
-- **Redis**: `6379:6379` (消息队列与任务结果缓存)
+*   **稳定公网访问**：在云防火墙开放主服务器的 **80 端口**。用户直接浏览器访问 `http://<你的主服务器公网IP>` 或绑定的域名即可使用系统。
