@@ -93,3 +93,22 @@ docker-compose logs -f backend
 
 ## 6. 后续处理 (HTTPS 配置)
 当系统跑通后，你可以在服务器上安装 Nginx 宿主机服务或使用 [Nginx Proxy Manager](https://nginxproxymanager.com/) 工具为你的域名快速签发免费 SSL 证书，再把流量完整转发进 Docker 的 `80` 端口，实现安全加密传输。
+
+---
+
+## 7. 开发阶段主服务器部署 (Development Phase)
+
+为了在开发阶段能够开箱即用并提供 PostgreSQL 数据库实例，我们新增了 `docker-compose.dev.yml` 文件。该文件除了包含前端、后端和 Redis，还内置了一个 PostgreSQL 15 容器。
+
+### 7.1 启动方式
+在项目根目录运行以下命令来启动开发阶段包含数据库的整套服务：
+
+```bash
+docker-compose -f docker-compose.dev.yml up -d --build
+```
+
+**主服务器端口映射情况说明：**
+- **前端 (Frontend)**: `8080:80` (通过 `http://主服务器IP:8080` 访问，避免与生产环境的 80 端口冲突)
+- **后端 (Backend)**: `5000:5000` (如果需要直接调试后端接口)
+- **PostgreSQL 数据库**: `5432:5432` (供其他开发人员的本地代码远程直连此数据库测试)
+- **Redis**: `6379:6379` (消息队列与任务结果缓存)

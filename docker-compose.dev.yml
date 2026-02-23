@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Development
+  db:
+    image: postgres:15-alpine
+    container_name: paper_agent_db_dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: paper_agent_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Message Broker & Task Result Backend
+  redis:
+    image: redis:7-alpine
+    container_name: paper_agent_redis_dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_dev:/data
+    restart: unless-stopped
+
+  # Main API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: paper_agent_backend_dev
+    volumes:
+      # Map host storage directory to container storage
+      - ./storage:/app/storage
+      # Map the dev config explicitly
+      - ./config.yaml:/app/config.yaml
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      # Override the DB URL to point to the local dev db container
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/paper_agent_db
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  # Asynchronous Task Worker
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: paper_agent_celery_dev
+    command: celery -A celery_app worker --loglevel=info
+    volumes:
+      - ./storage:/app/storage
+      - ./config.yaml:/app/config.yaml
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/paper_agent_db
+    depends_on:
+      - backend
+      - db
+      - redis
+    restart: unless-stopped
+
+  # Web Frontend using Nginx (Vue3 SPA)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: paper_agent_frontend_dev
+    ports:
+      - "8080:80" # Mapping to 8080 for dev to avoid port 80 conflicts if any
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata_dev:
+  redis_data_dev:
