@@ -5,15 +5,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, update, func, and_, desc, asc
 from sqlalchemy.dialects.postgresql import insert
 
-# Using relative imports suitable for the package structure
-from ..model.db.base import Base
-from ..model.db.doc_models import (
+# Using absolute imports
+from model.db.base import Base
+from model.db.doc_models import (
     GlobalFile, PdfParagraph, PdfImage, PdfFormula, UserPaper, 
     UserNote, UserHighlight
 )
-from ..model.db.chat_models import ChatSession, ChatMessage, ChatAttachment
-from ..model.db.user_models import User
-from ..model.db.graph_models import (
+from model.db.chat_models import ChatSession, ChatMessage, ChatAttachment
+from model.db.user_models import User
+from model.db.graph_models import (
     UserGraphProject, GraphNode, GraphEdge,
     graph_paper_association, paper_node_link, note_node_link
 )

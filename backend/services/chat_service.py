@@ -7,7 +7,7 @@ import uuid
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional, Any
-from ..repository.sql_repo import SQLRepository 
+from repository.sql_repo import SQLRepository 
 
 class ChatService:
     def __init__(self, db_repo: SQLRepository):
