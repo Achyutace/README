@@ -2,7 +2,7 @@ import logging
 from typing import Optional, Union, BinaryIO
 from qcloud_cos import CosConfig as TencentCosConfig
 from qcloud_cos import CosS3Client
-from backend.core.config import settings
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
