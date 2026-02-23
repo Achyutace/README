@@ -27,6 +27,17 @@ def init_db(app):
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     db.init_app(app)
 
+    # 确保所有模型在建表前被导入
+    import model.db.user_models
+    import model.db.doc_models
+    import model.db.chat_models
+    import model.db.graph_models
+
+# 生产环境改为数据库迁移
+#    with app.app_context():
+#        db.create_all()
+#        logger.info("Database tables verified/created successfully.")
+
 # ==========================================
 # 2. Vector Databases (Qdrant)
 # ==========================================

@@ -50,7 +50,9 @@ jwt_manager = JWTManager(app)
 
 # ==================== 2.6 Flask-SQLAlchemy ====================
 from core.database import db, init_db
+from flask_migrate import Migrate
 init_db(app)
+migrate = Migrate(app, db)
 
 # ==================== 3. 基础配置与路径 ====================
 # 获取项目根目录（README 目录）
