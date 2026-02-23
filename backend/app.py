@@ -162,9 +162,17 @@ if settings.env == "development" or settings.debug:
     )
     app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
+    # openapi.yaml 路径: 优先使用 backend/docs/openapi/ (Docker 容器内)
+    # 如果不存在则回退到项目根目录 docs/openapi/ (本地开发)
+    APP_DIR = Path(__file__).resolve().parent  # backend 目录 (/app in Docker)
+
     @app.route('/api/openapi.yaml')
     def send_openapi():
-        openapi_dir = BASE_DIR / "docs" / "openapi"
+        # Docker 容器中: /app/docs/openapi/openapi.yaml
+        openapi_dir = APP_DIR / "docs" / "openapi"
+        if not openapi_dir.exists():
+            # 本地开发: README/docs/openapi/openapi.yaml
+            openapi_dir = BASE_DIR / "docs" / "openapi"
         return send_from_directory(str(openapi_dir), 'openapi.yaml')
 
 # ==================== 5.5 全局错误处理 ====================
