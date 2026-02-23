@@ -22,6 +22,7 @@ COPY . .
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 ENV PYTHONPATH=/app
+ENV CONFIG_PATH=/app/config.yaml
 
 EXPOSE 5000
 

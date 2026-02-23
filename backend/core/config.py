@@ -5,11 +5,13 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
 # Load config.yaml
-CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
+# Use CONFIG_PATH from environment if available, otherwise fallback to local dev path
+_default_path = Path(__file__).parent.parent.parent / "config.yaml"
+CONFIG_PATH = Path(os.getenv("CONFIG_PATH", _default_path))
 
 def load_yaml_config(path: Path) -> Dict[str, Any]:
     if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        raise FileNotFoundError(f"Config file not found: {path} (Resolved from CONFIG_PATH env var or default)")
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
