@@ -19,13 +19,8 @@ services:
       dockerfile: Dockerfile
     container_name: paper_agent_backend
     volumes:
-      # Map host storage directory to container storage
-      # We put this mapped volume here so uploaded PDFs persist
       - ./storage:/app/storage
-      # You might also want to map the config.yaml if you want to edit it easily without rebuilding
       - ./config.yaml:/app/config.yaml
-      # OpenAPI spec for Swagger UI
-      - ./docs/openapi:/app/docs/openapi:ro
     ports:
       - "5000:5000"
     environment:

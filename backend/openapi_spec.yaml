@@ -1,0 +1,289 @@
+openapi: 3.0.0
+info:
+  title: Paper Agent Backend API
+  description: API documentation for the Paper Agent backend services including PDF upload, Chat, Highlight, and Notes.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000/api
+    description: Local Development Server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Access Token. 通过 /api/auth/login 或 /api/auth/register 获取。
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    # --- PDF Upload Schemas ---
+    UploadResponse:
+      type: object
+      properties:
+        pdfId:
+          type: string
+          description: Hash of the file
+        taskId:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        pageCount:
+          type: integer
+        filename:
+          type: string
+        isNewUpload:
+          type: boolean
+
+    TaskStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        currentPage:
+          type: integer
+        totalPages:
+          type: integer
+        error:
+          type: string
+          nullable: true
+        paragraphs:
+          type: array
+          items:
+            type: object # Simplified Paragraph Object
+
+    PDFInfoResponse:
+      type: object
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        page_count:
+          type: integer
+        file_hash:
+          type: string
+
+    # --- Chatbox Schemas ---
+    NewSessionResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        title:
+          type: string
+        isNew:
+          type: boolean
+        messageCount:
+          type: integer
+
+    MessageRequest:
+      type: object
+      required: [message, sessionId]
+      properties:
+        message:
+          type: string
+        sessionId:
+          type: string
+        pdfId:
+          type: string
+          nullable: true
+
+    ChatResponse:
+      type: object
+      properties:
+        response:
+          type: string
+        citations:
+          type: array
+          items:
+            type: object
+        sessionId:
+          type: string
+
+    SessionListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        sessions:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+
+    # --- Highlight Schemas ---
+    HighlightRequest:
+      type: object
+      required: [pdfId, page, rects, pageWidth, pageHeight]
+      properties:
+        pdfId:
+          type: string
+        page:
+          type: integer
+        rects:
+          type: array
+          items:
+            type: object
+            properties:
+              x: {type: number}
+              y: {type: number}
+              width: {type: number}
+              height: {type: number}
+        pageWidth:
+          type: number
+        pageHeight:
+          type: number
+        text:
+          type: string
+        color:
+          type: string
+
+    # --- Note Schemas ---
+    NoteRequest:
+      type: object
+      required: [pdfId]
+      properties:
+        pdfId:
+          type: string
+        content:
+          type: string
+        title:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+
+    NoteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        id:
+          type: integer
+        message:
+          type: string
+
+    # --- SmartRef Schemas ---
+    PaperRef:
+      type: object
+      properties:
+        paperId: {type: string}
+        title: {type: string}
+        authors: {type: array, items: {type: string}}
+        abstract: {type: string}
+        year: {type: integer}
+        venue: {type: string}
+        citationCount: {type: integer}
+        url: {type: string}
+        doi: {type: string}
+        arxivId: {type: string}
+
+    SmartRefSearchResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        paper:
+          $ref: '#/components/schemas/PaperRef'
+        searchedBy: {type: string}
+
+    SmartRefBatchResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              query: {type: object}
+              found: {type: boolean}
+              paper:
+                $ref: '#/components/schemas/PaperRef'
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  # ================= Translate =================
+  /translate/paragraph:
+    post:
+      tags: [Translate]
+      summary: Translate a paragraph
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pdfId, paragraphId]
+              properties:
+                pdfId: {type: string}
+                paragraphId: {type: string}
+                force: {type: boolean}
+      responses:
+        200:
+          description: Translation result
+
+  /translate/text:
+    post:
+      tags: [Translate]
+      summary: Translate selected text with context
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string}
+                pdfId: {type: string}
+                contextParagraphs: {type: integer}
+      responses:
+        200:
+          description: Translation result
+
+  /translate/page/{pdf_id}/{page_number}:
+    get:
+      tags: [Translate]
+      summary: Get all cached translations for a page
+      parameters:
+        - in: path
+          name: pdf_id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: page_number
+          required: true
+          schema: {type: integer}
+      responses:
+        200:
+          description: Page translations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pdfId: {type: string}
+                  page: {type: integer}
+                  translations: {type: object}
+
+  
+  # ================= Health =================
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      security: []
+      responses:
+        200:
+          description: System status
