@@ -56,8 +56,15 @@ migrate = Migrate(app, db)
 
 # ==================== 3. 基础配置与路径 ====================
 # 获取项目根目录（README 目录）
-BASE_DIR = Path(__file__).resolve().parent.parent  
-STORAGE_ROOT = BASE_DIR / 'storage'  # README/storage
+BASE_DIR = Path(__file__).resolve().parent  
+
+# 通过环境变量制定存储路径，兼容 Docker 和本地直接运行
+storage_env = os.environ.get('STORAGE_ROOT')
+if storage_env:
+    STORAGE_ROOT = Path(storage_env)
+else:
+    # 默认回退到项目根目录下的 storage (README/storage)
+    STORAGE_ROOT = BASE_DIR.parent / 'storage'
 
 # 初始化磁盘目录结构
 def init_storage_directories():

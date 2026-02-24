@@ -12,7 +12,7 @@
 
 状态定义: pending | processing | completed | failed
 """
-from flask import Blueprint, request, jsonify, g, send_file
+from flask import Blueprint, request, jsonify, g, send_file, current_app
 from core.security import jwt_required
 from core.exceptions import NotFoundError
 from core.logging import get_logger

@@ -23,6 +23,7 @@ ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 ENV PYTHONPATH=/app
 ENV CONFIG_PATH=/app/config.yaml
+ENV STORAGE_ROOT=/app/storage
 
 EXPOSE 5000
 
