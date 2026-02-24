@@ -144,8 +144,8 @@ def before_request():
 
         # 4. 初始化 per-request 服务 (Flask-SQLAlchemy 自动管理 session 生命周期)
         repo = SQLRepository(db.session)
-        app.chat_service = ChatService(db_repo=repo)
-        app.note_service = NoteService(db_repo=repo)
+        g.chat_service = ChatService(db_repo=repo)
+        g.note_service = NoteService(db_repo=repo)
     # 未认证请求 — 不初始化用户相关服务
     # 公开接口不需要这些，受保护接口会被 @jwt_required() 拦截
 
@@ -203,8 +203,7 @@ def health_check():
             'celery': True,
             'rag': hasattr(app, 'rag_service'),
             'translate': hasattr(app, 'translate_service'),
-            'agent': hasattr(app, 'agent_service'),
-            'chat': hasattr(app, 'chat_service')
+            'agent': hasattr(app, 'agent_service')
         }
     })
 

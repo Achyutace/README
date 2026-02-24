@@ -38,7 +38,7 @@ def create_note():
     content = data.get('content', '')
     keywords = data.get('keywords', [])
 
-    note_service = current_app.note_service
+    note_service = g.note_service
     note_id = note_service.add_note(
         user_id=user_id,
         file_hash=pdf_id,
@@ -61,7 +61,7 @@ def get_notes(pdf_id):
     获取某 PDF 的所有笔记
     """
     user_id = g.user_id
-    note_service = current_app.note_service
+    note_service = g.note_service
 
     notes = note_service.get_notes(user_id=user_id, file_hash=pdf_id)
 
@@ -107,7 +107,7 @@ def update_note(note_id):
         return jsonify({'error': 'At least one field (title, content, keywords) must be provided'}), 400
 
     # 2. 调用 Service 更新
-    note_service = current_app.note_service
+    note_service = g.note_service
     note_service.update_note_content(
         note_id=note_id,
         title=title,
@@ -125,7 +125,7 @@ def update_note(note_id):
 @jwt_required()
 def delete_note(note_id):
     """删除笔记"""
-    note_service = current_app.note_service
+    note_service = g.note_service
     success = note_service.delete_note(note_id)
 
     if not success:

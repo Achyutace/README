@@ -45,7 +45,7 @@ def create_highlight():
     )
 
     # 3. 持久化
-    note_svc = current_app.note_service
+    note_svc = g.note_service
     highlight_id = note_svc.add_highlight(
         user_id=g.user_id,
         file_hash=pdf_id,
@@ -83,7 +83,7 @@ def get_highlights():
 
     page = request.args.get('page', type=int)
 
-    note_svc = current_app.note_service
+    note_svc = g.note_service
     highlights = note_svc.get_highlights(
         user_id=g.user_id,
         file_hash=pdf_id,
@@ -101,7 +101,7 @@ def get_highlights():
 @jwt_required()
 def delete_highlight(highlight_id):
     """删除高亮"""
-    note_svc = current_app.note_service
+    note_svc = g.note_service
     note_svc.delete_highlight(highlight_id)
     return jsonify({'success': True})
 
@@ -111,7 +111,7 @@ def delete_highlight(highlight_id):
 def update_highlight(highlight_id):
     """更新高亮 (颜色)"""
     data = request.get_json()
-    note_svc = current_app.note_service
+    note_svc = g.note_service
     note_svc.update_highlight(
         highlight_id=highlight_id,
         color=data.get('color')

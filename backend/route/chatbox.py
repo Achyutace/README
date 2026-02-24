@@ -72,7 +72,7 @@ def send_message():
         return jsonify({'error': 'Message and sessionId are required'}), 400
 
     agent_service = current_app.agent_service
-    chat_service = current_app.chat_service
+    chat_service = g.chat_service
 
     # 1. 懒创建会话
     handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
@@ -132,7 +132,7 @@ def simple_chat():
 
     agent_service = current_app.agent_service
     pdf_service = g.pdf_service
-    chat_service = current_app.chat_service
+    chat_service = g.chat_service
 
     # 1. 懒创建
     handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
@@ -184,7 +184,7 @@ def stream_message():
 
     def generate():
         agent_service = current_app.agent_service
-        chat_service = current_app.chat_service
+        chat_service = g.chat_service
 
         try:
             # 1. 懒创建
@@ -240,7 +240,7 @@ def delete_session(session_id):
     """
     接口 D: 删除会话
     """
-    chat_service = current_app.chat_service
+    chat_service = g.chat_service
     user_id = g.user_id
 
     chat_service.delete_session(session_id, user_id)
@@ -258,7 +258,7 @@ def list_sessions():
     """
     接口 E: 获取会话列表
     """
-    chat_service = current_app.chat_service
+    chat_service = g.chat_service
     user_id = g.user_id
 
     pdf_id = request.args.get('pdfId')
@@ -279,7 +279,7 @@ def get_session_messages(session_id):
     """
     接口 F: 获取会话的所有消息
     """
-    chat_service = current_app.chat_service
+    chat_service = g.chat_service
     user_id = g.user_id
 
     messages = chat_service.get_session_messages_for_ui(session_id, user_id)
@@ -305,7 +305,7 @@ def update_session_title(session_id):
     if not new_title or not new_title.strip():
         return jsonify({'error': 'Title is required'}), 400
 
-    chat_service = current_app.chat_service
+    chat_service = g.chat_service
     success = chat_service.update_title(session_id, user_id, new_title.strip())
 
     if not success:
