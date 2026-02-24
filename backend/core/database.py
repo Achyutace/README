@@ -23,8 +23,22 @@ db = SQLAlchemy(model_class=Base)
 
 def init_db(app):
     """在 Flask app 上初始化 Flask-SQLAlchemy"""
-    app.config["SQLALCHEMY_DATABASE_URI"] = settings.DATABASE_URL
+    # 处理云数据库常见的连接断开问题
+    database_url = settings.DATABASE_URL
+    if "sslmode" not in database_url:
+        separator = "&" if "?" in database_url else "?"
+        database_url = f"{database_url}{separator}sslmode=require"
+
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    
+    # 优化连接池设置，防止连接断开
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_recycle": 300,   # 5 分钟回收连接，防止被服务器强删
+        "pool_pre_ping": True, # 每次请求前检查连接是否存活
+        "pool_size": 10,       # 默认连接池大小
+        "max_overflow": 20,    # 允许溢出的最大连接数
+    }
     db.init_app(app)
 
     # 确保所有模型在建表前被导入

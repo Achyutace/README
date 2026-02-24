@@ -53,7 +53,15 @@
 
 ## 后端开发
 
-### 0. 准备云服务
+### 0. 准备服务
+
+#### 版本要求
+
+| 组件 | 版本 | 说明 |
+|---|---|---|
+| **Python** | 3.12 | 启动脚本首次运行时会自动创建虚拟环境，但需系统已安装 Python 3.12 |
+| **Node.js** | ≥ 20.19 | Vite 7 要求，推荐使用 Node 20 LTS |
+| **Redis** | 任意 | 本地开发用，推荐 ≥ 6.0 |
 
 开发阶段，后端依赖以下云端服务：
 
@@ -84,10 +92,12 @@ cp config.yaml.example config.yaml
 
 ### 3. 启动
 #### 3.1 脚本启动
+> 脚本首次运行时会自动创建 Python 3.12 虚拟环境并安装依赖，无需手动操作。
+
 **先决条件**：
 - [安装 Redis](https://redis.io/download/)。
 - 将解压后redis所在的文件夹添加到环境变量，确保在命令行能直接执行 `redis-server`。
-- 如果是 Windows，请确保 Python、Node.js、Redis 的路径都在环境变量中。
+- 如果是 Windows，请确保 `Python 3.12`、`Node.js`、`Redis` 的路径都在环境变量中。
 
 在项目根目录下打开终端，直接运行：
 
@@ -115,6 +125,10 @@ cp config.yaml.example config.yaml
 1. 后端 api 启动
    ```bash
    cd backend
+
+   # 0. 创建虚拟环境
+   conda create -n readme python=3.12
+
    # 1. 激活虚拟环境
    conda activate readme  
 

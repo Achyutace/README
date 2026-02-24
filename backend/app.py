@@ -214,6 +214,15 @@ def health_check():
         }
     })
 
+@app.route('/')
+def index():
+    """根路由跳转到 Swagger 文档"""
+    return jsonify({
+        "message": "Academic Agent Backend is running.",
+        "docs": "/api/docs",
+        "health": "/api/health"
+    })
+
 # ==================== 8. 启动入口 ====================
 
 if __name__ == '__main__':

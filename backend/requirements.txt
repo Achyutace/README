@@ -12,11 +12,11 @@ PyMuPDF==1.23.7
 Pillow==10.2.0
 
 # OpenAI & LangChain Ecosystem (v0.3)
-openai==1.45.0
+openai==1.55.0
 langchain==0.3.0
-langchain-openai==0.2.0
+langchain-openai==0.2.10
 langchain-community==0.3.0
-langgraph==0.3.0
+langgraph==0.3.2
 
 # Vector Database
 qdrant-client>=1.7.0
