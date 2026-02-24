@@ -27,4 +27,4 @@ ENV CONFIG_PATH=/app/config.yaml
 EXPOSE 5000
 
 # Start Gunicorn (4 workers binding to 0.0.0.0:5000)
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-w", "4", "--threads", "4", "-b", "0.0.0.0:5000", "app:app"]
