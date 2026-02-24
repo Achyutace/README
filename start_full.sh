@@ -34,6 +34,9 @@ source venv/bin/activate
 echo "Installing backend dependencies..."
 pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
 
+echo "Applying database migrations..."
+flask db upgrade
+
 python3 app.py &
 BACKEND_PID=$!
 

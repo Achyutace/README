@@ -30,6 +30,7 @@ services:
       - "5000:5000"
     environment:
       - FLASK_ENV=development
+    command: sh -c "flask db upgrade && python app.py"
     depends_on:
       - redis
     restart: unless-stopped

@@ -82,7 +82,8 @@ cp config.yaml.example config.yaml
 6. `jwt`：用户鉴权设置。
 7. `cos`：文档图片的存储。通过配置 `enabled: false` 可关闭云端存储并自动映射到本地 `storage/` 文件夹。
 
-### 3.1 脚本启动
+### 3. 启动
+#### 3.1 脚本启动
 **先决条件**：
 - [安装 Redis](https://redis.io/download/)。
 - 将解压后redis所在的文件夹添加到环境变量，确保在命令行能直接执行 `redis-server`。
@@ -98,7 +99,18 @@ cp config.yaml.example config.yaml
 ./start_full.sh
 ```
 
-### 3.2 手动启动
+#### 3.2 手动启动
+
+0. 数据库同步
+   > **注意**：初次拉取或他人更新了数据库代码时必须执行。一键启动脚本（`start_full`）会自动执行此步骤。
+
+   ```bash
+   cd backend
+   # 激活虚拟环境
+   conda activate readme  
+   # 数据库更新
+   flask db upgrade
+   ```
 
 1. 后端 api 启动
    ```bash
@@ -113,9 +125,9 @@ cp config.yaml.example config.yaml
    python app.py
    ```
 2. celery 启动
-   > 注意：需要先启动redis
-   
+   > 注意：需要先启动redis。
    ```bash
+   # 新开一个终端
    cd backend
    celery -A celery_app worker --loglevel=info --pool=solo
    ```
@@ -129,4 +141,24 @@ cp config.yaml.example config.yaml
 后端启动后，可利用`swagger ui`越过前端直接在浏览器发送真实请求：
 - **调试地址**: `http://localhost:5000/api/docs`
 - **说明**：此页面同步 OpenAPI 文档。
+
+### 5. 数据库更新
+
+如果在开发过程中修改了后端模型代码(`backend/model/` 目录下)时，需要手动同步数据库结构：
+
+```bash
+cd backend
+# 1. 激活虚拟环境
+conda activate readme
+
+# 2. 生成迁移脚本 (会在 backend/migrations/versions 下生成一个新的 py 文件)
+flask db migrate -m "描述你的变更，例如：add_user_phone_field"
+
+# 3. 将变更应用到数据库
+flask db upgrade
+```
+
+> [!IMPORTANT]
+> 在提交 Git 代码时，必须将 `backend/migrations/versions/` 下新生成的迁移脚本一并提交。
+
 ---

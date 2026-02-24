@@ -38,6 +38,10 @@ $backendJob = Start-Job -ScriptBlock {
     & ".\venv\Scripts\activate.ps1"
     Write-Host "Installing backend dependencies..."
     pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
+    
+    Write-Host "Applying database migrations..."
+    flask db upgrade
+    
     python app.py
 }
 

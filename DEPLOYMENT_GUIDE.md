@@ -33,6 +33,12 @@
    docker-compose -f docker-compose.dev.yml up -d --build
    ```
 
+4. **确认迁移**
+   开发环境默认会自动尝试执行 `flask db upgrade`。如果数据库开启了保护或自动执行失败，可手动触发：
+   ```bash
+   docker exec -it paper_agent_backend_dev flask db upgrade
+   ```
+
 ### 如何访问
 - **普通用户**：`http://<服务器公网IP>:8080`
 - **文件存储**：上传的 PDF 或附件将保存在服务器的 `./storage` 目录下。
