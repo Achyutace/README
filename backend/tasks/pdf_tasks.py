@@ -8,7 +8,7 @@ PDF 异步处理任务
 import os
 import logging
 import uuid
-from celery import shared_task
+from celery_app import celery
 
 from core.database import db
 from repository.sql_repo import SQLRepository
@@ -58,7 +58,7 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 
 # =================== Celery Task =======================
 
-@shared_task(bind=True, name="tasks.pdf_tasks.process_pdf",
+@celery.task(bind=True, name="tasks.pdf_tasks.process_pdf",
              max_retries=3, default_retry_delay=60)
 
 def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: uuid.UUID = None):

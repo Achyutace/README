@@ -10,7 +10,7 @@
 # TODO：添加轻量化llm组件
 import logging
 import uuid
-from celery import shared_task
+from celery_app import celery
 
 from core.database import db
 from core.config import settings
@@ -69,7 +69,7 @@ def _generate_title_via_llm(user_query: str) -> str:
 
 # ==================== Celery Task ====================
 
-@shared_task(ignore_result=True, name="tasks.chat_tasks.generate_session_title")
+@celery.task(ignore_result=True, name="tasks.chat_tasks.generate_session_title")
 def generate_session_title_task(session_id: uuid.UUID, user_id: uuid.UUID, user_query: str):
     """
     异步生成会话标题并更新数据库。
