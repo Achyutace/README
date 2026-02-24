@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # README PDF Reader - Full Stack Start Script (macOS / Linux)
+# 用于本地开发人员一键启动全栈联调环境（非 Docker 部署）
+# 架构：本地 Redis + 云端 SQL + 云端 Qdrant + 本地 COS (storage/ 目录)
 
 echo "Starting README PDF Reader Full Stack Environment..."
 
@@ -15,7 +17,13 @@ fi
 rm -rf backend/uploads
 mkdir -p backend/uploads
 
-# 3. 启动后端
+# 3. 启动 Redis
+echo "Starting Redis server..."
+redis-server &
+REDIS_PID=$!
+sleep 2
+
+# 4. 启动后端
 echo "Starting backend server..."
 cd backend
 if [ ! -d "venv" ]; then
@@ -28,11 +36,18 @@ pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 python3 app.py &
 BACKEND_PID=$!
+
+sleep 2
+
+# 5. 启动 Celery Worker
+echo "Starting Celery worker..."
+celery -A celery_app worker --loglevel=info &
+CELERY_PID=$!
 cd ..
 
 sleep 2
 
-# 4. 启动前端
+# 6. 启动前端
 echo "Starting frontend server..."
 cd frontend
 npm install
@@ -50,7 +65,7 @@ echo ""
 echo "Press Ctrl+C to stop all servers"
 
 # 处理 Ctrl+C
-trap "echo 'Stopping servers...'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT
+trap "echo 'Stopping servers...'; kill $REDIS_PID $BACKEND_PID $CELERY_PID $FRONTEND_PID 2>/dev/null; exit" INT
 
 # 等待进程
 wait

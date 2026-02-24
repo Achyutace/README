@@ -27,7 +27,6 @@ class OpenAIConfig(BaseModel):
 class AppInfoConfig(BaseModel):
     """应用总体配置"""
     env: str = "development"
-    debug: bool = True
     host: str = "0.0.0.0"
     port: int = 5000
 
@@ -128,10 +127,8 @@ class AppConfig:
         # 1. 应用基本信息
         app_conf = raw.get("app", {})
         self.env = app_conf.get("env", "development")
-        self.debug = app_conf.get("debug", self.env == "development")
         self.app = AppInfoConfig(
             env=self.env,
-            debug=self.debug,
             host=app_conf.get("host", "0.0.0.0"),
             port=app_conf.get("port", 5000),
         )
@@ -222,6 +219,11 @@ class AppConfig:
     @property
     def has_openai_key(self) -> bool:
         return self.openai is not None and bool(self.openai.api_key)
+
+    @property
+    def debug(self) -> bool:
+        """根据环境自动推导是否开启调试模式"""
+        return self.env == "development"
 
 
 # Global Instance

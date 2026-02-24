@@ -1,4 +1,6 @@
 # README PDF Reader - Full Stack Start Script (Windows)
+# 用于本地开发人员一键启动全栈联调环境（非 Docker 部署）
+# 架构：本地 Redis + 云端 SQL + 云端 Qdrant + 本地 COS (storage/ 目录)
 
 Write-Host "Starting README PDF Reader Full Stack Environment..." -ForegroundColor Green
 
@@ -16,7 +18,14 @@ if (Test-Path $uploadsDir) {
 }
 New-Item -ItemType Directory -Force -Path $uploadsDir | Out-Null
 
-# 3. 启动后端服务器
+# 3. 启动 Redis 
+Write-Host "`nStarting Redis server..." -ForegroundColor Yellow
+$redisJob = Start-Job -ScriptBlock {
+    redis-server
+}
+Start-Sleep -Seconds 2
+
+# 4. 启动后端服务器
 Write-Host "`nStarting backend server..." -ForegroundColor Yellow
 $backendJob = Start-Job -ScriptBlock {
     Set-Location "$using:PWD\backend"
@@ -34,7 +43,17 @@ $backendJob = Start-Job -ScriptBlock {
 
 Start-Sleep -Seconds 2
 
-# 4. 启动前端服务器
+# 5. 启动 Celery Worker
+Write-Host "Starting Celery worker..." -ForegroundColor Yellow
+$celeryJob = Start-Job -ScriptBlock {
+    Set-Location "$using:PWD\backend"
+    & ".\venv\Scripts\activate.ps1"
+    celery -A celery_app worker --loglevel=info --pool=solo
+}
+
+Start-Sleep -Seconds 2
+
+# 6. 启动前端服务器
 Write-Host "Starting frontend server..." -ForegroundColor Yellow
 $frontendJob = Start-Job -ScriptBlock {
     Set-Location "$using:PWD\frontend"
@@ -66,7 +85,7 @@ try {
 }
 finally {
     Write-Host "`nStopping servers..." -ForegroundColor Yellow
-    Stop-Job -Job $backendJob, $frontendJob -ErrorAction SilentlyContinue
-    Remove-Job -Job $backendJob, $frontendJob -ErrorAction SilentlyContinue
+    Stop-Job -Job $redisJob, $backendJob, $celeryJob, $frontendJob -ErrorAction SilentlyContinue
+    Remove-Job -Job $redisJob, $backendJob, $celeryJob, $frontendJob -ErrorAction SilentlyContinue
     Write-Host "All servers stopped." -ForegroundColor Green
 }

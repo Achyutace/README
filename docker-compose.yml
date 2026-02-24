@@ -1,3 +1,7 @@
+# 生产阶段云服务器部署配置
+# 架构：Redis, Celery, Backend, Frontend 运行在 Docker 中
+# 外部依赖：SQL 数据库、Qdrant (可能独立部署) 连接云服务
+# 对象存储 (COS)：使用腾讯云 COS 服务，不再依赖本地存储挂载
 version: '3.8'
 
 services:
@@ -18,9 +22,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: paper_agent_backend
-    command: bash -c "flask db upgrade && gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app"
+    command: gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app
     volumes:
-      - ./storage:/app/storage
+      # Map the config explicitly
       - ./config.yaml:/app/config.yaml
     ports:
       - "5000:5000"
@@ -38,7 +42,6 @@ services:
     container_name: paper_agent_celery
     command: celery -A celery_app worker --loglevel=info
     volumes:
-      - ./storage:/app/storage
       - ./config.yaml:/app/config.yaml
     environment:
       - FLASK_ENV=production

@@ -1,20 +1,10 @@
+# 开发阶段云服务器部署配置
+# 架构：Redis, Celery, Backend, Frontend 运行在 Docker 中
+# 外部依赖：SQL 数据库与 Qdrant 向量库连接云服务
+# 对象存储 (COS)：通过 Volume 挂载映射到云服务器本地 storage 目录
 version: '3.8'
 
 services:
-  # PostgreSQL Database for Development
-  db:
-    image: postgres:15-alpine
-    container_name: paper_agent_db_dev
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_password
-      POSTGRES_DB: paper_agent_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata_dev:/var/lib/postgresql/data
-    restart: unless-stopped
-
   # Message Broker & Task Result Backend
   redis:
     image: redis:7-alpine
@@ -40,10 +30,7 @@ services:
       - "5000:5000"
     environment:
       - FLASK_ENV=development
-      # Override the DB URL to point to the local dev db container
-      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/paper_agent_db
     depends_on:
-      - db
       - redis
     restart: unless-stopped
 
@@ -59,10 +46,8 @@ services:
       - ./config.yaml:/app/config.yaml
     environment:
       - FLASK_ENV=development
-      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/paper_agent_db
     depends_on:
       - backend
-      - db
       - redis
     restart: unless-stopped
 
@@ -79,5 +64,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  pgdata_dev:
   redis_data_dev:

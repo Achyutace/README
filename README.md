@@ -1,79 +1,132 @@
-# README
+# 开发指南
 
-## 快速开始 (本地开发指南)
+> [!IMPORTANT]
+> **本文档仅供本地开发人员调试使用（非 Docker 环境）。**
+> 若需在云服务器执行生产或开发阶段的部署，请阅读 [DEPLOYMENT_GUIDE.md](https://github.com/Achyutace/README/blob/main/DEPLOYMENT_GUIDE.md)。
 
-项目后端强依赖多种云服务，不同情况下提供不同的开发方案：
+## 开发前说明
 
-### 纯前端
+> 项目以openapi指导开发，所有接口以openapi定义的为准
+
+* 前端如果需求变动，需要新的接口，需要先修改openapi文档
+* 后端根据openapi文档的说明实现接口
+
+## 前端开发
+
+### 联调模式
+见后端开发部分。
+### mock server模式
 
 > 无需启动后端，使用 Prism 根据 OpenAPI 文档自动生成 Mock 数据。
 
-1. **安装全局依赖**：
+1. **首次安装全局依赖**
    ```bash
    npm install -g @stoplight/prism-cli
    ```
 
-**每次开发：** 可以在项目根目录运行一键启动脚本（脚本会同时启动 Mock Server 和前端）：
+2. **每次开发**
 
-```bash
-# Windows
-.\start_mock.ps1
+   2.1 **脚本启动**
 
-# macOS / Linux
-./start_mock.sh
-```
+   在项目根目录运行一键启动脚本，同时运行 Mock Server 和前端。
 
-> **注意**：如果不想使用脚本，也可以分别在两个终端手动运行：
+   ```bash
+   # Windows
+   .\start_mock.ps1
 
-```bash
-# 终端 1：启动 Mock Server（项目根目录）
+   # macOS / Linux
+   ./start_mock.sh
+   ```
+
+   2.2 **手动启动**
+
+   ```bash
+   # 终端 1：启动 Mock Server（在项目根目录下运行指令）
    prism mock docs/openapi/openapi.yaml
    
    # 终端 2：启动前端应用
    cd frontend
    npm install
    npm run dev:mock
-```
-
-> **联调说明**：前端联调，连接真实后端服务时，将 `frontend/.env` 中的 `VITE_API_BASE_URL` 指向部署好的后端域名，然后运行 `npm run dev` 即可。
-
+   ```
 ---
 
-### 后端 / 全栈开发
+## 后端开发
 
-> 需完整运行 Python 服务。由于后端依赖云资源，联系相关人员获取公共测试环境的 `config.yaml` 配置文件（不要使用线上正式环境）。
+### 0. 准备云服务
 
-**前提：** 将配置好的 `config.yaml` 放入项目根目录。
+开发阶段，后端依赖以下云端服务：
 
-**启动后端主服务：**
+1. **PostgreSQL**：推荐使用 [Neon PostgreSQL](https://neon.tech/)。注册并创建一个项目，获取连接字符串。
+2.  **Qdrant**：推荐使用 [Qdrant Cloud](https://qdrant.tech/)。注册并创建一个集群，获取 API Key 和集群 URL。
+3.  **Llm api**：推荐群里那个。
 
-#### 选项一：手动使用 Conda 启动
+### 1. 本地启动redis
+* **下载**：[Redis-x64-3.2.100.zip](https://github.com/microsoftarchive/redis/releases/tag/win-3.2.100)
+* **使用**：解压该压缩包到任意目录，双击运行里面的 `redis-server.exe`，会弹出一个黑色的命令行窗口，上面有端口信息，通常是默认端口6379。开发测试完成后可随时关闭。
 
+### 2. 配置 `config.yaml`
+
+#### 复制配置文件：
 ```bash
-# Windows / macOS / Linux
-cd backend
-conda create -n readme python=3.10 -y
-conda activate readme
-pip install -r requirements.txt
-python app.py
+cp config.yaml.example config.yaml
 ```
+#### 填写配置文件：
 
-#### 选项二：使用全栈一键启动脚本
+1. `openai`：大模型服务api。在 `openai` 节点下填写全局 `api_key` 与 `api_base`。如果有针对特定任务（如翻译、视觉）的模型需求，可在 `models` 节点下调整。
+2. `postgresql`：关系型数据库，连接到云端（`Neon`）。`database.url`填入云端 PostgreSQL的连接字符串
+（示例：`postgresql://<用户名>:<密码>@<云端域名>:5432/<数据库名>?sslmode=require`）
+3. `qdrant`：向量存储搜索库。填入云端 Qdrant 服务的 `url` 与 `api_key`。
+4. `celery`：依赖 Redis 作为 Broker 和 Result Backend，按照步骤一的结果填写，通常不用修改。
+5. `Semantic Scholar`, `Tavily`：ss可以无api请求，申请api可放宽限流；tavily需要申请api，有免费月额度。
+6. `jwt`：用户鉴权设置。
+7. `cos`：文档图片的存储。通过配置 `enabled: false` 可关闭云端存储并自动映射到本地 `storage/` 文件夹。
 
-由于项目包含前后端服务，可以在项目根目录运行全栈一键启动脚本（脚本会自动管理 venv 环境和依赖，并同时启动前后端）：
+### 3.1 脚本启动
+**先决条件**：
+- [安装 Redis](https://redis.io/download/)。
+- 将解压后redis所在的文件夹添加到环境变量，确保在命令行能直接执行 `redis-server`。
+- 如果是 Windows，请确保 Python、Node.js、Redis 的路径都在环境变量中。
+
+在项目根目录下打开终端，直接运行：
 
 ```bash
-# Windows
+# Windows (PowerShell)
 .\start_full.ps1
 
-# macOS / Linux
+# macOS / Linux (Terminal)
 ./start_full.sh
 ```
 
-> **注意**：服务启动在 `http://localhost:5000`，需同时（新建终端）启动 Celery Worker：
+### 3.2 手动启动
 
-```bash
-celery -A celery_app worker --loglevel=info --pool=solo
-```
+1. 后端 api 启动
+   ```bash
+   cd backend
+   # 1. 激活虚拟环境
+   conda activate readme  
 
+   # 2. 安装依赖
+   pip install -r requirements.txt
+
+   # 3. 启动主后端应用
+   python app.py
+   ```
+2. celery 启动
+   > 注意：需要先启动redis
+   
+   ```bash
+   cd backend
+   celery -A celery_app worker --loglevel=info --pool=solo
+   ```
+3. 前端 ui 启动
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+### 4. 接口调试说明
+后端启动后，可利用`swagger ui`越过前端直接在浏览器发送真实请求：
+- **调试地址**: `http://localhost:5000/api/docs`
+- **说明**：此页面同步 OpenAPI 文档。
 ---
