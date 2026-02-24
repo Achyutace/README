@@ -58,16 +58,14 @@ migrate = Migrate(app, db)
 # 获取项目根目录（README 目录）
 BASE_DIR = Path(__file__).resolve().parent.parent  
 STORAGE_ROOT = BASE_DIR / 'storage'  # README/storage
-USERS_DIR = STORAGE_ROOT / 'users'
 
 # 初始化磁盘目录结构
 def init_storage_directories():
     """初始化存储目录结构"""
     directories = [
         STORAGE_ROOT,
-        STORAGE_ROOT / 'images',      # 图片存储目录
-        STORAGE_ROOT / 'uploads',     # PDF上传目录
-        USERS_DIR,                     # 用户数据目录
+        STORAGE_ROOT / 'image',      # 图片存储目录
+        STORAGE_ROOT / 'pdffile',     # PDF上传目录
     ]
     
     for directory in directories:
@@ -137,9 +135,8 @@ def before_request():
         g.user_id = user_uuid
         g.user_id_str = str(user_uuid)
 
-        # 2. 准备用户目录
-        user_path = USERS_DIR / g.user_id_str
-        upload_folder = user_path / 'uploads'
+        # 2. 统一使用 pdffile 目录
+        upload_folder = STORAGE_ROOT / 'pdffile'
         upload_folder.mkdir(parents=True, exist_ok=True)
 
         # 3. 初始化 PdfService

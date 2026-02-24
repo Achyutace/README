@@ -39,7 +39,7 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
         # 使用临时文件防止并发写冲突
         tmp_candidate = f"{candidate}.tmp.{uuid.uuid4().hex}"
         try:
-            if object_storage.download_file(file_hash, tmp_candidate):
+            if object_storage.download_file(f"pdffile/{file_hash}", tmp_candidate):
                 # 原子替换 
                 os.replace(tmp_candidate, candidate)
                 logger.info(f"Downloaded {file_hash} from COS to {candidate}")

@@ -58,8 +58,8 @@ class PdfService:
         # 3. 如果启用 COS，尝试下载到本地
         if object_storage.config.enabled:
             try:
-                # COS Key 就是 pdf_id
-                if object_storage.download_file(pdf_id, candidate):
+                # COS Key 是 pdffile/{pdf_id}
+                if object_storage.download_file(f"pdffile/{pdf_id}", candidate):
                     logger.info(f"Downloaded {pdf_id} from COS to {candidate}")
                     return candidate
             except Exception as e:
@@ -153,7 +153,7 @@ class PdfService:
             try:
                 # 注意：这里需要重新打开文件流或使用 bytes
                 with open(filepath, 'rb') as f:
-                    object_storage.upload_file(f, pdf_id)
+                    object_storage.upload_file(f, f"pdffile/{pdf_id}")
             except Exception as e:
                 logger.error(f"[Ingest] COS upload failed (continuing): {e}")
 

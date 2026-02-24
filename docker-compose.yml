@@ -18,7 +18,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: paper_agent_backend
-    command: bash -c "flask db upgrade && gunicorn -w 4 -b 0.0.0.0:5000 app:app"
+    command: bash -c "flask db upgrade && gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app"
     volumes:
       - ./storage:/app/storage
       - ./config.yaml:/app/config.yaml
