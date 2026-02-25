@@ -101,6 +101,9 @@ async function selectDocument(id: string) {
     aiStore.resetForNewDocument() // 重置 AI Store 状态，要在更改 id 前重置避免清空 watcher 的结果
     await libraryStore.selectDocument(id) // 可能是异步，先拉取 blob
     pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID和最新的 url
+    
+    // 选择文献后自动收起左侧边栏
+    isCollapsed.value = true
   }
 }
 
@@ -138,8 +141,8 @@ function removeDocument(id: string, event: Event) {
       ]"
     >
       <!-- Logo Area -->
-      <div class="p-4 flex items-center justify-between border-b border-gray-700">
-        <h1 v-if="showFullContent" class="text-xl font-bold text-primary-500">
+      <div class="h-[42px] flex items-center justify-between px-4 pt-1">
+        <h1 v-if="showFullContent" class="text-2xl font-extrabold tracking-tight text-primary-500">
           README
         </h1>
         <button

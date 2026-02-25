@@ -8,6 +8,7 @@ const props = defineProps<{
   customModels: CustomModel[]
   selectedModel: string
   selectedText?: string
+  selectionMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   (e: 'open-model-modal'): void
   (e: 'delete-model', id: string): void
   (e: 'toggle-mode'): void
+  (e: 'toggle-selection-mode'): void
 }>()
 
 const inputMessage = ref('')
@@ -170,13 +172,13 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
 </script>
 
 <template>
-  <div ref="inputAreaRef" class="p-4 border-t border-gray-100 dark:border-gray-800 bg-white/50 dark:bg-[#252526]/50 backdrop-blur-sm">
+  <div ref="inputAreaRef" class="p-4 border-t border-blue-100/50 dark:border-slate-800/60 bg-white/80 dark:bg-[#252526]/50 backdrop-blur-sm">
     
     <!-- Preview blocks (Selections + References + Files) -->
     <div v-if="selectedText || selectedReferences.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-1.5 mb-2">
       
       <!-- PDF Selection Preview -->
-      <div v-if="selectedText" class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs">
+      <div v-if="selectedText" class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100/50 dark:bg-gray-700 text-primary-700 dark:text-gray-300 rounded text-xs">
         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg>
         <span class="max-w-20 truncate" :title="selectedText">{{ selectedText }}</span>
         <button @click="$emit('clear-selection')" class="hover:text-gray-900 dark:hover:text-white">
@@ -185,7 +187,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
       </div>
 
       <!-- Reference Tags -->
-      <div v-for="ref in selectedReferences" :key="ref.id" class="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded text-xs">
+      <div v-for="ref in selectedReferences" :key="ref.id" class="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs">
         <span class="text-primary-500">@</span>
         <span class="max-w-20 truncate">{{ ref.label }}</span>
         <button @click="removeReference(ref.id)" class="hover:text-primary-900">
@@ -204,18 +206,18 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
     </div>
 
     <!-- Toolbar row -->
-    <div class="flex items-center gap-1 mb-2">
+    <div class="flex items-center gap-1 mb-1">
 
       <!-- Prompts Menu -->
       <div class="relative">
         <button
           @click="togglePromptMenu"
-          class="flex items-center gap-0.5 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 transition-colors"
+          class="flex items-center gap-0.5 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 transition-colors"
           :class="{ 'bg-gray-100 dark:bg-gray-700': showPromptMenu }"
           title="预设提示词"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-          <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          <svg class="w-2.5 h-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
         </button>
 
         <!-- Prompt Dropdown -->
@@ -260,7 +262,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
       <div class="relative">
         <button
           @click="toggleAtMenu"
-          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors text-sm font-medium"
+          class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors text-xs font-medium"
           :class="{ 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200': showAtMenu }"
           title="插入引用"
         >@</button>
@@ -282,7 +284,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
       </div>
 
       <!-- Attachment Button -->
-      <button @click="triggerFileInput" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors" title="添加文件">
+      <button @click="triggerFileInput" class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors" title="添加文件">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
       </button>
       <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileSelect" />
@@ -290,7 +292,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
       <!-- Chat Mode Toggle Button -->
       <button
         @click="$emit('toggle-mode')"
-        class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+        class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         :title="chatMode === 'agent' ? '当前: Agent 模式 (点击切换到简单聊天)' : '当前: 简单聊天模式 (点击切换到 Agent)'"
       >
         <!-- Agent mode icon: magnifier -->
@@ -303,74 +305,83 @@ onBeforeUnmount(() => document.removeEventListener('click', handleGlobalClick))
         </svg>
       </button>
 
+      <!-- Selection Mode Toggle Button -->
+      <button
+        @click="$emit('toggle-selection-mode')"
+        class="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        :class="selectionMode ? 'text-slate-900 bg-slate-100 dark:bg-slate-800 dark:text-white' : 'text-slate-500 dark:text-slate-400'"
+        title="选择模式"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+      </button>
+
       <!-- Model Selector -->
       <div class="relative ml-auto">
         <button
           @click="toggleModelMenu"
-          class="flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors text-xs"
-          :class="{ 'bg-gray-100 dark:bg-gray-700': showModelMenu }"
+          class="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors text-[11px]"
+          :class="{ 'bg-slate-100 dark:bg-slate-800': showModelMenu }"
         >
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
           <span class="max-w-24 truncate">{{ selectedModel }}</span>
-          <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-180': showModelMenu }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          <svg class="w-2.5 h-2.5 transition-transform" :class="{ 'rotate-180': showModelMenu }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
         </button>
 
-        <div v-if="showModelMenu" class="absolute bottom-full right-0 mb-1 bg-white dark:bg-[#252526] border border-gray-200 dark:border-gray-700 rounded-lg py-1 min-w-36 max-w-48 z-50 shadow-lg">
+        <div v-if="showModelMenu" class="absolute bottom-full right-0 mb-1 bg-white dark:bg-[#252526] border border-slate-200 dark:border-slate-700 rounded-md z-50 shadow-lg overflow-hidden flex flex-col min-w-40 animate-in fade-in slide-in-from-bottom-2 duration-200">
           <button
             @click="selectModel('README Fusion')"
-            class="w-full text-left px-2.5 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors"
-            :class="{ 'bg-gray-100 dark:bg-gray-600/50': selectedModel === 'README Fusion' }"
+            class="w-full text-left px-3 py-2.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors first:rounded-t-md"
+            :class="{ 'bg-blue-50/60 dark:bg-slate-900/60 text-primary-700 dark:text-primary-400': selectedModel === 'README Fusion' }"
           >README Fusion</button>
 
           <template v-if="customModels.length > 0">
-            <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-            <div v-for="model in customModels" :key="model.id" class="relative group">
+            <div v-for="model in customModels" :key="model.id" class="relative group border-t border-gray-100 dark:border-gray-800">
               <button
                 @click="selectModel(model.name)"
-                class="w-full text-left px-2.5 py-2 pr-7 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors truncate"
-                :class="{ 'bg-gray-100 dark:bg-gray-600/50': selectedModel === model.name }"
+                class="w-full text-left px-3 py-2.5 pr-8 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors truncate"
+                :class="{ 'bg-blue-50/60 dark:bg-slate-900/60 text-primary-700 dark:text-primary-400': selectedModel === model.name }"
               >{{ model.name }}</button>
               <button
                 @click="deleteCustomModel(model.id, $event)"
-                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-all"
+                class="absolute right-2 top-1/2 -translate-y-1/2 p-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all"
               >
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
           </template>
 
-          <div class="border-t border-gray-200 dark:border-gray-600 my-1"></div>
           <button
             @click="$emit('open-model-modal'); showModelMenu = false"
-            class="w-full text-left px-2.5 py-2 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600/50 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+            class="w-full text-left px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition-colors border-t border-gray-100 dark:border-gray-800 last:rounded-b-md"
           >+ 添加自定义模型</button>
         </div>
       </div>
     </div>
 
-    <!-- Textarea + Send Button -->
     <div class="flex gap-2 items-end">
-      <div class="flex-1 relative">
+      <div 
+        class="flex-1 flex items-center border border-blue-100/60 dark:border-slate-700 rounded-lg bg-white dark:bg-[#3e3e42] transition-all duration-200 focus-within:border-primary-400 dark:focus-within:border-slate-500 overflow-hidden px-1"
+      >
         <textarea
           v-model="inputMessage"
           placeholder="输入问题..."
           @keydown.enter.exact.prevent="sendMessage()"
-          class="w-full px-4 py-3 min-h-[46px] max-h-32 border border-gray-200 dark:border-gray-700 rounded-2xl focus:outline-none focus:border-gray-300 dark:focus:border-gray-600 focus:ring-2 focus:ring-gray-100 dark:focus:ring-gray-800 text-sm bg-white dark:bg-[#3e3e42] dark:text-gray-200 transition-all duration-200 placeholder:text-gray-400 resize-none overflow-hidden"
-          style="field-sizing: content;"
+          class="w-full px-2 py-2 bg-transparent border-none focus:outline-none focus:ring-0 text-sm dark:text-gray-200 placeholder:text-slate-400 dark:placeholder:text-gray-400 resize-none leading-relaxed"
+          style="field-sizing: content; min-height: 38px; max-height: 160px; overflow-y: auto !important;"
         ></textarea>
       </div>
 
       <button
         @click="sendMessage()"
         :disabled="!inputMessage.trim() || isLoadingContent"
-        class="mb-1 p-2.5 rounded-xl transition-all duration-200 flex-shrink-0"
+        class="flex-shrink-0 flex items-center justify-center w-[38px] h-[38px] rounded-lg transition-all duration-200 self-end"
         :class="[
           inputMessage.trim()
-            ? 'bg-gray-900 dark:bg-[#0e639c] text-white hover:bg-gray-800 dark:hover:bg-[#1177bb]'
-            : 'bg-gray-100 dark:bg-[#2d2d30] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+            ? 'bg-primary-600 dark:bg-slate-700 text-white hover:bg-primary-700 dark:hover:bg-slate-600'
+            : 'bg-blue-50 dark:bg-slate-800 text-primary-300 dark:text-slate-500 cursor-not-allowed'
         ]"
       >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7" />
         </svg>
       </button>

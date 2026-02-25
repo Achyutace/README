@@ -80,8 +80,12 @@ def send_message():
     # 2. 存储用户消息
     chat_service.add_user_message(session_id, user_id, user_query)
 
-    # 3. 获取历史记录
-    history = chat_service.get_formatted_history(session_id, user_id, limit=10)
+    # 3. 获取历史记录（支持前端覆盖，用于重发/编辑场景）
+    history_override = data.get('history')
+    if history_override is not None:
+        history = history_override
+    else:
+        history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
     # 4. 调用 Agent
     '''
@@ -140,8 +144,12 @@ def simple_chat():
     # 2. 存储用户消息
     chat_service.add_user_message(session_id, user_id, user_query)
 
-    # 3. 历史记录
-    history = chat_service.get_formatted_history(session_id, user_id, limit=10)
+    # 3. 历史记录（支持前端覆盖，用于重发/编辑场景）
+    history_override = data.get('history')
+    if history_override is not None:
+        history = history_override
+    else:
+        history = chat_service.get_formatted_history(session_id, user_id, limit=10)
 
     # 4. 获取 PDF 全文
     paragraphs = pdf_service.get_paragraph(pdf_id) if pdf_id else []
