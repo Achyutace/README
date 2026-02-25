@@ -411,7 +411,8 @@ export const chatSessionApi = {
     mode: 'agent' | 'simple' = 'agent',
     model?: string, // 可选：覆盖后端默认模型
     apiBase?: string, // 可选：自定义 OpenAI-like 的 base URL
-    apiKey?: string // 可选：自定义 API Key（谨慎使用）
+    apiKey?: string, // 可选：自定义 API Key（谨慎使用）
+    history?: Array<{ role: string; content: string }> // 可选：重发/编辑时传入的历史覆盖
   ): Promise<{
     sessionId: string
     response: string
@@ -420,14 +421,18 @@ export const chatSessionApi = {
     const endpoint = mode === 'simple'
       ? '/chatbox/simple-chat'
       : '/chatbox/message'
-    const { data } = await api.post(endpoint, {
+    const payload: any = {
       sessionId,
       message,
       pdfId,
       model,
       apiBase,
       apiKey
-    })
+    }
+    if (history) {
+      payload.history = history
+    }
+    const { data } = await api.post(endpoint, payload)
     return data
   },
 }

@@ -73,7 +73,7 @@ async function loadNotesFromDB() {
       content: note.content || '',
       keywords: note.keywords || [],
       isEditing: false,
-      isCollapsed: false,
+      isCollapsed: true,
       showRawMd: false,
       createdAt: new Date(note.createdAt).getTime(),
       isLocal: false
@@ -152,7 +152,7 @@ function addCard() {
     content: '',
     keywords: [],
     isEditing: true,
-    isCollapsed: false,
+    isCollapsed: true,
     showRawMd: false,
     createdAt: Date.now(),
     isLocal: true
@@ -277,7 +277,7 @@ defineExpose({ addCard })
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-white dark:bg-[#2d2d30]">
+  <div class="h-full flex flex-col bg-transparent">
     <!-- Cards Container -->
     <div ref="containerRef" class="flex-1 overflow-y-auto pb-2 pt-0 space-y-1">
       <!-- Empty State -->
@@ -289,7 +289,7 @@ defineExpose({ addCard })
       <div
         v-for="card in cards"
         :key="card.id"
-        class="bg-white dark:bg-[#2d2d30] border-t border-b-0 border-gray-200 dark:border-gray-700 overflow-hidden"
+        class="bg-transparent border-t first:border-t-0 border-b-0 border-blue-100/50 dark:border-slate-800/60 overflow-hidden"
       >
         <!-- Editing Mode -->
         <template v-if="card.isEditing">
@@ -391,7 +391,7 @@ defineExpose({ addCard })
         <!-- Completed Mode -->
         <template v-else>
           <div
-            class="cursor-pointer hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
+            class="cursor-pointer hover:bg-blue-50/40 dark:hover:bg-white/[0.03] transition-colors"
             @click="toggleEdit(card)"
           >
             <div class="py-2 flex items-center justify-between">
@@ -439,16 +439,9 @@ defineExpose({ addCard })
                 </button>
               </div>
             </div>
-            <div class="px-3 pb-2 border-b-0">
-              <!-- Collapsed: show only first line -->
-              <div
-                v-if="card.isCollapsed"
-                class="text-sm text-gray-600 dark:text-gray-400 truncate"
-              >
-                {{ getFirstLine(card.content) || '无内容' }}
-              </div>
+            <div v-if="!card.isCollapsed" class="px-3 pb-2 border-b-0">
               <!-- Expanded: show rendered content using Tiptap in read-only mode -->
-              <div v-else class="text-sm text-gray-600 dark:text-gray-400">
+              <div class="text-sm text-gray-600 dark:text-gray-400">
                 <NoteEditor
                   v-model="card.content"
                   :editable="false"

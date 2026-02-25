@@ -213,8 +213,8 @@ const stopSplitResize = () => {
 const topPanelStyle = computed(() => {
   // 如果不可见
   if (!notesVisible.value) return { display: 'none' }
-  // 如果最小化，则固定高度为 36px
-  if (notesMinimized.value) return { height: '36px', flexShrink: 0 }
+  // 如果最小化，则固定高度为 42px
+  if (notesMinimized.value) return { height: '42px', flexShrink: 0 }
   
   // 当 Notes 展开且 Chat 隐藏/最小化时，Notes 占据剩余空间
   if (!chatVisible.value || chatMinimized.value) {
@@ -228,8 +228,8 @@ const topPanelStyle = computed(() => {
 const bottomPanelStyle = computed(() => {
   // 如果不可见
   if (!chatVisible.value) return { display: 'none' }
-  // 如果最小化，则固定高度为 36px
-  if (chatMinimized.value) return { height: '36px', flexShrink: 0 }
+  // 如果最小化，则固定高度为 42px
+  if (chatMinimized.value) return { height: '42px', flexShrink: 0 }
   
   // 当 Chat 展开且 Notes 隐藏/最小化时，Chat 占据剩余空间
   if (!notesVisible.value || notesMinimized.value) {
@@ -263,7 +263,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
+  <div class="flex h-screen w-screen bg-gradient-to-br from-blue-50/50 to-indigo-50/30 dark:from-[#1e1e1e] dark:to-[#252526] transition-colors duration-200">
     <!-- Left Sidebar - Library -->
     <LibrarySidebar class="flex-shrink-0" />
 
@@ -274,7 +274,7 @@ onBeforeUnmount(() => {
         <!-- PDF Viewer - always present, never destroyed -->
         <div class="flex-1 overflow-hidden flex flex-col">
           <!-- PDF Toolbar - Only above PDF viewer -->
-          <div class="bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-800/60 shadow-sm">
+          <div class="bg-white/95 dark:bg-[#252526] backdrop-blur-sm border-b border-blue-100/50 dark:border-slate-800/60">
             <PdfToolbar
               v-if="pdfStore.currentPdfUrl"
               :notes-visible="notesVisible"
@@ -283,7 +283,7 @@ onBeforeUnmount(() => {
               @toggle-chat-visibility="toggleChatVisibility"
               @toggle-theme="themeStore.toggleTheme"
             />
-            <div v-else class="h-[49px]"></div>
+            <div v-else class="h-[42px]"></div>
           </div>
           <!-- PDF Viewer Content -->
         <div class="flex-1 overflow-hidden">
@@ -291,12 +291,12 @@ onBeforeUnmount(() => {
         </div>
         </div>
 
-        <!-- Right Panel Container (Split View) - hidden when both panels are hidden -->
+        <!-- Right Panel Container (Split View) - hidden when both panels are hidden or no PDF is loaded -->
         <aside
-          v-if="libraryStore.currentDocumentId"
+          v-if="pdfStore.currentPdfUrl"
           v-show="sidebarVisible"
           ref="sidebarRef"
-          class="flex flex-col border-l border-gray-200/60 dark:border-gray-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-xl"
+          class="flex flex-col border-l border-blue-100/50 dark:border-slate-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-none"
           :class="aiStore.isPanelHidden ? 'w-0 opacity-0 overflow-hidden' : ''"
           :style="!aiStore.isPanelHidden ? { width: sidebarWidth + 'px' } : {}"
         >
@@ -313,26 +313,26 @@ onBeforeUnmount(() => {
           <!-- Top Panel: AI Panel (Notes) -->
           <div
             v-if="notesVisible"
-            class="flex flex-col border-b border-gray-200 dark:border-gray-800 overflow-hidden transition-all duration-200"
+            class="flex flex-col border-b border-blue-100/50 dark:border-slate-800/60 overflow-hidden transition-all duration-200 bg-slate-50/50 dark:bg-[#1e1e1e]"
             :style="topPanelStyle"
           >
             <!-- Minimized Bar for Top Panel -->
             <div 
               v-if="notesMinimized"
-              class="h-9 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
+              class="h-[42px] bg-blue-50/40 dark:bg-[#252526] flex items-center px-3 cursor-pointer hover:bg-blue-50/60 dark:hover:bg-[#2d2d30] transition-colors"
               @click="toggleNotesMinimize"
             >
                <!-- Down Triangle (Expand) -->
-               <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
+               <svg class="w-4 h-4 text-gray-500 dark:text-gray-400 mr-2" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M7 10l5 5 5-5H7z"/>
                 </svg>
-              <span class="text-white text-xs font-medium truncate">Note</span>
+              <span class="text-xs font-medium truncate text-slate-700 dark:text-gray-300">Note</span>
             </div>
 
             <template v-else>
             <!-- Panel Header with Minimize Button -->
             <div 
-              class="h-9 flex items-center justify-between px-3 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#252526] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2d2d30] transition-colors"
+              class="h-[42px] flex items-center justify-between px-3 border-b border-blue-100/50 dark:border-slate-800/60 bg-blue-50/40 dark:bg-[#252526] cursor-pointer hover:bg-blue-50/60 dark:hover:bg-[#2d2d30] transition-colors"
               @click="toggleNotesMinimize"
             >
               <div class="flex items-center">
@@ -342,7 +342,7 @@ onBeforeUnmount(() => {
                     <path d="M7 14l5-5 5 5H7z"/>
                   </svg>
                 </div>
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Note</span>
+                <span class="text-sm font-medium text-slate-700 dark:text-gray-300">Note</span>
               </div>
               <!-- Add Card Button -->
               <button
@@ -361,13 +361,15 @@ onBeforeUnmount(() => {
             </template>
           </div>
 
-          <!-- Spacer if both are minimized (to push chat to bottom) -->
-          <div v-if="notesVisible && notesMinimized && chatVisible && chatMinimized" class="flex-1 bg-gray-50 dark:bg-[#1e1e1e]"></div>
+          <!-- Spacer if Note is minimized AND Chat is minimized OR Note is hidden AND Chat is minimized OR Note is minimized AND Chat is hidden -->
+          <div 
+            v-if="(notesMinimized || !notesVisible) && (chatMinimized || !chatVisible)" 
+            class="flex-1 bg-slate-50/50 dark:bg-[#1e1e1e]"
+          ></div>
 
-          <!-- Draggable Divider (only show when both panels are visible and expanded) -->
           <div
             v-if="notesVisible && !notesMinimized && chatVisible && !chatMinimized"
-            class="h-1 bg-gray-300 dark:bg-gray-700 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
+            class="h-[1px] bg-blue-100/50 dark:bg-slate-800/60 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-ns-resize transition-colors relative z-20 flex-shrink-0"
             :class="{ 'bg-primary-500 dark:bg-primary-400': isResizingSplit }"
             @mousedown="startSplitResize"
           >
@@ -378,26 +380,26 @@ onBeforeUnmount(() => {
           <!-- Bottom Panel: Chat Box -->
           <div
             v-if="chatVisible"
-            class="flex flex-col overflow-hidden bg-gray-50 dark:bg-[#1e1e1e] transition-all duration-200"
+            class="flex flex-col overflow-hidden bg-slate-50/50 dark:bg-[#1e1e1e] transition-all duration-200"
             :style="bottomPanelStyle"
           >
             <!-- Minimized Bar for Bottom Panel -->
           <div
               v-if="chatMinimized"
-              class="h-9 bg-gray-700 flex items-center px-3 cursor-pointer hover:bg-gray-600 transition-colors"
+              class="h-[42px] bg-blue-50/40 dark:bg-[#252526] flex items-center px-3 cursor-pointer hover:bg-blue-50/60 dark:hover:bg-[#2d2d30] transition-colors"
               @click="toggleChatMinimize"
             >
               <!-- Triangle pointing up (Expand) -->
-              <svg class="w-4 h-4 text-white mr-2" fill="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-gray-500 dark:text-gray-400 mr-2" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M7 14l5-5 5 5H7z"/>
                 </svg>
-              <span class="text-white text-xs font-medium truncate">Chat</span>
+              <span class="text-xs font-medium truncate text-slate-700 dark:text-gray-300">Chat</span>
             </div>
             <!-- Full Panel Content -->
             <template v-else>
               <!-- Panel Header with Minimize Button and History -->
               <div 
-                class="h-9 flex items-center justify-between px-3 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#252526] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2d2d30] transition-colors"
+                class="h-[42px] flex items-center justify-between px-3 border-b border-blue-100/50 dark:border-slate-800/60 bg-blue-50/40 dark:bg-[#252526] cursor-pointer hover:bg-blue-50/60 dark:hover:bg-[#2d2d30] transition-colors"
                 @click="toggleChatMinimize"
               >
                 <div class="flex items-center">
@@ -407,7 +409,7 @@ onBeforeUnmount(() => {
                       <path d="M7 10l5 5 5-5H7z"/>
                         </svg>
                   </div>
-                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Chat</span>
+                  <span class="text-sm font-medium text-slate-700 dark:text-gray-300">Chat</span>
           </div>
 
                 <!-- Right Actions -->

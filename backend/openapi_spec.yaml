@@ -164,6 +164,15 @@ components:
         model: { type: string }
         apiKey: { type: string }
         apiBase: { type: string }
+        history:
+          type: array
+          description: 可选，前端传入的历史覆盖（用于重发/编辑场景）。提供时跳过数据库历史查询。
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role: { type: string, enum: [user, assistant] }
+              content: { type: string }
 
     NewSessionResponse:
       type: object

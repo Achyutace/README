@@ -51,6 +51,10 @@ export const useAiStore = defineStore('ai', () => {
   const isLoadingTranslation = ref(false)
   const isLoadingChat = ref(false)
 
+  // 消息选择模式
+  const selectionMode = ref(false)
+  const selectedMessageIds = ref<Set<string>>(new Set())
+
   // -----------------------------
   // 本地缓存（只有极轻量状态 ID）相关逻辑
   // -----------------------------
@@ -201,6 +205,44 @@ export const useAiStore = defineStore('ai', () => {
         }
       }
     }
+  }
+
+  // -----------------------------
+  // 消息选择相关
+  // -----------------------------
+  function toggleSelectionMode() {
+    selectionMode.value = !selectionMode.value
+    if (!selectionMode.value) {
+      selectedMessageIds.value = new Set()
+    }
+  }
+
+  function toggleMessageSelection(id: string) {
+    const newSet = new Set(selectedMessageIds.value)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    selectedMessageIds.value = newSet
+  }
+
+  function copySelectedAsJson() {
+    const selected = chatMessages.value.filter(m => selectedMessageIds.value.has(m.id))
+    const list = selected.map(m => ({
+      role: m.role === 'user' ? '用户' : 'AI',
+      content: m.content,
+      timestamp: m.timestamp
+    }))
+    return JSON.stringify(list, null, 2)
+  }
+
+  // 获取指定索引之前的消息历史（用于重发/编辑）
+  function getHistoryBeforeIndex(index: number): Array<{ role: string; content: string }> {
+    return chatMessages.value.slice(0, index).map(m => ({
+      role: m.role,
+      content: m.content
+    }))
   }
 
   // 清空当前聊天窗口并取消选中会话
@@ -398,6 +440,8 @@ export const useAiStore = defineStore('ai', () => {
     isLoadingSummary,
     isLoadingTranslation,
     isLoadingChat,
+    selectionMode,
+    selectedMessageIds,
     tabs,
     setActiveTab,
     togglePanel,
@@ -414,5 +458,9 @@ export const useAiStore = defineStore('ai', () => {
     deleteSession,
     resetForNewDocument,
     fetchRoadmap,
+    toggleSelectionMode,
+    toggleMessageSelection,
+    copySelectedAsJson,
+    getHistoryBeforeIndex,
   }
 })
