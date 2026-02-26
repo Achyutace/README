@@ -50,7 +50,7 @@ function handleSidebarMouseLeave() {
 }
 
 // ------------------------- 文件上传流程 -------------------------
-// 点击上传PDF按钮
+// 触发文件上传
 function triggerFileUpload() {
   fileInput.value?.click()
 }
@@ -237,5 +237,6 @@ function removeDocument(id: string, event: Event) {
         </div>
       </div>
     </aside>
+
   </div>
 </template>

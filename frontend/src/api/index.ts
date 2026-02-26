@@ -64,19 +64,20 @@ export function isAuthenticated(): boolean {
 // ==================== 临时 Mock 认证初始化 ====================
 /**
  * 临时解决方案：在没有正式登录界面时，为浏览器预填一个 Mock Token。
+ * 
  */
 // TODO
-export function initMockAuth() {
-  if (!getAccessToken()) {
-    setTokens('mock-access-token-' + Math.random().toString(36).substring(7), 'mock-refresh-token');
-    setCurrentUser({
-      id: '00000000-0000-0000-0000-000000000000', // 默认 UUID
-      username: 'Guest',
-      email: 'guest@example.com'
-    });
-    console.log('Temporary mock authentication initialized for PDF upload and other APIs.');
-  }
-}
+// export function initMockAuth() {
+//   if (!getAccessToken()) {
+//     setTokens('mock-access-token-' + Math.random().toString(36).substring(7), 'mock-refresh-token');
+//     setCurrentUser({
+//       id: '00000000-0000-0000-0000-000000000000', // 默认 UUID
+//       username: 'Guest',
+//       email: 'guest@example.com'
+//     });
+//     console.log('Temporary mock authentication initialized for PDF upload and other APIs.');
+//   }
+// }
 
 // ==================== 请求拦截器：自动注入 Bearer Token ====================
 

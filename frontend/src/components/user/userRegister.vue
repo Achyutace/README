@@ -28,32 +28,13 @@
           </div>
   
           <div>
-            <label class="block text-sm mb-1.5 text-gray-700 dark:text-gray-300">手机号</label>
+            <label class="block text-sm mb-1.5 text-gray-700 dark:text-gray-300">邮箱</label>
             <input
-              v-model="form.phone"
-              type="tel"
-              placeholder="请输入手机号"
+              v-model="form.email"
+              type="email"
+              placeholder="请输入邮箱"
               class="w-full px-3 py-2 bg-white dark:bg-[#3e3e42] border border-gray-200 dark:border-[#3e3e42] rounded text-gray-900 dark:text-gray-100 focus:outline-none focus:border-sky-500 dark:focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors duration-200"
             />
-          </div>
-
-          <div>
-            <label class="block text-sm mb-1.5 text-gray-700 dark:text-gray-300">验证码</label>
-            <div class="flex gap-2">
-              <input 
-                v-model="form.code" 
-                type="text" 
-                placeholder="请输入验证码"
-                class="flex-1 px-3 py-2 bg-white dark:bg-[#3e3e42] border border-gray-200 dark:border-[#3e3e42] rounded text-gray-900 dark:text-gray-100 focus:outline-none focus:border-sky-500 dark:focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors duration-200" 
-              />
-              <button 
-                @click="getVerificationCode"
-                :disabled="countdown > 0"
-                class="whitespace-nowrap px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-[#3e3e42] dark:hover:bg-[#4d4d50] text-gray-700 dark:text-gray-200 text-sm font-medium rounded transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {{ countdown > 0 ? `${countdown}s 后重试` : '获取验证码' }}
-              </button>
-            </div>
           </div>
   
           <div>
@@ -76,12 +57,15 @@
             />
           </div>
   
+          <p v-if="errorMsg" class="text-sm text-red-500">{{ errorMsg }}</p>
+
           <div class="flex justify-between items-center mt-4 pt-2">
-            <button 
+            <button
               @click="handleRegister"
-              class="px-6 py-2 bg-sky-500 hover:bg-sky-600 dark:bg-[#0e639c] dark:hover:bg-[#1177bb] text-white text-sm font-medium rounded transition-colors duration-200 focus:outline-none"
+              :disabled="loading"
+              class="px-6 py-2 bg-sky-500 hover:bg-sky-600 dark:bg-[#0e639c] dark:hover:bg-[#1177bb] text-white text-sm font-medium rounded transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              注册
+              {{ loading ? '注册中...' : '注册' }}
             </button>
             
             <div class="text-sm text-gray-600 dark:text-gray-400">
@@ -97,73 +81,65 @@
     </div>
   </template>
   
-  <script setup>
+  <script setup lang="ts">
   import { reactive, ref } from 'vue'
-  
+  import { authApi } from '../../api'
+
   const props = defineProps({
     visible: {
       type: Boolean,
       default: false
     }
   })
-  
-  // update:visible 控制弹窗开关，switch-to-login 用于通知父组件切换到登录组件
+
   const emit = defineEmits(['update:visible', 'register-success', 'switch-to-login'])
-  
+
   const form = reactive({
     username: '',
-    phone: '',
-    code: '',
+    email: '',
     password: '',
     confirmPassword: ''
   })
-  
-  const countdown = ref(0)
-  let timer = null
-  
-  // 关闭弹窗
+
+  const loading = ref(false)
+  const errorMsg = ref('')
+
   const closeModal = () => {
     emit('update:visible', false)
   }
-  
-  // 切换到登录界面
+
   const switchToLogin = () => {
     emit('switch-to-login')
   }
-  
-  // 获取验证码
-  const getVerificationCode = () => {
-  
-    // 模拟发送验证码接口调用
-    console.log('向手机号发送验证码:', form.code)
-    
-    // 开启倒计时
-    countdown.value = 60
-    timer = setInterval(() => {
-      countdown.value--
-      if (countdown.value <= 0) {
-        clearInterval(timer)
-      }
-    }, 1000)
-  }
-  
-  // 点击注册
-  const handleRegister = () => {
-    if (!form.username || !form.phone || !form.code || !form.password || !form.confirmPassword) {
-      alert('请填写完整注册信息')
+
+  const handleRegister = async () => {
+    errorMsg.value = ''
+
+    if (!form.username || !form.email || !form.password || !form.confirmPassword) {
+      errorMsg.value = '请填写完整注册信息'
       return
     }
-  
+
     if (form.password !== form.confirmPassword) {
-      alert('两次输入的密码不一致')
+      errorMsg.value = '两次输入的密码不一致'
       return
     }
-    
-    // 这里模拟调用注册接口
-    console.log('提交注册表单:', form)
-    
-    // 假设注册成功
-    // alert('注册成功，请登录！')
-    // switchToLogin()
+
+    loading.value = true
+    try {
+      const res = await authApi.register(form.username, form.email, form.password)
+      closeModal()
+      emit('register-success', res.user)
+    } catch (e: any) {
+      const code = e.response?.data?.error?.code
+      const msgMap: Record<string, string> = {
+        EMAIL_EXISTS: '该邮箱已被注册',
+        USERNAME_TAKEN: '该用户名已被占用',
+        PASSWORD_TOO_SHORT: '密码长度不足',
+      }
+      errorMsg.value = msgMap[code] || e.response?.data?.error?.message || '注册失败，请稍后重试'
+    } finally {
+      loading.value = false
+    }
   }
   </script>

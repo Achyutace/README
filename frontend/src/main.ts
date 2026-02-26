@@ -2,11 +2,8 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import './style.css'
 import App from './App.vue'
-import { initMockAuth } from './api'
-
-// 在应用挂载前，先尝试初始化一个 Mock Token
-// TODO 
-initMockAuth()
+// import { initMockAuth } from './api'
+// initMockAuth() // 已改为真实登录流程
 
 // 利用 App.vue 里面的组件创建 Vue 应用实例 app
 const app = createApp(App)

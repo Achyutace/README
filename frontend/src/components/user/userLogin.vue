@@ -18,12 +18,12 @@
         <div class="p-6 flex flex-col gap-4">
           
           <div>
-            <label class="block text-sm mb-1.5 text-gray-700 dark:text-gray-300">手机号</label>
-            <input 
-              v-model="form.phone" 
-              type="tel" 
-              placeholder="请输入手机号"
-              class="w-full px-3 py-2 bg-white dark:bg-[#3e3e42] border border-gray-200 dark:border-[#3e3e42] rounded text-gray-900 dark:text-gray-100 focus:outline-none focus:border-sky-500 dark:focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors duration-200" 
+            <label class="block text-sm mb-1.5 text-gray-700 dark:text-gray-300">邮箱</label>
+            <input
+              v-model="form.email"
+              type="email"
+              placeholder="请输入邮箱"
+              class="w-full px-3 py-2 bg-white dark:bg-[#3e3e42] border border-gray-200 dark:border-[#3e3e42] rounded text-gray-900 dark:text-gray-100 focus:outline-none focus:border-sky-500 dark:focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors duration-200"
             />
           </div>
   
@@ -51,19 +51,22 @@
             </a>
           </div>
   
+          <p v-if="errorMsg" class="text-sm text-red-500">{{ errorMsg }}</p>
+
           <div class="flex justify-between items-end mt-4">
-            <button 
+            <button
               @click="handleLogin"
-              class="px-6 py-2 bg-sky-500 hover:bg-sky-600 dark:bg-[#0e639c] dark:hover:bg-[#1177bb] text-white text-sm font-medium rounded transition-colors duration-200 focus:outline-none"
+              :disabled="loading"
+              class="px-6 py-2 bg-sky-500 hover:bg-sky-600 dark:bg-[#0e639c] dark:hover:bg-[#1177bb] text-white text-sm font-medium rounded transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              登录
+              {{ loading ? '登录中...' : '登录' }}
             </button>
             
             <div class="text-sm text-gray-600 dark:text-gray-400">
               没有账号？
-              <a href="#" class="text-sky-500 hover:text-sky-600 dark:text-sky-400 hover:underline font-medium transition-colors duration-200">
+              <button @click="emit('switch-to-register')" class="text-sky-500 hover:text-sky-600 dark:text-sky-400 hover:underline font-medium transition-colors duration-200 focus:outline-none">
                 注册
-              </a>
+              </button>
             </div>
           </div>
   
@@ -72,44 +75,54 @@
     </div>
   </template>
   
-  <script setup>
-  import { reactive } from 'vue'
-  
-  // 接收父组件传来的控制显示隐藏的 props
+  <script setup lang="ts">
+  import { reactive, ref } from 'vue'
+  import { authApi } from '../../api'
+
   const props = defineProps({
     visible: {
       type: Boolean,
       default: false
     }
   })
-  
-  // 定义抛出给父组件的事件
-  const emit = defineEmits(['update:visible', 'login-success'])
-  
-  // 表单响应式数据
+
+  const emit = defineEmits(['update:visible', 'login-success', 'switch-to-register'])
+
   const form = reactive({
-    phone: '',
+    email: '',
     password: '',
     remember: false
   })
-  
-  // 关闭弹窗
+
+  const loading = ref(false)
+  const errorMsg = ref('')
+
   const closeModal = () => {
     emit('update:visible', false)
   }
-  
-  // 点击登录
-  const handleLogin = () => {
-    if (!form.phone || !form.password) {
-      alert('请输入手机号和密码')
+
+  const handleLogin = async () => {
+    errorMsg.value = ''
+
+    if (!form.email || !form.password) {
+      errorMsg.value = '请输入邮箱和密码'
       return
     }
-    
-    // 这里模拟调用接口
-    console.log('提交登录表单:', form)
-    
-    // 假设登录成功，关闭弹窗并通知父组件
-    // closeModal()
-    // emit('login-success', form)
+
+    loading.value = true
+    try {
+      const res = await authApi.login(form.email, form.password)
+      closeModal()
+      emit('login-success', res.user)
+    } catch (e: any) {
+      const code = e.response?.data?.error?.code
+      if (code === 'INVALID_CREDENTIALS') {
+        errorMsg.value = '邮箱或密码错误'
+      } else {
+        errorMsg.value = e.response?.data?.error?.message || '登录失败，请稍后重试'
+      }
+    } finally {
+      loading.value = false
+    }
   }
   </script>
