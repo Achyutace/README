@@ -1,13 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, getCurrentUser, clearTokens, setCurrentUser } from '../api'
+import { authApi, setCurrentUser } from '../api'
+import router from '../router'
 
 export const useAuthStore = defineStore('auth', () => {
   // ==================== 状态 ====================
   const user = ref<{ id: string; username: string; email: string } | null>(null)
   const authChecked = ref(false)
-  const showLoginModal = ref(false)
-  const showRegisterModal = ref(false)
 
   const isLoggedIn = computed(() => !!user.value)
 
@@ -21,43 +20,27 @@ export const useAuthStore = defineStore('auth', () => {
       setCurrentUser(me)
     } catch {
       user.value = null
-      showLoginModal.value = true
     } finally {
       authChecked.value = true
     }
   }
 
-  /** 登录成功回调 */
+  /** 登录成功：设置用户，跳转首页 */
   function onLoginSuccess(userData: { id: string; username: string; email: string }) {
     user.value = userData
-    showLoginModal.value = false
-    showRegisterModal.value = false
+    router.push('/')
   }
 
-  /** 注册成功回调 */
+  /** 注册成功：设置用户，跳转首页 */
   function onRegisterSuccess(userData: { id: string; username: string; email: string }) {
     user.value = userData
-    showLoginModal.value = false
-    showRegisterModal.value = false
+    router.push('/')
   }
 
-  /** 切换到注册弹窗 */
-  function switchToRegister() {
-    showLoginModal.value = false
-    showRegisterModal.value = true
-  }
-
-  /** 切换到登录弹窗 */
-  function switchToLogin() {
-    showRegisterModal.value = false
-    showLoginModal.value = true
-  }
-
-  /** auth:logout 事件处理：清空状态，弹出登录 */
+  /** auth:logout 事件处理：清空状态，跳转登录页 */
   function handleLogout() {
     user.value = null
-    showLoginModal.value = true
-    showRegisterModal.value = false
+    router.push('/login')
   }
 
   // 监听 axios 拦截器触发的 auth:logout 事件
@@ -66,14 +49,10 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     user,
     authChecked,
-    showLoginModal,
-    showRegisterModal,
     isLoggedIn,
     checkAuth,
     onLoginSuccess,
     onRegisterSuccess,
-    switchToRegister,
-    switchToLogin,
     handleLogout,
   }
 })

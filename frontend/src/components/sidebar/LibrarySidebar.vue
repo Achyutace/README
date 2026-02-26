@@ -11,12 +11,22 @@ import { ref, computed } from 'vue'
 import { useLibraryStore } from '../../stores/library'
 import { usePdfStore } from '../../stores/pdf'
 import { useAiStore } from '../../stores/ai'
+import { useAuthStore } from '../../stores/auth'
+import { authApi } from '../../api'
+import { useRouter } from 'vue-router'
 
 // ------------------------- 初始化 store 实例 -------------------------
 // 组合式 store 实例用于访问应用级状态和方法
 const libraryStore = useLibraryStore()
 const pdfStore = usePdfStore()
 const aiStore = useAiStore()
+const authStore = useAuthStore()
+const router = useRouter()
+
+function handleLogout() {
+  authApi.logout()
+  router.push('/login')
+}
 
 // ------------------------- 初始化侧边栏折叠与交互状态 -------------------------
 // 控制左侧边栏折叠 / 悬停状态，以及上传文件输入引用
@@ -229,11 +239,21 @@ function removeDocument(id: string, event: Event) {
       <div class="p-4 border-t border-gray-700">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
-            <span class="text-sm font-medium">U</span>
+            <span class="text-sm font-medium">{{ authStore.user?.username?.charAt(0)?.toUpperCase() || 'U' }}</span>
           </div>
-          <div v-if="showFullContent" class="flex-1">
-            <p class="text-sm font-medium">用户</p>
+          <div v-if="showFullContent" class="flex-1 min-w-0">
+            <p class="text-sm font-medium truncate">{{ authStore.user?.username || '用户' }}</p>
           </div>
+          <button
+            v-if="showFullContent"
+            @click="handleLogout"
+            class="p-1.5 hover:bg-gray-700 rounded-lg transition-colors flex-shrink-0"
+            title="登出"
+          >
+            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
         </div>
       </div>
     </aside>
