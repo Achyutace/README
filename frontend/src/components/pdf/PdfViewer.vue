@@ -762,6 +762,41 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="pdf-viewer-root flex flex-col h-full bg-slate-50/50 dark:bg-[#0b1220] relative">
+
+    <!-- 全文预翻译进度条 -->
+    <Transition name="slide-down">
+      <div
+        v-if="pdfStore.isPreTranslating"
+        class="pre-translate-bar absolute top-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-700/60 px-4 py-2 flex items-center gap-3 shadow-sm"
+      >
+        <div class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 flex-shrink-0">
+          <svg class="w-4 h-4 text-primary-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <span class="font-medium">预翻译中</span>
+        </div>
+        <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div
+            class="h-full bg-primary-500 rounded-full transition-all duration-300 ease-out"
+            :style="{ width: pdfStore.preTranslateProgress + '%' }"
+          ></div>
+        </div>
+        <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 tabular-nums">
+          {{ pdfStore.preTranslateCompleted }}/{{ pdfStore.preTranslateTotal }}
+        </span>
+        <button
+          @click="pdfStore.stopPreTranslation()"
+          class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors flex-shrink-0"
+          title="停止预翻译"
+        >
+          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </Transition>
+
     <div
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
@@ -1038,5 +1073,16 @@ onBeforeUnmount(() => {
 
 :deep(.textLayer ::selection) {
   background: rgba(59, 130, 246, 0.3) !important;
+}
+
+/* 预翻译进度条动画 */
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: all 0.3s ease;
+}
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-100%);
 }
 </style>

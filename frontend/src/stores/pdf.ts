@@ -7,7 +7,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { PdfParagraph } from '../types'
 import type { PageSize } from '../types/pdf'
-import { highlightApi, type InternalLinkData } from '../api'
+import { highlightApi, aiApi, type InternalLinkData } from '../api'
 
 // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
@@ -84,6 +84,17 @@ export const usePdfStore = defineStore('pdf', () => {
   })
 
 
+
+  // ---------------------- 全文预翻译状态 ----------------------
+  const isPreTranslating = ref(false)
+  const preTranslateQueue = ref<string[]>([])
+  const preTranslateTotal = ref(0)
+  const preTranslateCompleted = ref(0)
+  const preTranslatePdfId = ref<string | null>(null)
+  const preTranslateProgress = computed(() => {
+    if (preTranslateTotal.value === 0) return 0
+    return Math.round((preTranslateCompleted.value / preTranslateTotal.value) * 100)
+  })
 
   // UI 显示的缩放百分比
   const scalePercent = computed(() => Math.round((scale.value / DEFAULT_SCALE) * 100))
@@ -341,6 +352,80 @@ export const usePdfStore = defineStore('pdf', () => {
     pageSizesArray.value = array
   }
 
+  // ---------------------- 全文预翻译 ----------------------
+
+  // 启动全文预翻译
+  async function startPreTranslation(pdfId: string) {
+    const docParagraphs = allParagraphs.value[pdfId]
+    if (!docParagraphs || docParagraphs.length === 0) return
+
+    isPreTranslating.value = true
+    preTranslatePdfId.value = pdfId
+    preTranslateQueue.value = docParagraphs.map(p => p.id)
+    preTranslateTotal.value = docParagraphs.length
+    preTranslateCompleted.value = 0
+
+    await processPreTranslateQueue()
+  }
+
+  // 逐个处理预翻译队列
+  async function processPreTranslateQueue() {
+    // 延迟导入 translation store 避免循环依赖
+    const { useTranslationStore } = await import('./translation')
+    const translationStore = useTranslationStore()
+
+    while (preTranslateQueue.value.length > 0 && isPreTranslating.value) {
+      const paragraphId = preTranslateQueue.value[0] as string
+
+      // 已缓存则跳过
+      if (translationStore.translationCache[paragraphId]) {
+        preTranslateQueue.value.shift()
+        preTranslateCompleted.value++
+        continue
+      }
+
+      try {
+        const pdfId = preTranslatePdfId.value
+        if (pdfId) {
+          const result = await aiApi.translateParagraph(pdfId, paragraphId)
+          if (result.success) {
+            translationStore.setTranslation(paragraphId, result.translation)
+          }
+        }
+      } catch (error) {
+        console.error(`Pre-translate failed for ${paragraphId}:`, error)
+      }
+
+      // 按值移除（防止队列被 prioritize 重排后误删）
+      const idx = preTranslateQueue.value.indexOf(paragraphId)
+      if (idx !== -1) {
+        preTranslateQueue.value.splice(idx, 1)
+      }
+      preTranslateCompleted.value++
+    }
+
+    // 完成
+    isPreTranslating.value = false
+    preTranslatePdfId.value = null
+  }
+
+  // 停止预翻译
+  function stopPreTranslation() {
+    isPreTranslating.value = false
+    preTranslateQueue.value = []
+    preTranslatePdfId.value = null
+  }
+
+  // 优先翻译指定段落（移到队列最前面）
+  function prioritizeParagraph(paragraphId: string) {
+    if (!isPreTranslating.value) return
+    const index = preTranslateQueue.value.indexOf(paragraphId)
+    if (index > 0) {
+      preTranslateQueue.value.splice(index, 1)
+      preTranslateQueue.value.unshift(paragraphId)
+    }
+  }
+
   // ---------------------- 笔记预览卡片（小悬浮卡片） ----------------------
   const notePreviewCard = ref<{
     isVisible: boolean
@@ -562,6 +647,14 @@ export const usePdfStore = defineStore('pdf', () => {
     openSmartRefCard,
     closeSmartRefCard,
     updateSmartRefPosition,
+    // 全文预翻译
+    isPreTranslating,
+    preTranslateTotal,
+    preTranslateCompleted,
+    preTranslateProgress,
+    startPreTranslation,
+    stopPreTranslation,
+    prioritizeParagraph,
     // 内部链接弹窗
     internalLinkPopup,
     openInternalLinkPopup,
