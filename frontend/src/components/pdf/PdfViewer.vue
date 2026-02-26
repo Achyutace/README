@@ -761,7 +761,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pdf-viewer-root flex flex-col h-full bg-gray-100 dark:bg-[#0b1220] relative">
+  <div class="pdf-viewer-root flex flex-col h-full bg-slate-50/50 dark:bg-[#0b1220] relative">
     <div
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
@@ -779,7 +779,7 @@ onBeforeUnmount(() => {
         <div
           v-for="page in pageNumbers"
           :key="page"
-          class="pdf-page relative bg-white dark:bg-[#111827] shadow-lg dark:shadow-[0_10px_30px_rgba(0,0,0,0.45)] outline outline-1 outline-gray-200 dark:outline-[#1f2937] overflow-hidden shrink-0"
+          class="pdf-page relative bg-white dark:bg-[#111827] shadow-none outline outline-1 outline-blue-100/60 dark:outline-slate-800/60 overflow-hidden shrink-0"
           :ref="(el) => handlePageContainerRef(page, el)"
           :data-page="page"
           :style="{

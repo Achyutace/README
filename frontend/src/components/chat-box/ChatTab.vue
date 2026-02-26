@@ -147,33 +147,57 @@ const handleToggleMode = () => {
   console.log('Chat mode switched to:', chatMode.value)
 }
 
-// --- Send Message Logic ---
-const handleChatSend = async (payload: { text: string; mode: 'agent' | 'simple'; model: string }) => {
-  selectedModel.value = payload.model
-  if (chatMode.value !== payload.mode) {
-    chatMode.value = payload.mode
-  }
-
-  const content = payload.text
-  if (!content || aiStore.isLoadingChat) return
+// --- Resend Logic ---
+const handleResend = async (index: number) => {
+  const message = aiStore.chatMessages[index]
+  if (!message || aiStore.isLoadingChat) return
   
-  // 提取自定义模型配置 (如果选中了非默认模型)
+  // 构造历史：取该消息之前的所有消息
+  const history = aiStore.chatMessages.slice(0, index).map(m => ({
+    role: m.role,
+    content: m.content
+  }))
+
+  await executeSendMessage(message.content, history, { resendFromIndex: index })
+}
+
+const handleResendEdited = async (index: number, newContent: string) => {
+  if (aiStore.isLoadingChat) return
+
+  // 构造历史
+  const history = aiStore.chatMessages.slice(0, index).map(m => ({
+    role: m.role,
+    content: m.content
+  }))
+
+  await executeSendMessage(newContent, history, { resendFromIndex: index, edited: true })
+}
+
+const executeSendMessage = async (
+  content: string, 
+  historyOverride?: { role: string; content: string }[],
+  meta?: any
+) => {
+  if (!content) return
+  
+  // 提取自定义模型配置
   let apiBase: string | undefined = undefined
   let apiKey: string | undefined = undefined
   
-  const customModel = customModels.value.find(m => m.name === payload.model)
+  const customModel = customModels.value.find(m => m.name === selectedModel.value)
   if (customModel) {
     apiBase = customModel.apiBase
     apiKey = customModel.apiKey
   }
 
-  // 1. 乐观 UI 更新：立即将用户消息加入列表
+  // 1. 乐观 UI 更新
   aiStore.addChatMessage({
     role: 'user',
-    content: content
+    content: content,
+    meta: meta
   })
 
-  aiStore.isLoadingChat = true  // 开启加载状态
+  aiStore.isLoadingChat = true
 
   try {
     if (!aiStore.currentSessionId || !libraryStore.currentDocumentId) {
@@ -186,39 +210,64 @@ const handleChatSend = async (payload: { text: string; mode: 'agent' | 'simple';
       }
     }
     
-    // 调用封装的 API
-    const data = await chatSessionApi.sendMessage(  // 发送消息到 API
-      aiStore.currentSessionId!,  // 会话 ID
-      content,  // 消息内容
-      libraryStore.currentDocumentId,  // PDF ID
-      payload.mode,  // 聊天模式
-      payload.model,  // 模型名称
-      apiBase,  // 动态提取的基础 URL
-      apiKey   // 动态提取的密钥
+    // 调用 API，传入 historyOverride
+    const data = await chatSessionApi.sendMessage(
+      aiStore.currentSessionId!,
+      content,
+      libraryStore.currentDocumentId,
+      chatMode.value,
+      selectedModel.value,
+      apiBase,
+      apiKey,
+      historyOverride
     )
     
-    // 成功后，将答案塞入 store
-    aiStore.addChatMessage({  // 添加助手消息到 UI
-      role: 'assistant',  // 角色
-      content: data.response,  // 响应内容
-      citations: data.citations || []  // 引用数据
+    aiStore.addChatMessage({
+      role: 'assistant',
+      content: data.response,
+      citations: data.citations || []
     })
 
-    // 显式滚动到底部
     nextTick(() => {
       messageListRef.value?.scrollToBottom()
     })
     
   } catch (error: any) {
     console.error('发送消息异常:', error)
-    aiStore.addChatMessage({  // 添加错误消息
+    aiStore.addChatMessage({
       role: 'assistant',
       content: '抱歉，网络请求失败，请检查后端服务或密钥配置。',
       citations: []
     })
   } finally {
-      aiStore.isLoadingChat = false  // 恢复加载状态
+    aiStore.isLoadingChat = false
   }
+}
+
+// --- Selection Logic ---
+const handleToggleSelectionMode = () => {
+  aiStore.toggleSelectionMode()
+}
+
+const handleToggleMessageSelection = (id: string) => {
+  aiStore.toggleMessageSelection(id)
+}
+
+const handleCopySelected = () => {
+  const json = aiStore.copySelectedAsJson()
+  if (json && json !== '[]') {
+    navigator.clipboard.writeText(json)
+    alert('已复制选中内容到剪贴板')
+    aiStore.selectionMode = false
+    aiStore.selectedMessageIds.clear()
+  }
+}
+
+// --- Send Message Logic (Original entry) ---
+const handleChatSend = async (payload: { text: string; mode: 'agent' | 'simple'; model: string }) => {
+  selectedModel.value = payload.model
+  chatMode.value = payload.mode
+  await executeSendMessage(payload.text)
 }
 
 watch(() => libraryStore.currentDocumentId, async (pdfId) => {  // 监听当前文档 ID 变化
@@ -275,8 +324,34 @@ defineExpose({  // 暴露组件方法
           ref="messageListRef"
           :messages="aiStore.chatMessages"
           :isLoadingContent="aiStore.isLoadingChat"
-
+          :selectionMode="aiStore.selectionMode"
+          :selectedIds="aiStore.selectedMessageIds"
+          @resend="handleResend"
+          @resend-edited="handleResendEdited"
+          @toggle-selection="handleToggleMessageSelection"
         />
+
+        <!-- Selection Mode Toolbar (Floating) -->
+        <div 
+          v-if="aiStore.selectionMode" 
+          class="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 px-4 py-1.5 bg-blue-50/40 dark:bg-slate-900/40 backdrop-blur-md border border-blue-100/50 dark:border-slate-700 rounded-lg shadow-none flex items-center gap-3 min-w-max transition-all duration-300"
+        >
+          <span class="text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">
+            已选择 {{ aiStore.selectedMessageIds.size }} 条
+          </span>
+          <div class="h-3 w-[1px] bg-blue-200/50 dark:bg-slate-700/50"></div>
+          <div class="flex gap-1 items-center">
+            <button 
+              @click="aiStore.selectionMode = false; aiStore.selectedMessageIds.clear()"
+              class="px-2 py-0.5 text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap"
+            >取消</button>
+            <button 
+              @click="handleCopySelected"
+              :disabled="aiStore.selectedMessageIds.size === 0"
+              class="px-3 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed rounded-md transition-all active:scale-95 whitespace-nowrap"
+            >复制为 JSON</button>
+          </div>
+        </div>
 
         <ChatInputArea
           :isLoadingContent="aiStore.isLoadingChat"
@@ -284,12 +359,14 @@ defineExpose({  // 暴露组件方法
           :customModels="customModels"
           :selectedModel="selectedModel"
           :selectedText="pdfStore.selectedText"
+          :selectionMode="aiStore.selectionMode"
           @clear-selection="pdfStore.clearSelection()"
           @send="handleChatSend"
           @change-model="handleModelChange"
           @open-model-modal="showCustomModelModal = true"
           @delete-model="handleDeleteModel"
           @toggle-mode="handleToggleMode"
+          @toggle-selection-mode="handleToggleSelectionMode"
         />
     </div>
   </div>

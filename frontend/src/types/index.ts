@@ -63,14 +63,16 @@ export interface Summary {
   generatedAt: Date    // 时间戳
 }
 
-// 聊天引用来源
+// 聊天引用来源 
 export interface Citation {
-  id: number              // 引用序号
-  title: string           // 来源标题
-  snippet: string         // 摘要片段
-  source_type: 'local' | 'external'  // 本地文档 / 外部网络
-  page?: number           // 页码（本地文档）
-  url?: string            // 链接（外部来源）
+  source_type: 'vector' | 'graph'  // 引用类型
+  id: string                       // 引用源ID
+  text: string                     // 引用文本片段
+  score?: number                   // 相似度分数 (可选)
+  name?: string                    // 实体名称 (graph 类型专用)
+  // 保持兼容性的扩展字段 (如果后端返回了更多信息)
+  page?: number                    // 页码 (对 vector 型可能有用)
+  url?: string                     // 链接 (对外部源可能有用)
 }
 
 // 聊天
@@ -80,6 +82,10 @@ export interface ChatMessage {
   content: string    // 消息内容
   timestamp: Date    // 时间戳
   citations?: Citation[]    // 引用的信息（可选）
+  meta?: {
+    resendFromIndex?: number  // 从第 N 条消息处重发（用于 UI 分支提示）
+    edited?: boolean          // 是否为编辑后重发
+  }
 }
 
 // 自定义模型配置

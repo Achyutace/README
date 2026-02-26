@@ -69,7 +69,7 @@ watch(
 
 <template>
   <div class="relative">
-    <div class="flex items-center justify-between px-4 py-1.5 bg-white dark:bg-[#252526] border-b border-gray-200 dark:border-gray-800 shadow-sm">
+    <div class="h-[42px] flex items-center justify-between px-4 bg-blue-50/40 dark:bg-[#252526] border-b border-blue-100/50 dark:border-slate-800/60">
       <!-- Left: Zoom Controls -->
       <div class="flex items-center gap-1.5">
         <button @click="pdfStore.zoomOut" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="缩小">

@@ -50,8 +50,8 @@ export function useMarkdownRenderer() {
     const handleMessageMouseOver = (event: MouseEvent, citations: Citation[]) => {
         const target = event.target as HTMLElement
         if (target.classList.contains('citation-ref')) {
-            const id = parseInt(target.getAttribute('data-id') || '0')
-            const citationData = citations.find(c => c.id === id)
+            const index = parseInt(target.getAttribute('data-id') || '0') - 1
+            const citationData = citations[index]
 
             if (citationData) {
                 if (tooltipTimeout) clearTimeout(tooltipTimeout)
@@ -78,10 +78,10 @@ export function useMarkdownRenderer() {
     const handleMessageClick = (event: MouseEvent, citations: Citation[]) => {
         const target = event.target as HTMLElement
         if (target.classList.contains('citation-ref')) {
-            const id = parseInt(target.getAttribute('data-id') || '0')
-            const citationData = citations.find(c => c.id === id)
+            const index = parseInt(target.getAttribute('data-id') || '0') - 1
+            const citationData = citations[index]
 
-            if (citationData && citationData.source_type === 'external' && citationData.url) {
+            if (citationData && citationData.url) {
                 window.open(citationData.url, '_blank')
             }
         }
