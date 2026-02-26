@@ -23,6 +23,7 @@
    ```bash
    npm install -g @stoplight/prism-cli
    ```
+   **别忘了设置/frontend/.env文件
 
 2. **每次开发**
 
