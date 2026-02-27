@@ -29,6 +29,8 @@ services:
       - ./storage:/app/storage
       - ./config.yaml:/app/config.yaml
     # 不暴露 5000 端口到宿主机，通过 Nginx 反向代理访问
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - FLASK_ENV=development
     command: sh -c "flask db upgrade && python app.py"
@@ -53,6 +55,8 @@ services:
     volumes:
       - ./storage:/app/storage
       - ./config.yaml:/app/config.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - FLASK_ENV=development
     depends_on:
