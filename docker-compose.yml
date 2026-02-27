@@ -2,7 +2,6 @@
 # 架构：Redis, Celery, Backend, Frontend 运行在 Docker 中
 # 外部依赖：SQL 数据库、Qdrant (可能独立部署) 连接云服务
 # 对象存储 (COS)：使用腾讯云 COS 服务，不再依赖本地存储挂载
-version: '3.8'
 
 services:
 
@@ -10,10 +9,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: paper_agent_redis
-    ports:
-      - "6379:6379"
+    # 不暴露端口到宿主机，容器间通过 Docker 内部网络用服务名 "redis" 访问
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   # Main API Service
@@ -22,16 +25,24 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: paper_agent_backend
-    command: gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app
+    # 先执行数据库迁移，再启动 Gunicorn
+    command: sh -c "flask db upgrade && gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app"
     volumes:
-      # Map the config explicitly
       - ./config.yaml:/app/config.yaml
-    ports:
-      - "5000:5000"
+    # 不暴露 5000 端口到宿主机，通过 Nginx 反向代理访问
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - FLASK_ENV=production
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # Asynchronous Task Worker
@@ -43,11 +54,15 @@ services:
     command: celery -A celery_app worker --loglevel=info
     volumes:
       - ./config.yaml:/app/config.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - FLASK_ENV=production
     depends_on:
-      - backend
-      - redis
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   # Web Frontend using Nginx (Vue3 SPA)
@@ -57,9 +72,10 @@ services:
       dockerfile: Dockerfile
     container_name: paper_agent_frontend
     ports:
-      - "80:80" # Host port 80 matches Nginx listening port
+      - "80:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

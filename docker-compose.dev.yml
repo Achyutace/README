@@ -2,17 +2,21 @@
 # 架构：Redis, Celery, Backend, Frontend 运行在 Docker 中
 # 外部依赖：SQL 数据库与 Qdrant 向量库连接云服务
 # 对象存储 (COS)：通过 Volume 挂载映射到云服务器本地 storage 目录
-version: '3.8'
 
 services:
+
   # Message Broker & Task Result Backend
   redis:
     image: redis:7-alpine
     container_name: paper_agent_redis_dev
-    ports:
-      - "6379:6379"
+    # 不暴露端口到宿主机
     volumes:
       - redis_data_dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   # Main API Service
@@ -22,17 +26,23 @@ services:
       dockerfile: Dockerfile
     container_name: paper_agent_backend_dev
     volumes:
-      # Map host storage directory to container storage
       - ./storage:/app/storage
-      # Map the dev config explicitly
       - ./config.yaml:/app/config.yaml
-    ports:
-      - "5000:5000"
+    # 不暴露 5000 端口到宿主机，通过 Nginx 反向代理访问
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - FLASK_ENV=development
     command: sh -c "flask db upgrade && python app.py"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # Asynchronous Task Worker
@@ -45,11 +55,15 @@ services:
     volumes:
       - ./storage:/app/storage
       - ./config.yaml:/app/config.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - FLASK_ENV=development
     depends_on:
-      - backend
-      - redis
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   # Web Frontend using Nginx (Vue3 SPA)
@@ -59,9 +73,10 @@ services:
       dockerfile: Dockerfile
     container_name: paper_agent_frontend_dev
     ports:
-      - "8080:80" # Mapping to 8080 for dev to avoid port 80 conflicts if any
+      - "8080:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

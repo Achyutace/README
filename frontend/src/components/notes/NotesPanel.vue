@@ -222,6 +222,13 @@ function updateCard() {
   // 仅更新本地状态，不触发保存
 }
 
+// function getFirstLine(text: string): string {
+//   if (!text) return ''
+//   const cleanText = text.replace(/[#*`]/g, '')
+//   const firstLine = cleanText.split('\n')[0] || ''
+//   return firstLine
+// }
+
 // ------------------------- 关键词管理 -------------------------
 /**
  * 添加关键词
