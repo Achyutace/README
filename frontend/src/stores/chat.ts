@@ -104,9 +104,11 @@ export const useChatStore = defineStore('chat', () => {
                     chatMessages.value = messages
                 }
 
-                dbPut(STORES.CHAT_MESSAGES, { id: sessionId, messages }).catch(err => {
-                    console.warn('[Chat Store] Failed to save messages to IndexedDB', err)
-                })
+                if (messages.length > 0) {
+                    dbPut(STORES.CHAT_MESSAGES, { id: sessionId, messages }).catch(err => {
+                        console.warn('[Chat Store] Failed to save messages to IndexedDB', err)
+                    })
+                }
 
                 console.log(`Loaded ${messages.length} messages for session: ${sessionId}`)
                 return messages
@@ -182,7 +184,7 @@ export const useChatStore = defineStore('chat', () => {
             currentSessionId.value = data.sessionId!
             chatMessages.value = []
 
-            dbPut(STORES.CHAT_SESSIONS, { ...newSession, messages: [] }).catch(e => console.warn(e))
+            // dbPut 会在发送真正第一条消息 addChatMessage 时再执行持久化
 
             import('../utils/broadcast').then(({ broadcastSync }) => {
                 broadcastSync('RELOAD_SESSIONS', pdfId)
@@ -300,6 +302,7 @@ export const useChatStore = defineStore('chat', () => {
         currentSessionId,
         chatSessions,
         isLoadingChat,
+        hydrateFromDB,
         addChatMessage,
         clearChat,
         createNewSession,

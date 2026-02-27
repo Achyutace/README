@@ -30,7 +30,8 @@ def handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, u
         chat_service.create_session(
             user_id=user_id,
             file_hash=pdf_id,
-            title="新对话"
+            title="新对话",
+            session_id=session_id
         )
 
         # 丢给 Celery 异步生成标题（独立 DB 连接，不阻塞请求）

@@ -42,7 +42,7 @@ def translate_paragraph():
     # 3. 从 paper_service (DB) 获取原文
     pdf_service = g.pdf_service
     paragraphs = pdf_service.get_paragraph(pdf_id, pagenumber=page, paraid=index)
-    original_text = paragraphs[0].get('original_text', '').strip() if paragraphs else ''
+    original_text = paragraphs[0].get('content', '').strip() if paragraphs else ''
     if not original_text:
         return jsonify({'error': 'Original text not found for this paragraph'}), 404
 

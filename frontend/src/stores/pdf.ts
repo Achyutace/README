@@ -7,7 +7,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { PdfParagraph, Highlight, NormalizedRect, HighlightsStorage } from '../types'
 import type { PageSize } from '../types/pdf'
-import { highlightApi, aiApi, type InternalLinkData } from '../api'
+import { highlightApi, type InternalLinkData } from '../api'
 
 // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
@@ -70,16 +70,12 @@ export const usePdfStore = defineStore('pdf', () => {
 
 
 
-  // ---------------------- 全文预翻译状态 ----------------------
-  const isPreTranslating = ref(false)
-  const preTranslateQueue = ref<string[]>([])
-  const preTranslateTotal = ref(0)
-  const preTranslateCompleted = ref(0)
-  const preTranslatePdfId = ref<string | null>(null)
-  const preTranslateProgress = computed(() => {
-    if (preTranslateTotal.value === 0) return 0
-    return Math.round((preTranslateCompleted.value / preTranslateTotal.value) * 100)
-  })
+  // ---------------------- 按页预翻译状态 ----------------------
+  // 记录每一页的翻译状态: 'idle' | 'loading' | 'done' | 'error'
+  const pageTranslationStatus = ref<Record<number, 'idle' | 'loading' | 'done' | 'error'>>({})
+
+  // 全文翻译状态
+  const fullTranslationStatus = ref<'idle' | 'loading' | 'done' | 'error'>('idle')
 
   // UI 显示的缩放百分比
   const scalePercent = computed(() => Math.round((scale.value / DEFAULT_SCALE) * 100))
@@ -96,6 +92,8 @@ export const usePdfStore = defineStore('pdf', () => {
     currentPage.value = 1
     scale.value = DEFAULT_SCALE
     isLoading.value = true
+    pageTranslationStatus.value = {}
+    fullTranslationStatus.value = 'idle'
 
     // 确保当前文档在高亮存储中存在对应数组（避免未定义访问）
     if (documentId) {
@@ -351,77 +349,86 @@ export const usePdfStore = defineStore('pdf', () => {
     pageSizesArray.value = array
   }
 
-  // ---------------------- 全文预翻译 ----------------------
+  // ---------------------- 按页预翻译 ----------------------
+  // ---------------------- 翻译核心引擎 ----------------------
 
-  // 启动全文预翻译
-  async function startPreTranslation(pdfId: string) {
-    const docParagraphs = allParagraphs.value[pdfId]
-    if (!docParagraphs || docParagraphs.length === 0) return
+  /**
+   * 预翻译核心逻辑：翻译指定页面的所有段落
+   * @param pageNumber 页码
+   * @param skipIfProcessing 如果该页已经在翻译中，是否忽略（防止重复请求）
+   */
+  async function startPagePreTranslation(pageNumber: number, skipIfProcessing = true) {
+    if (!activeReaderId.value) return
+    const pdfId = activeReaderId.value
 
-    isPreTranslating.value = true
-    preTranslatePdfId.value = pdfId
-    preTranslateQueue.value = docParagraphs.map(p => p.id)
-    preTranslateTotal.value = docParagraphs.length
-    preTranslateCompleted.value = 0
-
-    await processPreTranslateQueue()
-  }
-
-  // 逐个处理预翻译队列
-  async function processPreTranslateQueue() {
-    // 延迟导入 translation store 避免循环依赖
-    const { useTranslationStore } = await import('./translation')
-    const translationStore = useTranslationStore()
-
-    while (preTranslateQueue.value.length > 0 && isPreTranslating.value) {
-      const paragraphId = preTranslateQueue.value[0] as string
-
-      // 已缓存则跳过
-      if (translationStore.translationCache[paragraphId]) {
-        preTranslateQueue.value.shift()
-        preTranslateCompleted.value++
-        continue
-      }
-
-      try {
-        const pdfId = preTranslatePdfId.value
-        if (pdfId) {
-          const result = await aiApi.translateParagraph(pdfId, paragraphId)
-          if (result.success) {
-            translationStore.setTranslation(paragraphId, result.translation)
-          }
-        }
-      } catch (error) {
-        console.error(`Pre-translate failed for ${paragraphId}:`, error)
-      }
-
-      // 按值移除（防止队列被 prioritize 重排后误删）
-      const idx = preTranslateQueue.value.indexOf(paragraphId)
-      if (idx !== -1) {
-        preTranslateQueue.value.splice(idx, 1)
-      }
-      preTranslateCompleted.value++
+    // 【关键防护】：同步检查并设置状态。
+    // 由于 JS 单线程特性，在第一个 await 之前设置状态可以确保并发调用被拦截。
+    if (skipIfProcessing && pageTranslationStatus.value[pageNumber] === 'loading') {
+      return
     }
 
-    // 完成
-    isPreTranslating.value = false
-    preTranslatePdfId.value = null
+    const docParagraphs = allParagraphs.value[pdfId]
+    if (!docParagraphs) return
+
+    const pageParagraphs = docParagraphs.filter(p => p.page === pageNumber)
+    if (!pageParagraphs.length) {
+      pageTranslationStatus.value[pageNumber] = 'done'
+      return
+    }
+
+    // 同步标记为加载中
+    pageTranslationStatus.value[pageNumber] = 'loading'
+
+    const { useTranslationStore } = await import('./translation')
+    const translationStore = useTranslationStore()
+    const { aiApi } = await import('../api')
+
+    let allSuccess = true
+
+    // 逐段翻译（后端已有并发处理，前端保持序列发射以降低压力）
+    for (const p of pageParagraphs) {
+      // 如果缓存中已有，跳过
+      if (translationStore.translationCache[p.id]) continue
+
+      try {
+        const result = await aiApi.translateParagraph(pdfId, p.id)
+        if (result.success) {
+          translationStore.setTranslation(p.id, result.translation)
+        } else {
+          allSuccess = false
+        }
+      } catch (error) {
+        console.error(`[Pre-translate] Failed for paragraph ${p.id}:`, error)
+        allSuccess = false
+      }
+    }
+
+    pageTranslationStatus.value[pageNumber] = allSuccess ? 'done' : 'error'
+    return allSuccess
   }
 
-  // 停止预翻译
-  function stopPreTranslation() {
-    isPreTranslating.value = false
-    preTranslateQueue.value = []
-    preTranslatePdfId.value = null
-  }
+  /**
+   * 全文预翻译：按页序执行
+   */
+  async function startFullPreTranslation() {
+    if (!activeReaderId.value || fullTranslationStatus.value === 'loading') return
 
-  // 优先翻译指定段落（移到队列最前面）
-  function prioritizeParagraph(paragraphId: string) {
-    if (!isPreTranslating.value) return
-    const index = preTranslateQueue.value.indexOf(paragraphId)
-    if (index > 0) {
-      preTranslateQueue.value.splice(index, 1)
-      preTranslateQueue.value.unshift(paragraphId)
+    fullTranslationStatus.value = 'loading'
+    const total = totalPages.value
+    let hasError = false
+
+    try {
+      // 采用顺序执行，避免瞬间数千个段落请求压垮后端/浏览器
+      // 同时可以让用户看到预览进度
+      for (let i = 1; i <= total; i++) {
+        const success = await startPagePreTranslation(i, true)
+        if (success === false) hasError = true
+      }
+
+      fullTranslationStatus.value = hasError ? 'error' : 'done'
+    } catch (e) {
+      console.error('[Full Pre-translate] Interrupted:', e)
+      fullTranslationStatus.value = 'error'
     }
   }
 
@@ -647,14 +654,11 @@ export const usePdfStore = defineStore('pdf', () => {
     openSmartRefCard,
     closeSmartRefCard,
     updateSmartRefPosition,
-    // 全文预翻译
-    isPreTranslating,
-    preTranslateTotal,
-    preTranslateCompleted,
-    preTranslateProgress,
-    startPreTranslation,
-    stopPreTranslation,
-    prioritizeParagraph,
+    // 按页预翻译
+    pageTranslationStatus,
+    fullTranslationStatus,
+    startPagePreTranslation,
+    startFullPreTranslation,
     // 内部链接弹窗
     internalLinkPopup,
     openInternalLinkPopup,

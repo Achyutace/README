@@ -67,12 +67,15 @@ class ChatService:
         sessions = self.repo.list_chat_sessions(user_id, file_hash=file_hash, limit=limit)
         return self.format_session_list(sessions)
 
-    def create_session(self, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat") -> Dict:
+    def create_session(self, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat", session_id: Optional[str] = None) -> Dict:
         """创建新会话"""
-        session_id = uuid.uuid4()
+        if session_id:
+            s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        else:
+            s_uuid = uuid.uuid4()
         
         session = self.repo.create_chat_session(
-            session_id=session_id,
+            session_id=s_uuid,
             user_id=user_id,
             file_hash=file_hash,
             title=title

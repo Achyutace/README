@@ -763,40 +763,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="pdf-viewer-root flex flex-col h-full bg-slate-50/50 dark:bg-[#0b1220] relative">
 
-    <!-- 全文预翻译进度条 -->
-    <Transition name="slide-down">
-      <div
-        v-if="pdfStore.isPreTranslating"
-        class="pre-translate-bar absolute top-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-sm border-b border-gray-200/60 dark:border-gray-700/60 px-4 py-2 flex items-center gap-3 shadow-sm"
-      >
-        <div class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 flex-shrink-0">
-          <svg class="w-4 h-4 text-primary-500 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
-          <span class="font-medium">预翻译中</span>
-        </div>
-        <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div
-            class="h-full bg-primary-500 rounded-full transition-all duration-300 ease-out"
-            :style="{ width: pdfStore.preTranslateProgress + '%' }"
-          ></div>
-        </div>
-        <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 tabular-nums">
-          {{ pdfStore.preTranslateCompleted }}/{{ pdfStore.preTranslateTotal }}
-        </span>
-        <button
-          @click="pdfStore.stopPreTranslation()"
-          class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors flex-shrink-0"
-          title="停止预翻译"
-        >
-          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    </Transition>
-
     <div
       v-if="pdfStore.currentPdfUrl"
       ref="containerRef"
@@ -829,6 +795,46 @@ onBeforeUnmount(() => {
             <div class="loading-spinner mb-3"></div>
             <span class="text-gray-400 text-sm">{{ page }}</span>
           </div>
+          
+          <!-- 翻译控制层 -->
+          <div class="absolute top-2 left-2 z-20 flex flex-col gap-2 transition-opacity duration-500" 
+               v-if="isPageRendered(page)"
+               :class="{ 'opacity-0 pointer-events-none': !pdfStore.activeReaderId || pdfStore.getParagraphsByPage(page).length === 0 }">
+            <!-- 全文预翻译按钮 (仅在第一页显示) -->
+            <button
+              v-if="page === 1"
+              @click="pdfStore.startFullPreTranslation()"
+              class="flex items-center gap-1.5 px-2 py-1.5 w-fit bg-white/80 dark:bg-[#1f2937]/80 hover:bg-white dark:hover:bg-[#374151] rounded shadow-sm border border-gray-200 dark:border-gray-700 backdrop-blur-sm transition-colors text-gray-500 hover:text-primary-500 dark:text-gray-400 dark:hover:text-primary-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              :title="pdfStore.fullTranslationStatus === 'loading' ? '正在翻译全文...' : '全文翻译 (预翻译所有页面)'"
+              :disabled="pdfStore.fullTranslationStatus === 'loading'"
+            >
+              <svg v-if="pdfStore.fullTranslationStatus === 'loading'" class="w-4 h-4 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              <span class="text-xs font-medium">全文翻译</span>
+            </button>
+
+            <!-- 按页预翻译按钮 -->
+            <button
+              @click="pdfStore.startPagePreTranslation(page)"
+              class="w-fit p-1.5 bg-white/80 dark:bg-[#1f2937]/80 hover:bg-white dark:hover:bg-[#374151] rounded shadow-sm border border-gray-200 dark:border-gray-700 backdrop-blur-sm transition-colors text-gray-500 hover:text-primary-500 dark:text-gray-400 dark:hover:text-primary-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              :title="'预翻译第 ' + page + ' 页'"
+              :disabled="pdfStore.pageTranslationStatus[page] === 'loading'"
+            >
+              <svg v-if="pdfStore.pageTranslationStatus[page] === 'loading'" class="w-4 h-4 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              <svg v-else-if="pdfStore.pageTranslationStatus[page] === 'done'" class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+              <svg v-else class="w-4 h-4" :class="pdfStore.pageTranslationStatus[page] === 'error' ? 'text-red-500' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            </button>
+          </div>
+
           <canvas class="absolute top-0 left-0" />
           <div class="highlightLayer absolute inset-0 pointer-events-none" :class="{ 'zooming-layer': isZooming }">
             <template v-for="hl in pdfStore.getHighlightsByPage(page)" :key="hl.id">
@@ -854,7 +860,9 @@ onBeforeUnmount(() => {
           <div class="textLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" />
           <div class="linkLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" />
           
-          <div class="paragraphMarkerLayer absolute inset-0 pointer-events-none z-10" :class="{ 'zooming-layer': isZooming }">
+          <div
+            v-if="pdfStore.activeReaderId && pdfStore.getParagraphsByPage(page).length > 0"
+            class="paragraphMarkerLayer absolute inset-0 pointer-events-none z-10" :class="{ 'zooming-layer': isZooming }">
             <div
               v-for="paragraph in pdfStore.getParagraphsByPage(page)"
               :key="paragraph.id"
