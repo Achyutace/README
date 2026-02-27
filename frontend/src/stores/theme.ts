@@ -2,14 +2,20 @@
 ----------------------------------------------------------------------
                           主题store定义
 ----------------------------------------------------------------------
-*/ 
+*/
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
 // 定义了一个叫 'theme' 的 store，负责管理应用的主题设置（深色模式/浅色模式）
 export const useThemeStore = defineStore('theme', () => {
-  // 从浏览器（本地）加载主题设置，如果没有则默认的浅色模式
-  const isDarkMode = ref(localStorage.getItem('theme') === 'dark')
+  // 从本地加载主题，如果没有则检测系统偏好，兜底浅色模式
+  const getInitialTheme = () => {
+    const saved = localStorage.getItem('theme')
+    if (saved) return saved === 'dark'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  }
+
+  const isDarkMode = ref(getInitialTheme())
 
   // 监听主题变化
   watch(isDarkMode, (dark) => {

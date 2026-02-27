@@ -75,8 +75,8 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
     task_id = self.request.id
     logger.info(f"[Task {task_id}] Start processing PDF {filename} ({file_hash}), pages={page_count}, user={user_id}")
 
-    from app import app
-    with app.app_context():
+    from celery_app import get_worker_app
+    with get_worker_app().app_context():
         try:
             filepath = _resolve_filepath(file_hash, upload_folder)
 
@@ -170,8 +170,8 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
 
 def _update_status(file_hash: str, status: str, task_id: str = None, error: str = None):
     """更新 GlobalFile 的处理状态"""
-    from app import app
-    with app.app_context():
+    from celery_app import get_worker_app
+    with get_worker_app().app_context():
         repo = SQLRepository(db.session)
         try:
             gf = repo.get_global_file(file_hash)
@@ -191,8 +191,8 @@ def _update_status(file_hash: str, status: str, task_id: str = None, error: str 
 
 def _update_progress(file_hash: str, current_page: int):
     """更新当前已解析到的页码"""
-    from app import app
-    with app.app_context():
+    from celery_app import get_worker_app
+    with get_worker_app().app_context():
         repo = SQLRepository(db.session)
         try:
             gf = repo.get_global_file(file_hash)

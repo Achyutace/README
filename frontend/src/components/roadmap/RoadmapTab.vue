@@ -11,7 +11,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { useAiStore } from '../../stores/ai'
+import { useRoadmapStore } from '../../stores/roadmap'
 import { useLibraryStore } from '../../stores/library'
 
 const emit = defineEmits<{
@@ -20,7 +20,7 @@ const emit = defineEmits<{
 
 // ------------------------- 初始化 store 实例 -------------------------
 // 组合式 store 实例用于访问应用级状态和 VueFlow 辅助函数
-const aiStore = useAiStore()
+const roadmapStore = useRoadmapStore()
 const libraryStore = useLibraryStore()
 const { onNodeClick, fitView } = useVueFlow()
 
@@ -92,7 +92,7 @@ async function loadRoadmap() {
   // 确保有当前文档
   if (libraryStore.currentDocument) {
     // 拉取 roadmap 数据（见 ai.ts）
-    await aiStore.fetchRoadmap(libraryStore.currentDocument.id) 
+    await roadmapStore.fetchRoadmap(libraryStore.currentDocument.id) 
     // 100ms 后超时，加载默认页面
     setTimeout(() => fitView(), 100)
   } else {
@@ -119,7 +119,7 @@ onNodeClick((event) => {
 // ------------------------- 导出与交互函数 -------------------------
 // 导出 roadmap 为 JSON，及关闭节点详情的辅助函数
 function exportRoadmap() {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(aiStore.roadmap, null, 2));
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(roadmapStore.roadmap, null, 2));
   const downloadAnchorNode = document.createElement('a');
   downloadAnchorNode.setAttribute("href", dataStr);
   downloadAnchorNode.setAttribute("download", "roadmap.json");
@@ -133,7 +133,7 @@ function closeDetail() {
 }
 
 onMounted(() => {
-  if (!aiStore.roadmap) {
+  if (!roadmapStore.roadmap) {
     loadRoadmap()
   }
 })
@@ -202,16 +202,16 @@ onUnmounted(() => {
     <!-- 内容区域 -->
     <div class="flex-1 relative w-full h-full bg-gray-50 dark:bg-[#252526] overflow-hidden">
       <!-- Loading -->
-      <div v-if="aiStore.isLoadingRoadmap" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 dark:bg-[#1e1e1e]/80 z-10">
+      <div v-if="roadmapStore.isLoadingRoadmap" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 dark:bg-[#1e1e1e]/80 z-10">
         <div class="animate-spin w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full mb-2"></div>
         <span class="text-xs text-gray-500 dark:text-gray-400">Generating...</span>
       </div>
 
       <!-- Flow Chart -->
       <VueFlow
-        v-if="aiStore.roadmap"
-        :nodes="aiStore.roadmap.nodes"
-        :edges="aiStore.roadmap.edges"
+        v-if="roadmapStore.roadmap"
+        :nodes="roadmapStore.roadmap.nodes"
+        :edges="roadmapStore.roadmap.edges"
         class="basicflow w-full h-full"
         :default-viewport="{ zoom: 1 }"
         :min-zoom="0.2"
@@ -223,7 +223,7 @@ onUnmounted(() => {
       </VueFlow>
 
       <!-- Empty State -->
-      <div v-else-if="!aiStore.isLoadingRoadmap" class="absolute inset-0 flex items-center justify-center text-center p-4">
+      <div v-else-if="!roadmapStore.isLoadingRoadmap" class="absolute inset-0 flex items-center justify-center text-center p-4">
         <p class="text-xs text-gray-400 dark:text-gray-500">No Roadmap Data</p>
       </div>
 

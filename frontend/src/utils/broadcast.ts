@@ -17,6 +17,8 @@ export type SyncEventType =
     | 'RELOAD_MESSAGES'      // 重新加载当前会话消息
     | 'RELOAD_HIGHLIGHTS'    // 重新加载当前 PDF 的高亮
     | 'RELOAD_CUSTOM_MODELS' // 重新加载自定义模型列表
+    | 'RELOAD_LIBRARY'       // 重新加载文献库列表
+    | 'AUTH_LOGOUT'          // 用户登出 (同步清理所有标签页缓存)
 
 export interface SyncMessage {
     type: SyncEventType

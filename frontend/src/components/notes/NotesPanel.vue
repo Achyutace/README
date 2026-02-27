@@ -222,17 +222,6 @@ function updateCard() {
   // 仅更新本地状态，不触发保存
 }
 
-/**
- * 获取文本的首行（用于折叠时显示摘要）
- * - 移除一些常见的 Markdown 标记作为简化的预览
- */
-function getFirstLine(text: string): string {
-  if (!text) return ''
-  const cleanText = text.replace(/[#*`]/g, '') 
-  const firstLine = cleanText.split('\n')[0] || ''
-  return firstLine
-}
-
 // ------------------------- 关键词管理 -------------------------
 /**
  * 添加关键词

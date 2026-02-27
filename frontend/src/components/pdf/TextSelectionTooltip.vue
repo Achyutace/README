@@ -61,7 +61,7 @@ async function handleTranslate() {
   dragStore.resetDrag() // 每次点击翻译按钮，重置弹窗位置回到菜单正上方
   
   // 1. 设置 Panel 的位置（让 Panel 出现在当前鼠标附近，稍微错开一点）
-  translateStore.updateTranslationPanelPosition({
+  translateStore.updateTextPanelPosition({
     x: props.position.x,
     y: props.position.y + 40
   })

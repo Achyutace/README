@@ -2,7 +2,8 @@
 // ------------------------- 导入依赖与 store -------------------------
 // 引入 Vue 响应式 API、Markdown 支持、代码高亮及应用 store/API
 import { ref, computed, watch, onMounted, nextTick } from 'vue'  // 导入 Vue 的响应式 API 和生命周期钩子
-import { useAiStore } from '../../stores/ai'  // 导入 AI 相关的状态管理 store
+import { useChatStore } from '../../stores/chat'
+import { usePanelStore } from '../../stores/panel'  // 导入 AI 相关的状态管理 store
 import { useLibraryStore } from '../../stores/library'  // 导入库相关的状态管理 store
 import { usePdfStore } from '../../stores/pdf'  // 导入 PDF 相关的状态管理 store
 import { chatSessionApi } from '../../api'  // 导入聊天会话 API
@@ -14,7 +15,8 @@ import ChatMessageList from './ChatMessageList.vue'
 import ChatInputArea from './ChatInputArea.vue'
 
 // 初始化各个 store 实例
-const aiStore = useAiStore()  // 创建 AI store 实例
+const chatStore = useChatStore()
+const panelStore = usePanelStore()  // 创建 AI store 实例
 const libraryStore = useLibraryStore()  // 创建库 store 实例
 const pdfStore = usePdfStore()  // 创建 PDF store 实例
 
@@ -95,12 +97,12 @@ const toggleHistoryPanel = () => {  // 切换历史面板显示状态
 const createNewChat = async () => {  // 创建新聊天
   const pdfId = libraryStore.currentDocumentId  // 获取当前 PDF ID
   if (pdfId) {  // 如果有 PDF ID
-    await aiStore.createNewSession(pdfId)  // 创建新会话
+    await chatStore.createNewSession(pdfId)
   }
-  showHistoryPanel.value = false  // 关闭历史面板
+  showHistoryPanel.value = false
 }
-const loadChatSession = async (sessionId: string) => {  // 加载聊天会话
-  await aiStore.loadSession(sessionId)  // 加载指定会话
+const loadChatSession = async (sessionId: string) => {
+  await chatStore.loadSession(sessionId)
   showHistoryPanel.value = false  // 关闭历史面板
 }
 
@@ -108,7 +110,7 @@ const deleteChatSession = async (sessionId: string, event: Event) => {  // 删�
   event.stopPropagation()  // 阻止事件冒泡
   if (confirm('确定要删除这个对话吗？')) {  // 确认删除
     try {
-      await aiStore.deleteSession(sessionId)  // 删除会话
+      await chatStore.deleteSession(sessionId)
     } catch (error) {
       console.error('删除会话失败:', error)  // 记录错误
     }
@@ -118,7 +120,7 @@ const deleteChatSession = async (sessionId: string, event: Event) => {  // 删�
 const currentPdfSessions = computed(() => {  // 获取当前 PDF 的会话列表（computed 缓存）
   const pdfId = libraryStore.currentDocumentId  // 获取当前 PDF ID
   if (!pdfId) return []  // 如果没有 PDF ID，返回空数组
-  return aiStore.getSessionsByPdfId(pdfId)  // 返回该 PDF 的会话列表
+  return chatStore.getSessionsByPdfId(pdfId)
 })
 
 // --- Model Change Handler ---
@@ -149,11 +151,11 @@ const handleToggleMode = () => {
 
 // --- Resend Logic ---
 const handleResend = async (index: number) => {
-  const message = aiStore.chatMessages[index]
-  if (!message || aiStore.isLoadingChat) return
+  const message = chatStore.chatMessages[index]
+  if (!message || chatStore.isLoadingChat) return
   
   // 构造历史：取该消息之前的所有消息
-  const history = aiStore.chatMessages.slice(0, index).map(m => ({
+  const history = chatStore.chatMessages.slice(0, index).map(m => ({
     role: m.role,
     content: m.content
   }))
@@ -162,10 +164,10 @@ const handleResend = async (index: number) => {
 }
 
 const handleResendEdited = async (index: number, newContent: string) => {
-  if (aiStore.isLoadingChat) return
+  if (chatStore.isLoadingChat) return
 
   // 构造历史
-  const history = aiStore.chatMessages.slice(0, index).map(m => ({
+  const history = chatStore.chatMessages.slice(0, index).map(m => ({
     role: m.role,
     content: m.content
   }))
@@ -191,28 +193,28 @@ const executeSendMessage = async (
   }
 
   // 1. 乐观 UI 更新
-  aiStore.addChatMessage({
+  chatStore.addChatMessage({
     role: 'user',
     content: content,
     meta: meta
   })
 
-  aiStore.isLoadingChat = true
+  chatStore.isLoadingChat = true
 
   try {
-    if (!aiStore.currentSessionId || !libraryStore.currentDocumentId) {
+    if (!chatStore.currentSessionId || !libraryStore.currentDocumentId) {
       if (libraryStore.currentDocumentId) {
-        await aiStore.createNewSession(libraryStore.currentDocumentId)
+        await chatStore.createNewSession(libraryStore.currentDocumentId)
       } else {
         alert("找不到有效文档，请先在左侧选择 PDF。")
-        aiStore.isLoadingChat = false
+        chatStore.isLoadingChat = false
         return
       }
     }
     
     // 调用 API，传入 historyOverride
     const data = await chatSessionApi.sendMessage(
-      aiStore.currentSessionId!,
+      chatStore.currentSessionId!,
       content,
       libraryStore.currentDocumentId,
       chatMode.value,
@@ -222,7 +224,7 @@ const executeSendMessage = async (
       historyOverride
     )
     
-    aiStore.addChatMessage({
+    chatStore.addChatMessage({
       role: 'assistant',
       content: data.response,
       citations: data.citations || []
@@ -234,32 +236,32 @@ const executeSendMessage = async (
     
   } catch (error: any) {
     console.error('发送消息异常:', error)
-    aiStore.addChatMessage({
+    chatStore.addChatMessage({
       role: 'assistant',
       content: '抱歉，网络请求失败，请检查后端服务或密钥配置。',
       citations: []
     })
   } finally {
-    aiStore.isLoadingChat = false
+    chatStore.isLoadingChat = false
   }
 }
 
 // --- Selection Logic ---
 const handleToggleSelectionMode = () => {
-  aiStore.toggleSelectionMode()
+  panelStore.toggleSelectionMode()
 }
 
 const handleToggleMessageSelection = (id: string) => {
-  aiStore.toggleMessageSelection(id)
+  panelStore.toggleMessageSelection(id)
 }
 
 const handleCopySelected = () => {
-  const json = aiStore.copySelectedAsJson()
+  const json = chatStore.copySelectedAsJson(panelStore.selectedMessageIds)
   if (json && json !== '[]') {
     navigator.clipboard.writeText(json)
     alert('已复制选中内容到剪贴板')
-    aiStore.selectionMode = false
-    aiStore.selectedMessageIds.clear()
+    panelStore.selectionMode = false
+    panelStore.selectedMessageIds.clear()
   }
 }
 
@@ -272,16 +274,16 @@ const handleChatSend = async (payload: { text: string; mode: 'agent' | 'simple';
 
 watch(() => libraryStore.currentDocumentId, async (pdfId) => {  // 监听当前文档 ID 变化
   if (pdfId) {  // 如果有 PDF ID
-    aiStore.clearChat()  // 清空聊天
-    await aiStore.loadSessionsFromBackend(pdfId)  // 从后端加载会话
+    chatStore.clearChat()
+    await chatStore.loadSessionsFromBackend(pdfId)
     
     // 自动加载该文档最近的会话或者创建一个新会话
-    const sessions = aiStore.getSessionsByPdfId(pdfId)
+    const sessions = chatStore.getSessionsByPdfId(pdfId)
     const firstSession = sessions[0]
     if (firstSession) {
-      await aiStore.loadSession(firstSession.id)
+      await chatStore.loadSession(firstSession.id)
     } else {
-      await aiStore.createNewSession(pdfId)
+      await chatStore.createNewSession(pdfId)
     }
   }
 }, { immediate: true })  // 立即执行
@@ -313,7 +315,7 @@ defineExpose({  // 暴露组件方法
     <ChatHistorySidebar
       v-if="showHistoryPanel"
       :sessions="currentPdfSessions"
-      :currentSessionId="aiStore.currentSessionId"
+      :currentSessionId="chatStore.currentSessionId"
       @close="showHistoryPanel = false"
       @load-session="loadChatSession"
       @delete-session="deleteChatSession"
@@ -322,10 +324,10 @@ defineExpose({  // 暴露组件方法
     <div class="flex-1 flex flex-col relative w-full h-full overflow-hidden">
         <ChatMessageList
           ref="messageListRef"
-          :messages="aiStore.chatMessages"
-          :isLoadingContent="aiStore.isLoadingChat"
-          :selectionMode="aiStore.selectionMode"
-          :selectedIds="aiStore.selectedMessageIds"
+          :messages="chatStore.chatMessages"
+          :isLoadingContent="chatStore.isLoadingChat"
+          :selectionMode="panelStore.selectionMode"
+          :selectedIds="panelStore.selectedMessageIds"
           @resend="handleResend"
           @resend-edited="handleResendEdited"
           @toggle-selection="handleToggleMessageSelection"
@@ -333,33 +335,33 @@ defineExpose({  // 暴露组件方法
 
         <!-- Selection Mode Toolbar (Floating) -->
         <div 
-          v-if="aiStore.selectionMode" 
+          v-if="panelStore.selectionMode" 
           class="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 px-4 py-1.5 bg-blue-50/40 dark:bg-slate-900/40 backdrop-blur-md border border-blue-100/50 dark:border-slate-700 rounded-lg shadow-none flex items-center gap-3 min-w-max transition-all duration-300"
         >
           <span class="text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">
-            已选择 {{ aiStore.selectedMessageIds.size }} 条
+            已选择 {{ panelStore.selectedMessageIds.size }} 条
           </span>
           <div class="h-3 w-[1px] bg-blue-200/50 dark:bg-slate-700/50"></div>
           <div class="flex gap-1 items-center">
             <button 
-              @click="aiStore.selectionMode = false; aiStore.selectedMessageIds.clear()"
+              @click="panelStore.selectionMode = false; panelStore.selectedMessageIds.clear()"
               class="px-2 py-0.5 text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap"
             >取消</button>
             <button 
               @click="handleCopySelected"
-              :disabled="aiStore.selectedMessageIds.size === 0"
+              :disabled="panelStore.selectedMessageIds.size === 0"
               class="px-3 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed rounded-md transition-all active:scale-95 whitespace-nowrap"
             >复制为 JSON</button>
           </div>
         </div>
 
         <ChatInputArea
-          :isLoadingContent="aiStore.isLoadingChat"
+          :isLoadingContent="chatStore.isLoadingChat"
           :chatMode="chatMode"
           :customModels="customModels"
           :selectedModel="selectedModel"
           :selectedText="pdfStore.selectedText"
-          :selectionMode="aiStore.selectionMode"
+          :selectionMode="panelStore.selectionMode"
           @clear-selection="pdfStore.clearSelection()"
           @send="handleChatSend"
           @change-model="handleModelChange"

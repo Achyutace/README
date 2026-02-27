@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ChatSession } from '../../stores/ai'
+import type { ChatSession } from '../../stores/chat'
 
 const props = defineProps<{
   sessions: ChatSession[]

@@ -5,32 +5,24 @@
 */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { TranslationPanelState, TranslationPanelInstance } from '../types'
-import { useAiStore } from './ai'
+import type { TranslationPanelInstance } from '../types'
 import { useLibraryStore } from './library'
 import { aiApi } from '../api'
+import { dbPut, dbGetAll, dbClear, STORES } from '../utils/db'
 
 export const useTranslationStore = defineStore('translation', () => {
-  const aiStore = useAiStore()
   const libraryStore = useLibraryStore()
 
   // ---------------------- 状态（State） ----------------------
-  
+
   // 划词翻译/快速翻译状态
   const showTextTranslation = ref(false)
   const isTextTranslating = ref(false)
   const textTranslationResult = ref('')
   const textTranslationOriginal = ref('')  // 存储划词翻译的原文，用于重新翻译
 
-  // 兼容旧版的单一翻译面板状态（为向后兼容保留）
-  const translationPanel = ref<TranslationPanelState>({
-    isVisible: false,
-    paragraphId: '',
-    position: { x: 0, y: 0 },
-    translation: '',
-    isLoading: false,
-    originalText: ''
-  })
+  // 划词翻译面板的位置
+  const textPanelPosition = ref<{ x: number; y: number }>({ x: 0, y: 0 })
 
   // 多窗口翻译面板列表
   const translationPanels = ref<TranslationPanelInstance[]>([])
@@ -41,33 +33,52 @@ export const useTranslationStore = defineStore('translation', () => {
   // 翻译缓存：paragraphId -> translation
   const translationCache = ref<Record<string, string>>({})
 
+  // 从 IndexedDB 水合翻译缓存
+  async function hydrateFromDB() {
+    try {
+      const records = await dbGetAll<{ id: string; translation: string }>(STORES.TRANSLATIONS)
+      if (records.length > 0) {
+        const cache: Record<string, string> = {}
+        for (const rec of records) {
+          cache[rec.id] = rec.translation
+        }
+        translationCache.value = cache
+        console.log(`[Translation] Hydrated ${records.length} cached translations from IndexedDB`)
+      }
+    } catch (error) {
+      console.warn('[Translation] Failed to hydrate from IndexedDB:', error)
+    }
+  }
+
+  // 启动时水合
+  hydrateFromDB()
+
   // ---------------------- 动作（Actions） ----------------------
 
   // ---------------------- 划词翻译功能 ----------------------
-  
+
   // 翻译文本 (Translate Text Selection)
   async function translateText(text: string, forceRefresh = false) {
     showTextTranslation.value = true
     isTextTranslating.value = true
     textTranslationOriginal.value = text  // 保存原文用于重新翻译
-    
+
     // 如果不是强制刷新且有缓存结果，则直接使用缓存
     if (!forceRefresh && textTranslationResult.value) {
       isTextTranslating.value = false
       return
     }
-    
+
     textTranslationResult.value = ''
-    
+
     try {
       const pdfId = libraryStore.currentDocumentId
       const response = await aiApi.translateText(text, pdfId || undefined)
-      
+
       if (response && response.translatedText) {
-         textTranslationResult.value = response.translatedText
-         aiStore.setTranslation(response)
+        textTranslationResult.value = response.translatedText
       } else {
-         textTranslationResult.value = "未能获取翻译结果"
+        textTranslationResult.value = "未能获取翻译结果"
       }
     } catch (error) {
       console.error('Translation failed:', error)
@@ -92,7 +103,7 @@ export const useTranslationStore = defineStore('translation', () => {
         console.warn('No active PDF document found.')
         return null
       }
-      
+
       const result = await aiApi.translateParagraph(pdfId, paragraphId, forceRefresh)
       if (result.success) {
         return result.translation
@@ -112,7 +123,7 @@ export const useTranslationStore = defineStore('translation', () => {
   function openTranslationPanel(paragraphId: string, position: { x: number; y: number }, originalText: string) {
     // 先尝试从缓存中获取翻译，若存在则直接使用
     const cached = translationCache.value[paragraphId]
-    
+
     // 若已存在同一段落的翻译面板，则把它移到数组末尾以实现聚焦效果
     const existingPanel = translationPanels.value.find(p => p.paragraphId === paragraphId)
     if (existingPanel) {
@@ -121,7 +132,7 @@ export const useTranslationStore = defineStore('translation', () => {
       translationPanels.value.push(existingPanel)
       return
     }
-    
+
     // 创建并初始化一个新的翻译面板实例
     const newPanel: TranslationPanelInstance = {
       id: `tp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -135,25 +146,11 @@ export const useTranslationStore = defineStore('translation', () => {
       snapTargetParagraphId: null,
       isSidebarDocked: false
     }
-    
+
     translationPanels.value.push(newPanel)
-    
-    // 同时更新旧版的单一翻译面板状态以保持向后兼容
-    translationPanel.value = {
-      isVisible: true,
-      paragraphId,
-      position,
-      translation: cached || '',
-      isLoading: !cached,
-      originalText
-    }
+
   }
 
-  // 关闭旧版的单一翻译面板（仅影响兼容的状态表示）
-  function closeTranslationPanel() {
-    translationPanel.value.isVisible = false
-  }
-  
   // 关闭指定 ID 的翻译面板，并处理侧边栏停靠列表
   function closeTranslationPanelById(panelId: string) {
     const index = translationPanels.value.findIndex(p => p.id === panelId)
@@ -167,11 +164,11 @@ export const useTranslationStore = defineStore('translation', () => {
     }
   }
 
-  // 更新旧版翻译面板的位置（兼容）
-  function updateTranslationPanelPosition(position: { x: number; y: number }) {
-    translationPanel.value.position = position
+  // 更新划词翻译面板的位置
+  function updateTextPanelPosition(position: { x: number; y: number }) {
+    textPanelPosition.value = position
   }
-  
+
   // 更新指定面板的位置（多窗口）
   function updatePanelPosition(panelId: string, position: { x: number; y: number }) {
     const panel = translationPanels.value.find(p => p.id === panelId)
@@ -179,7 +176,7 @@ export const useTranslationStore = defineStore('translation', () => {
       panel.position = position
     }
   }
-  
+
   // 更新指定面板尺寸
   function updatePanelSize(panelId: string, size: { width: number; height: number }) {
     const panel = translationPanels.value.find(p => p.id === panelId)
@@ -187,7 +184,7 @@ export const useTranslationStore = defineStore('translation', () => {
       panel.size = size
     }
   }
-  
+
   // 设置面板的吸附模式（none / paragraph / sidebar），并维护侧边栏停靠列表
   function setPanelSnapMode(panelId: string, mode: 'none' | 'paragraph' | 'sidebar', targetParagraphId?: string) {
     const panel = translationPanels.value.find(p => p.id === panelId)
@@ -195,7 +192,7 @@ export const useTranslationStore = defineStore('translation', () => {
       panel.snapMode = mode
       panel.snapTargetParagraphId = targetParagraphId || null
       panel.isSidebarDocked = mode === 'sidebar'
-      
+
       // 管理侧边栏停靠数组，避免重复或残留条目
       const sidebarIndex = sidebarDockedPanels.value.indexOf(panelId)
       if (mode === 'sidebar' && sidebarIndex === -1) {
@@ -209,13 +206,12 @@ export const useTranslationStore = defineStore('translation', () => {
   // 设置翻译结果并更新缓存与所有相关面板状态
   function setTranslation(paragraphId: string, translation: string) {
     translationCache.value[paragraphId] = translation
-    
-    // 如果旧版面板正在显示相同段落，则同步更新
-    if (translationPanel.value.paragraphId === paragraphId) {
-      translationPanel.value.translation = translation
-      translationPanel.value.isLoading = false
-    }
-    
+
+    // 异步写入 IndexedDB
+    dbPut(STORES.TRANSLATIONS, { id: paragraphId, translation }).catch(err => {
+      console.warn('[Translation] Failed to persist translation to IndexedDB:', err)
+    })
+
     // 更新所有匹配的多窗口翻译面板
     translationPanels.value.forEach(panel => {
       if (panel.paragraphId === paragraphId) {
@@ -225,11 +221,6 @@ export const useTranslationStore = defineStore('translation', () => {
     })
   }
 
-  // 设置旧版翻译面板的加载状态
-  function setTranslationLoading(loading: boolean) {
-    translationPanel.value.isLoading = loading
-  }
-  
   // 设置指定多窗口面板的加载状态
   function setPanelLoading(panelId: string, loading: boolean) {
     const panel = translationPanels.value.find(p => p.id === panelId)
@@ -237,7 +228,7 @@ export const useTranslationStore = defineStore('translation', () => {
       panel.isLoading = loading
     }
   }
-  
+
   // 将指定面板移动到数组末尾，从而在 UI 层表现为置顶/聚焦
   function bringPanelToFront(panelId: string) {
     const index = translationPanels.value.findIndex(p => p.id === panelId)
@@ -248,17 +239,26 @@ export const useTranslationStore = defineStore('translation', () => {
       }
     }
   }
-  
+
   // 关闭所有面板
   function closeAllPanels() {
     translationPanels.value = []
     sidebarDockedPanels.value = []
-    closeTranslationPanel()
+  }
+
+  // 清空翻译缓存 (退出登录时)
+  async function clearCache() {
+    translationCache.value = {}
+    textTranslationResult.value = ''
+    textTranslationOriginal.value = ''
+    closeAllPanels()
+    // 同时清空 IndexedDB 中的翻译缓存
+    await dbClear(STORES.TRANSLATIONS)
   }
 
   return {
     // State
-    translationPanel,
+    textPanelPosition,
     translationPanels,
     sidebarDockedPanels,
     translationCache,
@@ -266,22 +266,21 @@ export const useTranslationStore = defineStore('translation', () => {
     isTextTranslating,
     textTranslationResult,
     textTranslationOriginal,
-    
+
     // Actions
     translateText,
     closeTextTranslation,
     translateParagraph,
     openTranslationPanel,
-    closeTranslationPanel,
     closeTranslationPanelById,
-    updateTranslationPanelPosition,
+    updateTextPanelPosition,
     updatePanelPosition,
     updatePanelSize,
     setPanelSnapMode,
     setTranslation,
-    setTranslationLoading,
     setPanelLoading,
     bringPanelToFront,
-    closeAllPanels
+    closeAllPanels,
+    clearCache
   }
 })

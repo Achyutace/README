@@ -198,3 +198,24 @@ export interface NoteListResponse {
   notes: Note[]
   total: number
 }
+// 矩形框（左上角坐标 + 宽高）
+export interface NormalizedRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+// 高亮对象结构
+export interface Highlight {
+  id: string
+  page: number
+  rects: NormalizedRect[]
+  text: string
+  color: string
+}
+
+// 存储结构：文档ID -> 高亮列表
+export interface HighlightsStorage {
+  [documentId: string]: Highlight[]
+}

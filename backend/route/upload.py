@@ -24,6 +24,37 @@ upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
 
 
 # ==========================================
+# 列表接口
+# ==========================================
+
+@upload_bp.route('/', methods=['GET'])
+@jwt_required()
+def list_user_papers():
+    """
+    获取当前用户的文献库列表
+    Query Params:
+        page (int): 当前页码
+        pageSize (int): 每页数量
+        group (str): 分组名称
+        keyword (str): 关键词
+    """
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('pageSize', 50, type=int)
+    group = request.args.get('group')
+    keyword = request.args.get('keyword')
+
+    library_service = current_app.library_service
+    result = library_service.get_user_papers(
+        user_id=g.user_id,
+        page=page,
+        page_size=page_size,
+        group_filter=group,
+        keyword=keyword
+    )
+    return jsonify(result)
+
+
+# ==========================================
 # 上传接口
 # ==========================================
 

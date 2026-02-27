@@ -5,38 +5,23 @@
 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { PdfParagraph } from '../types'
+import type { PdfParagraph, Highlight, NormalizedRect, HighlightsStorage } from '../types'
 import type { PageSize } from '../types/pdf'
 import { highlightApi, aiApi, type InternalLinkData } from '../api'
 
 // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
-// 矩形框（左上角坐标 + 宽高）
-type NormalizedRect = {
-  left: number
-  top: number
-  width: number
-  height: number
-}
-
-// 高亮对象结构
-type Highlight = {
-  id: string    // 唯一标识符
-  page: number    // 所在页码
-  rects: NormalizedRect[]    // 该高亮覆盖的多个矩形区域
-  text: string    // 高亮的文本内容
-  color: string    // 高亮颜色（十六进制字符串）
-}
-
-// 存储结构：文档ID -> 高亮列表
-type HighlightsStorage = Record<string, Highlight[]>
 
 export type { Highlight, NormalizedRect }
 
 export const usePdfStore = defineStore('pdf', () => {
   // ---------------------- 可观察的状态（state） ----------------------
   const currentPdfUrl = ref<string | null>(null) // 当前打开的 PDF 文件 URL
-  const currentDocumentId = ref<string | null>(null) // 当前文档 ID（用于区分不同文档的高亮与段落）
+  // PDF 渲染器当前展示的文档 ID（用于高亮隔离、段落定位）
+  // 注：与 library.ts 中的 currentDocumentId 语义不同——
+  //   - pdf.ts 这里的：渲染器上下文 ID，随 setCurrentPdf 切换
+  //   - library.ts 中的：用户在文献库选中的 ID，驱动文件 Blob 加载
+  const activeReaderId = ref<string | null>(null) // 当前文档 ID（用于区分不同文档的高亮与段落）
   const currentPage = ref(1) // 当前页码（从 1 开始）
   const totalPages = ref(0) // 文档总页数
   const scale = ref(DEFAULT_SCALE) // 当前缩放比例（内部以 1.5 为基准）
@@ -57,8 +42,8 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 当前文档的高亮（计算属性，若没有当前文档则返回空数组）
   const highlights = computed(() => {
-    if (!currentDocumentId.value) return []
-    return allHighlights.value[currentDocumentId.value] || []
+    if (!activeReaderId.value) return []
+    return allHighlights.value[activeReaderId.value] || []
   })
 
   // 默认高亮颜色（亮黄色）
@@ -79,8 +64,8 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 当前文档的段落（计算属性）
   const paragraphs = computed(() => {
-    if (!currentDocumentId.value) return []
-    return allParagraphs.value[currentDocumentId.value] || []
+    if (!activeReaderId.value) return []
+    return allParagraphs.value[activeReaderId.value] || []
   })
 
 
@@ -107,7 +92,7 @@ export const usePdfStore = defineStore('pdf', () => {
     clearHighlightSelection()
 
     currentPdfUrl.value = url
-    currentDocumentId.value = documentId || null
+    activeReaderId.value = documentId || null
     currentPage.value = 1
     scale.value = DEFAULT_SCALE
     isLoading.value = true
@@ -191,14 +176,14 @@ export const usePdfStore = defineStore('pdf', () => {
   // 从当前选择创建一个高亮并保存到当前文档
   async function addHighlightFromSelection() {
     // 需要有选择信息、选中文本且存在当前文档 ID
-    if (!selectionInfo.value || !selectedText.value || !currentDocumentId.value) {
+    if (!selectionInfo.value || !selectedText.value || !activeReaderId.value) {
       if (!selectionInfo.value) console.warn('Cannot add highlight: no selection info')
       if (!selectedText.value) console.warn('Cannot add highlight: no selected text')
-      if (!currentDocumentId.value) console.warn('Cannot add highlight: no document ID')
+      if (!activeReaderId.value) console.warn('Cannot add highlight: no document ID')
       return
     }
 
-    const docId = currentDocumentId.value
+    const docId = activeReaderId.value
     const page = selectionInfo.value.page
     const pageData = pageSizesArray.value?.[page - 1] || pageSizesConstant.value
     const pageWidth = pageData?.width || 800
@@ -256,12 +241,12 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 删除当前文档下的某条高亮
   async function removeHighlight(id: string) {
-    if (!currentDocumentId.value) {
+    if (!activeReaderId.value) {
       console.warn('Cannot remove highlight: no current document')
       return
     }
 
-    const docId = currentDocumentId.value
+    const docId = activeReaderId.value
     try {
       await highlightApi.deleteHighlight(id)
       // 后台删除成功后同步本地缓存
@@ -280,12 +265,12 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 更新某条高亮的颜色
   async function updateHighlightColor(id: string, color: string) {
-    if (!currentDocumentId.value) {
+    if (!activeReaderId.value) {
       console.warn('Cannot update highlight color: no current document')
       return
     }
 
-    const docId = currentDocumentId.value
+    const docId = activeReaderId.value
     try {
       await highlightApi.updateHighlight(id, color)
       // 更新成功后，改本地样式
@@ -339,6 +324,20 @@ export const usePdfStore = defineStore('pdf', () => {
   // 为某个文档设置段落数据（通常由解析 PDF 得到）
   function setParagraphs(documentId: string, paragraphsData: PdfParagraph[]) {
     allParagraphs.value[documentId] = paragraphsData
+  }
+
+  // 增量追加段落（用于后台解析轮询）
+  function appendParagraphs(documentId: string, newParagraphs: PdfParagraph[]) {
+    if (!newParagraphs.length) return
+    const existing = allParagraphs.value[documentId] ?? []
+    const existingIds = new Set(existing.map(p => p.id))
+    const toAdd = newParagraphs.filter(p => !existingIds.has(p.id))
+    if (!toAdd.length) return
+
+    const merged = [...existing, ...toAdd]
+    // 确保同一页内的段落按纵坐标正确排序，以防追加错乱
+    merged.sort((a, b) => a.page - b.page || (a.bbox?.y0 ?? 0) - (b.bbox?.y0 ?? 0))
+    allParagraphs.value[documentId] = merged
   }
 
   // 获取指定页面对应的段落列表（用于显示翻译、跳转等）
@@ -578,7 +577,7 @@ export const usePdfStore = defineStore('pdf', () => {
     syncChannel.addEventListener('message', (event) => {
       const { type, payload } = event.data
       if (type === 'RELOAD_HIGHLIGHTS') {
-        if (payload && payload === currentDocumentId.value) {
+        if (payload && payload === activeReaderId.value) {
           fetchHighlightsForPdf(payload)
           console.log(`[Broadcast] Required reloading highlights for PDF: ${payload}`)
         }
@@ -589,7 +588,7 @@ export const usePdfStore = defineStore('pdf', () => {
   // ---------------------- 导出 store 接口 ----------------------
   return {
     currentPdfUrl,
-    currentDocumentId,
+    activeReaderId: activeReaderId,
     currentPage,
     totalPages,
     scale,
@@ -632,6 +631,7 @@ export const usePdfStore = defineStore('pdf', () => {
     // 段落管理
     paragraphs,
     setParagraphs,
+    appendParagraphs,
     getParagraphsByPage,
     // 页面尺寸
     pageSizesConstant,

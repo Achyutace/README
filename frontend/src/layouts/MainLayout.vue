@@ -15,8 +15,7 @@ import PdfToolbar from '../components/pdf/PdfToolbar.vue'
 import NotesPanel from '../components/notes/NotesPanel.vue'
 import ChatTab from '../components/chat-box/ChatTab.vue'
 // 导入 Pinia store 的组合式使用函数（用于全局状态）
-import { useLibraryStore } from '../stores/library'
-import { useAiStore } from '../stores/ai'
+import { usePanelStore } from '../stores/panel'
 import { usePdfStore } from '../stores/pdf'
 import { useThemeStore } from '../stores/theme'
 import { clamp } from '@vueuse/core'
@@ -24,8 +23,7 @@ import { clamp } from '@vueuse/core'
 // ------------------------- 初始化 store 实例 -------------------------
 // Store 本质上保存的是 应用状态 + 相关逻辑
 // 通过组合式函数获取各个 store 的实例，供组件内部使用
-const libraryStore = useLibraryStore()
-const aiStore = useAiStore()
+const panelStore = usePanelStore()
 const pdfStore = usePdfStore()
 const themeStore = useThemeStore()
 
@@ -38,12 +36,11 @@ const chatVisible = ref(false)
 const notesMinimized = ref(false)
 const chatMinimized = ref(false)
 
-// 计算侧边栏是否可见
+// 计算侧边栏是否可见：只有当至少有一个面板是“展开”状态（可见且非最小化）时，侧边栏才显示
 const sidebarVisible = computed(() => {
-  const hasVisiblePanel = notesVisible.value || chatVisible.value
-  const bothMinimized = notesVisible.value && notesMinimized.value
-    && chatVisible.value && chatMinimized.value
-  return hasVisiblePanel && !bothMinimized
+  const isNoteExpanded = notesVisible.value && !notesMinimized.value
+  const isChatExpanded = chatVisible.value && !chatMinimized.value
+  return isNoteExpanded || isChatExpanded
 })
 
 // Chat 占 Chat + Notes 的比例，默认 0.45
@@ -84,8 +81,8 @@ const toggleChatVisibility = () => {
 // 切换 Notes 面板最小化/展开（面板头部点击触发）
 const toggleNotesMinimize = () => {
   notesMinimized.value = !notesMinimized.value
-  // 如果两个面板都最小化了，则自动隐藏它们并重置最小化状态
-  if (notesMinimized.value && chatMinimized.value) {
+  // 处理逻辑：如果切换后 Note 变为了最小化，且此时 Chat 也是不可见或最小化的，则全部设置为隐藏
+  if (notesMinimized.value && (!chatVisible.value || chatMinimized.value)) {
     notesVisible.value = false
     chatVisible.value = false
     notesMinimized.value = false
@@ -95,8 +92,8 @@ const toggleNotesMinimize = () => {
 // 切换 Chat 面板最小化/展开（面板头部点击触发）
 const toggleChatMinimize = () => {
   chatMinimized.value = !chatMinimized.value
-  // 如果两个面板都最小化了，则自动隐藏它们并重置最小化状态
-  if (notesMinimized.value && chatMinimized.value) {
+  // 处理逻辑：如果切换后 Chat 变为了最小化，且此时 Note 也是不可见或最小化的，则全部设置为隐藏
+  if (chatMinimized.value && (!notesVisible.value || notesMinimized.value)) {
     notesVisible.value = false
     chatVisible.value = false
     notesMinimized.value = false
@@ -262,12 +259,12 @@ onBeforeUnmount(() => {
           v-show="sidebarVisible"
           ref="sidebarRef"
           class="flex flex-col border-l border-blue-100/50 dark:border-slate-800/60 bg-white/95 dark:bg-[#1e1e1e] backdrop-blur-sm flex-shrink-0 relative transition-all duration-200 shadow-none"
-          :class="aiStore.isPanelHidden ? 'w-0 opacity-0 overflow-hidden' : ''"
-          :style="!aiStore.isPanelHidden ? { width: sidebarWidth + 'px' } : {}"
+          :class="panelStore.isPanelHidden ? 'w-0 opacity-0 overflow-hidden' : ''"
+          :style="!panelStore.isPanelHidden ? { width: sidebarWidth + 'px' } : {}"
         >
           <!-- Width Resize Handle -->
           <div
-            v-if="!aiStore.isPanelHidden"
+            v-if="!panelStore.isPanelHidden"
             class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-gray-400 dark:hover:bg-gray-600 transition-colors z-50"
             :class="{ 'bg-primary-500': isResizingWidth }"
             @mousedown="startWidthResize"

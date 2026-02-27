@@ -60,7 +60,7 @@ const visiblePanels = computed(() => {
     panels.push({
       id: TEXT_PANEL_ID,
       paragraphId: '', // 划词翻译无段落ID
-      position: translationStore.translationPanel.position,
+      position: translationStore.textPanelPosition,
       size: textPanelSize.value,
       translation: translationStore.textTranslationResult || (translationStore.isTextTranslating ? '' : '暂无翻译'),
       isLoading: translationStore.isTextTranslating,
@@ -208,7 +208,7 @@ const { startDrag: initDrag, setPosition: setDragPosition } = useDraggableWindow
     if (currentId === TEXT_PANEL_ID) {
        const maxX = window.innerWidth - textPanelSize.value.width
        const maxY = window.innerHeight - textPanelSize.value.height
-       translationStore.updateTranslationPanelPosition({
+       translationStore.updateTextPanelPosition({
           x: clamp(newPos.x, 0, maxX),
           y: clamp(newPos.y, 0, maxY)
        })
@@ -322,7 +322,7 @@ function startDrag(e: MouseEvent, panelId: string) {
   draggingPanelId.value = panelId
   
   if (panelId === TEXT_PANEL_ID) {
-    setDragPosition(translationStore.translationPanel.position)
+    setDragPosition(translationStore.textPanelPosition)
   } else {
     const panel = translationStore.translationPanels.find(p => p.id === panelId)
     if (!panel) {
@@ -351,8 +351,8 @@ const { startResize: initResize, setSize: setResizeSize } = useResizableWindow({
     if (id === TEXT_PANEL_ID) {
         textPanelSize.value = size
         if (delta.x !== 0 || delta.y !== 0) {
-            const curPos = translationStore.translationPanel.position
-            translationStore.updateTranslationPanelPosition({
+            const curPos = translationStore.textPanelPosition
+            translationStore.updateTextPanelPosition({
                 x: curPos.x + delta.x,
                 y: curPos.y + delta.y
             })

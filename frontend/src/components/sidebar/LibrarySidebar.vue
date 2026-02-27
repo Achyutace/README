@@ -10,7 +10,8 @@
 import { ref, computed } from 'vue'
 import { useLibraryStore } from '../../stores/library'
 import { usePdfStore } from '../../stores/pdf'
-import { useAiStore } from '../../stores/ai'
+import { useChatStore } from '../../stores/chat'
+import { useRoadmapStore } from '../../stores/roadmap'
 import { useAuthStore } from '../../stores/auth'
 import { authApi } from '../../api'
 import { useRouter } from 'vue-router'
@@ -19,7 +20,8 @@ import { useRouter } from 'vue-router'
 // 组合式 store 实例用于访问应用级状态和方法
 const libraryStore = useLibraryStore()
 const pdfStore = usePdfStore()
-const aiStore = useAiStore()
+const chatStore = useChatStore()
+const roadmapStore = useRoadmapStore()
 const authStore = useAuthStore()
 const router = useRouter()
 
@@ -97,7 +99,8 @@ async function handleFileUpload(event: Event) {
     // 只处理 PDF 文件
     if (file && file.type === 'application/pdf') {
       try {
-        aiStore.resetForNewDocument() // 应该在改变前重置状态
+        chatStore.resetForNewDocument()
+        roadmapStore.resetForNewDocument()
 
         // 添加文档到库中
         const doc = await libraryStore.addDocument(file)
@@ -129,7 +132,8 @@ async function selectDocument(id: string) {
   const doc = libraryStore.documents.find((d: { id: string }) => d.id === id)
   // 如果找到则选择该文档
   if (doc) {
-    aiStore.resetForNewDocument() // 重置 AI Store 状态，要在更改 id 前重置避免清空 watcher 的结果
+    chatStore.resetForNewDocument()
+    roadmapStore.resetForNewDocument()
     await libraryStore.selectDocument(id) // 可能是异步，先拉取 blob
     pdfStore.setCurrentPdf(doc.url, doc.id) // 传递文档ID和最新的 url
     

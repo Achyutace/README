@@ -61,23 +61,6 @@ export function isAuthenticated(): boolean {
   return !!getAccessToken()
 }
 
-// ==================== 临时 Mock 认证初始化 ====================
-/**
- * 临时解决方案：在没有正式登录界面时，为浏览器预填一个 Mock Token。
- * 
- */
-// TODO
-// export function initMockAuth() {
-//   if (!getAccessToken()) {
-//     setTokens('mock-access-token-' + Math.random().toString(36).substring(7), 'mock-refresh-token');
-//     setCurrentUser({
-//       id: '00000000-0000-0000-0000-000000000000', // 默认 UUID
-//       username: 'Guest',
-//       email: 'guest@example.com'
-//     });
-//     console.log('Temporary mock authentication initialized for PDF upload and other APIs.');
-//   }
-// }
 
 // ==================== 请求拦截器：自动注入 Bearer Token ====================
 
@@ -241,6 +224,12 @@ export interface InternalLinkData {
 // 对应后端： router/upload.py
 // -----------------------------
 export const pdfApi = {
+  // 获取文献库列表
+  list: async (params?: { page?: number; pageSize?: number; group?: string; keyword?: string }) => {
+    const { data } = await api.get('/pdf/', { params })
+    return data
+  },
+
   // 上传 PDF 文件，返回 PdfUploadResponse
   upload: async (file: File): Promise<PdfUploadResponse> => {
     const formData = new FormData()
@@ -266,6 +255,20 @@ export const pdfApi = {
       responseType: 'blob'
     })
     return response.data
+  },
+
+  // 查询 PDF 处理进度（用于前端轮询）
+  getStatus: async (pdfId: string, fromPage: number = 1): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed'
+    currentPage: number
+    totalPages: number
+    error: string | null
+    paragraphs: PdfParagraph[]
+  }> => {
+    const { data } = await api.get(`/pdf/${pdfId}/status`, {
+      params: { from_page: fromPage }
+    })
+    return data
   },
 }
 
@@ -445,15 +448,7 @@ export const chatSessionApi = {
 export const linkApi = {
   // 获取内部链接数据（发送 pdfId 和 paragraphId，返回论文信息）
   getLinkData: async (pdfId: string, targetParagraphId: string): Promise<InternalLinkData> => {
-    // const defaultData: InternalLinkData = {
-    //   title: 'Attention Is All You Need',
-    //   url: 'https://arxiv.org/abs/1706.03762',
-    //   snippet: '这是一个示例论文的摘要片段，用于展示内部链接数据的结构。',
-    //   published_date: '2024-01-01',
-    //   authors: ['作者 A', '作者 B'],
-    //   source: 'arXiv',
-    //   valid: 1
-    // }
+
     const defaultData: InternalLinkData = {
       title: "",
       url: '',
