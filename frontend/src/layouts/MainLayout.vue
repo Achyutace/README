@@ -15,7 +15,6 @@ import PdfToolbar from '../components/pdf/PdfToolbar.vue'
 import NotesPanel from '../components/notes/NotesPanel.vue'
 import ChatTab from '../components/chat-box/ChatTab.vue'
 // 导入 Pinia store 的组合式使用函数（用于全局状态）
-import { useLibraryStore } from '../stores/library'
 import { useAiStore } from '../stores/ai'
 import { usePdfStore } from '../stores/pdf'
 import { useThemeStore } from '../stores/theme'
@@ -24,7 +23,6 @@ import { clamp } from '@vueuse/core'
 // ------------------------- 初始化 store 实例 -------------------------
 // Store 本质上保存的是 应用状态 + 相关逻辑
 // 通过组合式函数获取各个 store 的实例，供组件内部使用
-const libraryStore = useLibraryStore()
 const aiStore = useAiStore()
 const pdfStore = usePdfStore()
 const themeStore = useThemeStore()
