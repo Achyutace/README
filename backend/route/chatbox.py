@@ -103,7 +103,10 @@ def send_message():
         user_query=user_query,
         user_id=user_id,
         paper_id=pdf_id,
-        chat_history=history
+        chat_history=history,
+        model=data.get('model'),
+        api_base=data.get('apiBase'),
+        api_key=data.get('apiKey'),
     )
 
     # 5. 存储 AI 回答
@@ -159,7 +162,10 @@ def simple_chat():
     result = agent_service.simple_chat(
         user_query=user_query,
         context_text=context_text,
-        chat_history=history
+        chat_history=history,
+        model=data.get('model'),
+        api_base=data.get('apiBase'),
+        api_key=data.get('apiKey'),
     )
 
     # 6. 存储 AI 回答
@@ -211,7 +217,10 @@ def stream_message():
                 user_query=user_query,
                 user_id=user_id,
                 paper_id=pdf_id,
-                chat_history=history
+                chat_history=history,
+                model=data.get('model'),
+                api_base=data.get('apiBase'),
+                api_key=data.get('apiKey'),
             ):
                 if event.get('type') == 'final':
                     final_response_data = event

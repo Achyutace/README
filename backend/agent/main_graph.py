@@ -74,6 +74,43 @@ class AcademicAgentService:
 
         return g.compile()
 
+    # ==================== 自定义模型 ====================
+
+    def _resolve_llm(self, model=None, api_base=None, api_key=None):
+        """有自定义参数时创建临时 LLM，否则用默认"""
+        if model or api_base or api_key:
+            profile = resolve_llm_profile("chat", api_key=api_key, api_base=api_base, model=model)
+            return get_langchain_llm(profile)
+        return self.llm
+
+    def _build_workflow_with_llm(self, llm):
+        """使用指定 LLM 构建工作流（用于自定义模型场景）"""
+        g = StateGraph(AgentState)
+
+        g.add_node("router", partial(router_node, llm=llm))
+        g.add_node("paper_expert", partial(paper_expert_node, llm=llm, rag_service=self.rag_service))
+        g.add_node("search_expert", partial(search_expert_node, llm=llm, rag_service=self.rag_service))
+
+        g.set_entry_point("router")
+
+        g.add_conditional_edges("router", _route, {
+            "chat": END,
+            "paper": "paper_expert",
+            "search": "search_expert",
+        })
+
+        g.add_edge("paper_expert", END)
+        g.add_edge("search_expert", END)
+
+        return g.compile()
+
+    def _resolve_workflow(self, model=None, api_base=None, api_key=None):
+        """有自定义参数时用临时 LLM 构建工作流，否则用默认"""
+        if model or api_base or api_key:
+            llm = self._resolve_llm(model, api_base, api_key)
+            return self._build_workflow_with_llm(llm)
+        return self.workflow
+
     # ==================== 公共接口 ====================
 
     def generate_session_title(self, user_query: str) -> str:
@@ -88,11 +125,13 @@ class AcademicAgentService:
             logger.error(f"[title] error: {e}")
             return user_query[:20]
 
-    def chat(self, user_query: str, user_id=None, paper_id=None, chat_history=None) -> Dict:
+    def chat(self, user_query: str, user_id=None, paper_id=None, chat_history=None,
+             model=None, api_base=None, api_key=None) -> Dict:
         """与 Agent 对话（非流式）"""
         state = _init_state(user_query, user_id, paper_id, chat_history)
+        workflow = self._resolve_workflow(model, api_base, api_key)
         try:
-            final = self.workflow.invoke(state)
+            final = workflow.invoke(state)
             return {
                 "response": final["final_response"],
                 "citations": final.get("citations", []),
@@ -107,11 +146,13 @@ class AcademicAgentService:
             logger.exception("Chat error")
             return {"response": f"抱歉，出现错误：{e}", "citations": [], "steps": ["错误"], "context_used": {}}
 
-    def stream_chat(self, user_query: str, user_id=None, paper_id=None, chat_history=None):
+    def stream_chat(self, user_query: str, user_id=None, paper_id=None, chat_history=None,
+                    model=None, api_base=None, api_key=None):
         """流式对话（生成器，每个节点完成时 yield 一次）"""
         state = _init_state(user_query, user_id, paper_id, chat_history)
+        workflow = self._resolve_workflow(model, api_base, api_key)
         try:
-            for chunk in self.workflow.stream(state):
+            for chunk in workflow.stream(state):
                 for node_name, node_state in chunk.items():
                     yield {"type": "step", "step": node_state.get("current_step", node_name), "data": node_state}
                     if node_state.get("final_response"):
@@ -125,7 +166,8 @@ class AcademicAgentService:
             logger.error(f"[stream] error: {e}")
             yield {"type": "error", "error": str(e)}
 
-    def simple_chat(self, user_query: str, context_text=None, chat_history=None, system_prompt=None) -> Dict:
+    def simple_chat(self, user_query: str, context_text=None, chat_history=None, system_prompt=None,
+                    model=None, api_base=None, api_key=None) -> Dict:
         """简单对话 — 不走工作流，直接 LLM 回答。"""
         default = "你是一个学术论文阅读助手。请根据提供的文档内容和对话历史，回答问题。"
         messages = [SystemMessage(content=system_prompt or default)]
@@ -139,8 +181,9 @@ class AcademicAgentService:
 
         messages.append(HumanMessage(content=user_query))
 
+        llm = self._resolve_llm(model, api_base, api_key)
         try:
-            resp = self.llm.invoke(messages)
+            resp = llm.invoke(messages)
             return {"response": resp.content, "citations": [], "context_used": {"has_context": bool(context_text)}}
         except Exception as e:
             logger.exception("Simple chat error")
