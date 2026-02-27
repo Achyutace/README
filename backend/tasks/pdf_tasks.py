@@ -143,22 +143,6 @@ def _process_pdf_impl(task_self, file_hash: str, upload_folder: str, filename: s
 
             # ================== RAG 向量化 ==================
             task_self.update_state(state="PROGRESS", meta={
-                try:
-                    mineru_success = _run_mineru_full_parse(
-                        file_hash, filepath, upload_folder, page_count, task_id, task_self
-                    )
-                except Exception as e:
-                    logger.warning(f"[Task {task_id}] MinerU full parse failed, falling back to PyMuPDF: {e}")
-                    mineru_success = False
-
-            # ================== PyMuPDF 回退 ==================
-            if not mineru_success:
-                logger.info(f"[Task {task_id}] Using PyMuPDF fallback for parsing")
-                _run_pymupdf_fallback(file_hash, filepath, page_count, task_id, task_self)
-
-            # ================== RAG 向量化 ==================
-            task_self.update_state(state="PROGRESS", meta={
->>>>>>> 9bbb89d (backup: mineru changes 20260228-002817)
                 "current_page": page_count,
                 "total_pages": page_count,
                 "phase": "vectorizing",
