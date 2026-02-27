@@ -55,9 +55,8 @@ components:
 
     RefreshRequest:
       type: object
-      required: [refreshToken]
       properties:
-        refreshToken: { type: string, description: "注册或登录时返回的刷新令牌" }
+        refreshToken: { type: string, description: "注册或登录时返回的刷新令牌 (可选，优先由 HttpOnly Cookie 自动携带)" }
 
     AuthResponse:
       type: object
@@ -70,7 +69,6 @@ components:
             username: { type: string }
             email: { type: string, format: email }
         accessToken: { type: string }
-        refreshToken: { type: string }
 
     RefreshResponse:
       type: object

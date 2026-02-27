@@ -230,10 +230,11 @@ export function calculateIoU(
  * 计算段落光标位置样式
  */
 export function getParagraphMarkerStyle(
-  paragraph: { bbox: { x0: number; y0: number } },
+  paragraph: { bbox?: { x0: number; y0: number } | null },
   pageSize: PageSize | null
 ): Record<string, string> {
-  if (!pageSize) return { display: 'none' }
+  // bbox 为空时隐藏（后端返回的段落可能尚未附带坐标信息）
+  if (!pageSize || !paragraph.bbox) return { display: 'none' }
 
   const left = (paragraph.bbox.x0 / pageSize.width) * 100
   const top = (paragraph.bbox.y0 / pageSize.height) * 100

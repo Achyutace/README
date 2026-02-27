@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, setCurrentUser, getCurrentUser, getAccessToken, getRefreshToken, clearTokens, setTokens } from '../api'
+import api, { authApi, setCurrentUser, getCurrentUser, clearTokens, setTokens } from '../api'
 import router from '../router'
 import { useLibraryStore } from './library'
 import { useChatStore } from './chat'
@@ -33,15 +33,18 @@ export const useAuthStore = defineStore('auth', () => {
    *    - 其他网络错误 → 保留本地缓存状态（离线容错）。
    */
   async function checkAuth() {
-    // Step 1：本地无 Token，直接判断为未登录
-    if (!getAccessToken() && !getRefreshToken()) {
+    // Step 1：读取本地缓存的用户信息
+    // 因为 refreshToken 在 HttpOnly Cookie 中，我们无法直接判断其是否存在。
+    // 但是只要有 cachedUser，我们就假设当前可能是登录状态，从而触发后台验证
+    const cachedUser = getCurrentUser()
+    if (!cachedUser) {
+      // 没有缓存用户，说明确定未登录（或者是首次打开未登录态）
       user.value = null
       authChecked.value = true
       return
     }
 
-    // Step 2：读取本地缓存的用户信息，立即水合（让路由守卫不必等待网络）
-    const cachedUser = getCurrentUser()
+    // Step 2：存在缓存用户，立即水合（让路由守卫不必等待网络）
     if (cachedUser) {
       user.value = cachedUser
     }
@@ -69,22 +72,16 @@ export const useAuthStore = defineStore('auth', () => {
       const status = err?.response?.status
 
       if (status === 401) {
-        // accessToken 失效，尝试用 refreshToken 换新
-        const refreshToken = getRefreshToken()
-        if (!refreshToken) {
-          // 没有 refreshToken，直接静默登出
-          _silentLogout()
-          return
-        }
-
+        // accessToken 失效（或者因为刷新页面丢失），尝试请求刷新接口唤醒
         try {
-          // 直接调用 refresh 接口，绕过 axios 拦截器（避免触发 auth:logout 事件循环）
+          // 直接调用 refresh 接口，携带 HttpOnly Cookie，绕过 axios 拦截器
           const { data } = await axios.post(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/refresh`,
-            { refreshToken }
+            `${import.meta.env.VITE_API_URL}/auth/refresh`,
+            {},
+            { withCredentials: true }
           )
-          // 保存新 Token
-          setTokens(data.accessToken, refreshToken)
+          // 保存新 Token 到内存
+          setTokens(data.accessToken)
 
           // 用新 Token 再次获取用户信息
           const me = await authApi.getMe()

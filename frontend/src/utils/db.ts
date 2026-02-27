@@ -22,7 +22,6 @@ const DB_VERSION = 2 // 从 v1 (仅 pdfs) 升级到 v2 (全量 store)
 export const STORES = {
     PDFS: 'pdfs',                   // PDF Blob 缓存
     LIBRARY: 'library',             // 文献元数据
-    TRANSLATIONS: 'translations',   // 翻译段落对
     CHAT_SESSIONS: 'chat_sessions', // 聊天会话元数据
     CHAT_MESSAGES: 'chat_messages', // 聊天消息 (key = sessionId)
 } as const

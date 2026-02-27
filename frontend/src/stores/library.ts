@@ -294,12 +294,25 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   // 初始化时先从 IndexedDB 水合，再从后端增量同步
-  hydrateFromDB().then(() => {
+  hydrateFromDB().then(async () => {
     // 水合完成后，如果有当前选中文档且缺少 URL，则加载 Blob
     if (currentDocumentId.value) {
       const initDoc = documents.value.find(d => d.id === currentDocumentId.value)
-      if (initDoc && !initDoc.url) {
-        loadDocumentBlob(currentDocumentId.value)
+      if (initDoc) {
+        if (!initDoc.url) {
+          await loadDocumentBlob(currentDocumentId.value)
+        }
+        // 关键：同步 pdfStore，使 activeReaderId 与 currentPdfUrl 都被设置
+        // 否则刷新后 paragraphs computed 永远返回 []，翻译图标无法渲染
+        const { usePdfStore } = await import('./pdf')
+        const pdfStore = usePdfStore()
+        if (initDoc.url) {
+          pdfStore.setCurrentPdf(initDoc.url, initDoc.id)
+          // 若该文档尚未完成解析，启动轮询
+          if (!isParsed(initDoc.id)) {
+            startPolling(initDoc.id)
+          }
+        }
       }
     }
     // 从后端增量同步

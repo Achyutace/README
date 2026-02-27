@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { pdfApi } from '../api'
 import { usePdfStore } from '../stores/pdf'
+import { useTranslationStore } from '../stores/translation'
 
 type PdfProcessStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'unknown'
 const POLL_INTERVAL_MS = 2000
@@ -13,6 +14,7 @@ const pollTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
 export function usePdfProcessing() {
     const pdfStore = usePdfStore()
+    const translationStore = useTranslationStore()
 
     async function _fetchOnce(pdfId: string, retries = 0): Promise<boolean> {
         const fromPage = (receivedUpToPage[pdfId] ?? 0) + 1
@@ -22,6 +24,12 @@ export function usePdfProcessing() {
 
             if (result.paragraphs && result.paragraphs.length > 0) {
                 pdfStore.appendParagraphs(pdfId, result.paragraphs)
+
+                for (const p of result.paragraphs) {
+                    if (p.id && p.translation) {
+                        translationStore.translatedParagraphsCache.set(p.id, p.translation)
+                    }
+                }
             }
 
             if (result.currentPage > (receivedUpToPage[pdfId] ?? 0)) {

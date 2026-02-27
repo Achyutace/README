@@ -609,6 +609,12 @@ function handleParagraphMarkerClick(event: MouseEvent, paragraphId: string, orig
   const finalX = (panelX + panelWidth > window.innerWidth) ? (rect.left - panelWidth - 10) : panelX
 
   translationStore.openTranslationPanel(paragraphId, { x: Math.max(0, finalX), y: Math.max(0, panelY) }, originalText)
+
+  // 若段落已有缓存译文，直接填充面板，情则转廣即不发请求
+  const cached = translationStore.getCachedTranslation(paragraphId)
+  if (cached) {
+    translationStore.setTranslation(paragraphId, cached)
+  }
 }
 
 // ------------------------- Watch 监听 -------------------------
@@ -868,9 +874,13 @@ onBeforeUnmount(() => {
               :key="paragraph.id"
               :data-paragraph-id="paragraph.id"
               class="paragraph-marker absolute pointer-events-auto cursor-pointer"
+              :class="{
+                'is-translated': translationStore.translatedParagraphsCache.has(paragraph.id),
+                'is-translating': pdfStore.pageTranslationStatus[page] === 'loading' && !translationStore.translatedParagraphsCache.has(paragraph.id)
+              }"
               :style="getParagraphMarkerStyle(paragraph, getPageSize(page, pageSizesConstant, pageSizesArray))"
               @click="handleParagraphMarkerClick($event, paragraph.id, paragraph.content)"
-              :title="'点击翻译此段落'"
+              :title="translationStore.translatedParagraphsCache.has(paragraph.id) ? '已翻译，点击查看' : '点击翻译此段落'"
             >
               <div class="marker-icon">
                 <span class="marker-chevron">›</span>
@@ -996,12 +1006,44 @@ onBeforeUnmount(() => {
   color: rgba(80, 140, 255, 1);
 }
 
+/* 已翻译状态：绿色 */
+.paragraph-marker.is-translated .marker-chevron {
+  color: rgba(34, 197, 94, 0.85);
+}
+
+.paragraph-marker.is-translated:hover .marker-chevron {
+  color: rgba(22, 163, 74, 1);
+}
+
+/* 翻译中状态：橙黄色 */
+.paragraph-marker.is-translating .marker-chevron {
+  color: rgba(251, 146, 60, 0.8);
+  animation: translating-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes translating-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
 :global(.dark) .paragraph-marker .marker-chevron {
   color: rgba(140, 180, 255, 0.7);
 }
 
 :global(.dark) .paragraph-marker:hover .marker-chevron {
   color: rgba(160, 200, 255, 0.95);
+}
+
+:global(.dark) .paragraph-marker.is-translated .marker-chevron {
+  color: rgba(74, 222, 128, 0.85);
+}
+
+:global(.dark) .paragraph-marker.is-translated:hover .marker-chevron {
+  color: rgba(134, 239, 172, 1);
+}
+
+:global(.dark) .paragraph-marker.is-translating .marker-chevron {
+  color: rgba(251, 146, 60, 0.8);
 }
 
 .zooming-layer {

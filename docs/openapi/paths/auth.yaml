@@ -13,7 +13,7 @@ register:
             $ref: '../components/schemas/auth.yaml#/RegisterRequest'
     responses:
       201:
-        description: 注册成功，返回access_token和refresh_token
+        description: 注册成功，返回access_token和并在Cookie注入refresh_token
         content:
           application/json:
             schema:
@@ -78,16 +78,16 @@ refresh:
     tags: [Auth]
     summary: 刷新 Access Token
     security: []
-    description: 用 Refresh Token 换取新的 Access Token，Refresh Token 本身不会更新
+    description: 用 Refresh Token 换取新的 Access Token（依靠后端注入的 HttpOnly Cookie 自动携带）
     requestBody:
-      required: true
+      required: false
       content:
         application/json:
           schema:
             $ref: '../components/schemas/auth.yaml#/RefreshRequest'
     responses:
       200:
-        description: 新的 access_token 和 refresh_token
+        description: 新的 access_token
         content:
           application/json:
             schema:

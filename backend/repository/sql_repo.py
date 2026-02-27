@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Any, Union
 import uuid
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, delete, update, func, and_, desc, asc
 from sqlalchemy.dialects.postgresql import insert
 
@@ -466,10 +466,16 @@ class SQLRepository:
 
     def create_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat") -> ChatSession:
         """创建新的聊天会话"""
+        user_paper_id = None
+        if file_hash:
+            user_paper = self.get_user_paper(user_id, file_hash)
+            if user_paper:
+                user_paper_id = user_paper.id
+                
         session = ChatSession(
             id=session_id,
             user_id=user_id,
-            user_paper_id=file_hash,
+            user_paper_id=user_paper_id,
             title=title
         )
         self.db.add(session)
@@ -479,16 +485,16 @@ class SQLRepository:
     
     def get_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID) -> Optional[ChatSession]:
         """获取指定用户的聊天会话"""
-        stmt = select(ChatSession).where(
+        stmt = select(ChatSession).options(selectinload(ChatSession.user_paper)).where(
             and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
         )
         return self.db.execute(stmt).scalar_one_or_none()
         
     def list_chat_sessions(self, user_id: uuid.UUID, file_hash: Optional[str] = None, limit: int = 50) -> List[ChatSession]:
         """列出用户的聊天会话列表"""
-        stmt = select(ChatSession).where(ChatSession.user_id == user_id)
+        stmt = select(ChatSession).options(selectinload(ChatSession.user_paper)).where(ChatSession.user_id == user_id)
         if file_hash:
-            stmt = stmt.where(ChatSession.file_hash == file_hash)
+            stmt = stmt.join(UserPaper, ChatSession.user_paper_id == UserPaper.id).where(UserPaper.file_hash == file_hash)
         stmt = stmt.order_by(desc(ChatSession.updated_at)).limit(limit)
         return self.db.execute(stmt).scalars().all()
     

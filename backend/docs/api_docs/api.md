@@ -4,7 +4,7 @@
 
 - **Base URL**: `http://localhost:5000/api`
 - **鉴权与用户隔离**: 后端采用 **JWT (JSON Web Token)** 进行认证。
-    - 用户通过 `/api/auth/login` 或 `/api/auth/register` 获取 `accessToken` 和 `refreshToken`。
+    - 用户通过 `/api/auth/login` 或 `/api/auth/register` 获取 `accessToken`。同时，`refreshToken` 将通过后端生成的 `HttpOnly` Cookie 注入浏览器中防范窃取。
     - 受保护接口需在请求头中携带 `Authorization: Bearer <accessToken>`。
     - Access Token 过期后，前端可通过 `/api/auth/refresh` 接口使用 Refresh Token 换取新的 Access Token。
 - **公开接口**: `/api/auth/register`、`/api/auth/login`、`/api/auth/refresh`、`/api/health` 不需要认证。

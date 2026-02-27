@@ -37,10 +37,12 @@ from route.roadmap import roadmap_bp
 # ==================== 2.1 Celery ====================
 from celery_app import celery  # noqa: F401  (确保 Worker 能发现任务)
 
+import re
+
 # 初始化 Flask 应用
 app = Flask(__name__)
-# 允许跨域，支持前端从不同端口访问
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+# 允许跨域，动态匹配所有 Origin，避免写死 localhost 端口，并支持携带凭据(Cookie)
+CORS(app, resources={r"/api/*": {"origins": re.compile(r".*")}}, supports_credentials=True)
 
 # ==================== 2.5 JWT 配置 ====================
 app.config['JWT_SECRET_KEY'] = settings.jwt.secret

@@ -405,6 +405,14 @@ function startResize(e: MouseEvent, panelId: string, direction: string) {
 // 自动请求翻译（仅针对段落面板）
 async function fetchTranslation(panel: TranslationPanelInstance) {
   if (!panel.paragraphId || panel.translation) return
+
+  // 优先从内存缓存取（全文翻译/按页翻译已写入），命中则直接填充，无需再发请求
+  const cached = translationStore.getCachedTranslation(panel.paragraphId)
+  if (cached) {
+    translationStore.setTranslation(panel.paragraphId, cached)
+    return
+  }
+
   translationStore.setPanelLoading(panel.id, true)
   const translation = await translationStore.translateParagraph(panel.paragraphId)
   if (translation) {

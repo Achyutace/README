@@ -14,6 +14,7 @@ from core.security import (
     decode_refresh_token,
     jwt_required,
 )
+from core.config import settings
 
 # 定义蓝图
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
@@ -71,15 +72,27 @@ def register():
         # 签发令牌
         tokens = create_tokens(str(user.id))
 
-        return jsonify({
+        response = jsonify({
             'message': 'Registration successful',
             'user': {
                 'id': str(user.id),
                 'username': user.username,
                 'email': user.email,
             },
-            **tokens,
-        }), 201
+            'accessToken': tokens['accessToken'],
+        })
+
+        response.set_cookie(
+            'refreshToken',
+            tokens['refreshToken'],
+            httponly=True,
+            samesite='Lax',
+            secure=(settings.env == "production"),  
+            path='/api/auth/refresh',
+            max_age=settings.jwt.refresh_expire_days * 24 * 3600
+        )
+
+        return response, 201
 
     except Exception:
         db_session.rollback()
@@ -124,15 +137,27 @@ def login():
         # 签发令牌
         tokens = create_tokens(str(user.id))
 
-        return jsonify({
+        response = jsonify({
             'message': 'Login successful',
             'user': {
                 'id': str(user.id),
                 'username': user.username,
                 'email': user.email,
             },
-            **tokens,
+            'accessToken': tokens['accessToken'],
         })
+
+        response.set_cookie(
+            'refreshToken',
+            tokens['refreshToken'],
+            httponly=True,
+            samesite='Lax',
+            secure=(settings.env == "production"),
+            path='/api/auth/refresh',
+            max_age=settings.jwt.refresh_expire_days * 24 * 3600
+        )
+
+        return response
 
     except Exception:
         db_session.rollback()
@@ -146,20 +171,23 @@ def refresh():
     """
     使用 Refresh Token 换取新的 Access Token
 
-    Request Body:
+    Request Body (可选,向后兼容):
     {
         "refreshToken": "..."
     }
+    同时也会从 HttpOnly 的 Cookie 中读取 refreshToken。
 
     Returns:
         200 — 新的 access_token
         401 — refresh token 无效或已过期
     """
-    data = request.get_json()
-    if not data or not data.get('refreshToken'):
-        return jsonify({'code': 'MISSING_TOKEN', 'error': 'refreshToken is required'}), 400
+    data = request.get_json(silent=True) or {}
+    
+    # 优先从 cookie 获取，若无尝试从 body（为了向后兼容）
+    refresh_token = request.cookies.get('refreshToken') or data.get('refreshToken')
 
-    refresh_token = data['refreshToken']
+    if not refresh_token:
+        return jsonify({'code': 'MISSING_TOKEN', 'error': 'refreshToken is required in Cookie or Body'}), 400
 
     user_id = decode_refresh_token(refresh_token)
 

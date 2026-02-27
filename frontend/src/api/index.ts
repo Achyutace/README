@@ -16,35 +16,37 @@ import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph,
 export type { Note, CreateNoteRequest, UpdateNoteRequest, NoteActionResponse, NoteListResponse } from '../types'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL, // 依靠 .env 环境变量注入 API 地址
   timeout: 60000, // AI 生成可能较慢，增加超时时间
+  withCredentials: true, // 允许跨域请求带上 HttpOnly Cookie
 })
 
 // 请求拦截器：为所有请求自动注入 Authorization 头
 // 备注：这里可以统一注入 token、traceId 等通用头信息
 // ==================== Token 管理 ====================
 
-const TOKEN_KEY = 'readme_access_token'
-const REFRESH_TOKEN_KEY = 'readme_refresh_token'
 const USER_KEY = 'readme_user'
 
+let memoryAccessToken: string | null = null
+
 export function getAccessToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return memoryAccessToken
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY)
+  // refreshToken 已经改为 HttpOnly Cookie，前端 JS 无法也无需读取
+  return null
 }
 
-export function setTokens(accessToken: string, refreshToken: string) {
-  localStorage.setItem(TOKEN_KEY, accessToken)
-  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+export function setTokens(accessToken: string) {
+  memoryAccessToken = accessToken
 }
 
 export function clearTokens() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  memoryAccessToken = null
   localStorage.removeItem(USER_KEY)
+  // 如果需要完全登出清除 Cookie，最好再调用一个后端的 /auth/logout 接口
+  // 目前我们只清除前端内存和可访问的存储
 }
 
 export function setCurrentUser(user: { id: string; username: string; email: string }) {
@@ -111,20 +113,14 @@ api.interceptors.response.use(
       originalRequest._retry = true
       isRefreshing = true
 
-      const refreshToken = getRefreshToken()
-      if (!refreshToken) {
-        clearTokens()
-        window.dispatchEvent(new CustomEvent('auth:logout'))
-        return Promise.reject(error)
-      }
-
       try {
         const { data } = await axios.post(
           `${api.defaults.baseURL}/auth/refresh`,
-          { refreshToken },
+          {},
+          { withCredentials: true } // 确保带上 HttpOnly Cookie
         )
         const newAccessToken = data.accessToken
-        localStorage.setItem(TOKEN_KEY, newAccessToken)
+        setTokens(newAccessToken)
         processQueue(null, newAccessToken)
         originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
         return api(originalRequest)
@@ -151,7 +147,7 @@ export const authApi = {
   register: async (username: string, email: string, password: string) => {
     const { data } = await api.post('/auth/register', { username, email, password })
     if (data.accessToken) {
-      setTokens(data.accessToken, data.refreshToken)
+      setTokens(data.accessToken)
       setCurrentUser(data.user)
     }
     return data
@@ -161,7 +157,7 @@ export const authApi = {
   login: async (email: string, password: string) => {
     const { data } = await api.post('/auth/login', { email, password })
     if (data.accessToken) {
-      setTokens(data.accessToken, data.refreshToken)
+      setTokens(data.accessToken)
       setCurrentUser(data.user)
     }
     return data
@@ -181,10 +177,8 @@ export const authApi = {
 
   // 刷新 Token
   refreshToken: async () => {
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) throw new Error('No refresh token')
-    const { data } = await api.post('/auth/refresh', { refreshToken })
-    localStorage.setItem(TOKEN_KEY, data.accessToken)
+    const { data } = await api.post('/auth/refresh')
+    setTokens(data.accessToken)
     return data
   },
 }

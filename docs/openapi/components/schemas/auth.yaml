@@ -32,11 +32,10 @@ LoginRequest:
 
 RefreshRequest:
   type: object
-  required: [refreshToken]
   properties:
     refreshToken:
       type: string
-      description: 登录/注册时返回的 Refresh Token
+      description: Refresh Token (可选，由 HttpOnly Cookie 自动提供)
 
 UserInfo:
   type: object
@@ -62,9 +61,6 @@ AuthResponse:
     accessToken:
       type: string
       description: JWT Access Token
-    refreshToken:
-      type: string
-      description: JWT Refresh Token，用于换取新的 Access Token
 
 RefreshResponse:
   type: object

@@ -7,15 +7,14 @@
  - 用户的论文文献库
  - 用户创建的笔记内容
  - AI 历史对话记录
- - 已翻译过的段落对照对缓存
  - 用户自定义添加的大模型列表
  - 自定义系统提示词
  - 用户填写的个人大模型第三方 API Key 信息
-用户配置数据：
+ 用户配置数据：
  - 登录凭证（如 JWT Token）
  - 高级/敏感功能的临时验证凭据（如 Session 级别的 PIN 码状态）
  - 系统主题设置（深色/浅色模式）
-当前页面信息：
+ 当前页面信息：
  - 当前选中的默认大模型
  - 当前正在阅读/选中的文档 ID
  - 尚未发送的对话框/笔记输入草稿文本
@@ -54,6 +53,7 @@
 | 数据类别 | 典型实体 | 存储媒介 | 读写逻辑|
 | :--- | :--- | :--- | :--- |
 | 大文件 | PDF Blob 资源流 + 前端解析资源 | `IndexedDB` (L1)+ `Blob URL` (L2) | UI 层请求 -> 检查 IndexedDB -> 有则直接转换为 Blob URL 展示；无则请求后端下载 -> 存入 IndexedDB -> 转换为 Blob URL。 (需要定时删除) |
-| 核心业务关系数据 | 论文元数据列表、翻译段落对、笔记、聊天历史、用户自定义提示词和模型列表 | `IndexedDB (L1)` + `Pinia (L2)` |Pinia 作为唯一真相, 加载时从 IndexedDB 水合到 Pinia；修改时，先更新 Pinia (响应式更新UI) -> 异步写入 IndexedDB -> 异步同步到后端 (携带 `last_synced_at`)。 |
+| 核心业务关系数据 | 论文元数据列表、笔记、聊天历史、用户自定义提示词和模型列表 | `IndexedDB (L1)` + `Pinia (L2)` |Pinia 作为唯一真相, 加载时从 IndexedDB 水合到 Pinia；修改时，先更新 Pinia (响应式更新UI) -> 异步写入 IndexedDB -> 异步同步到后端 (携带 `last_synced_at`)。 |
+| 翻译段落 | 段落翻译结果 | 后端数据库（权威）+ `Pinia`（session 内内存缓存） | 后端接口已实现服务端缓存，同一段落 `force=false` 时直接命中缓存返回；前端 Pinia 仅用于当前 session 内快速重读，面板关闭即释放，刷新后重新从后端拉取。 |
 | 敏感/高安全性数据 | 临时 PIN 码验证状态、第三方 API Key | `SessionStorage (L2)` | PIN码状态仅存 SessionStorage；API Key 加密后存储在 LocalStorage 中。 |
 | UI/偏好极小状态 | 深色模式、当前选中大模型、当前选中侧边栏 | `LocalStorage (L1)` + `Pinia (L2)` | 同步持久化：每次 Pinia 状态变更，通过 `watch` 同步覆盖 LocalStorage。极小体积，无性能负担。 |

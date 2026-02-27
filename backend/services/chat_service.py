@@ -83,7 +83,7 @@ class ChatService:
         
         return {
             'id': str(session.id),
-            'pdfId': getattr(session, 'file_hash', file_hash),
+            'pdfId': file_hash,
             'title': session.title,
             'createdAt': session.created_at.isoformat() if session.created_at else None,
             'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
@@ -99,7 +99,7 @@ class ChatService:
             
         return {
             'id': str(session.id),
-            'pdfId': session.file_hash,
+            'pdfId': session.user_paper.file_hash if session.user_paper else None,
             'title': session.title,
             'createdAt': session.created_at.isoformat() if session.created_at else None,
             'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
@@ -131,7 +131,7 @@ class ChatService:
         for s in sessions:
             result.append({
                 'id': str(s.id),
-                'pdfId': s.file_hash,
+                'pdfId': s.user_paper.file_hash if s.user_paper else None,
                 'title': s.title,
                 'createdAt': s.created_at.isoformat() if s.created_at else None,
                 'updatedAt': s.updated_at.isoformat() if s.updated_at else None,

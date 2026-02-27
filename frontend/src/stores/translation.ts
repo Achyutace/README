@@ -2,13 +2,13 @@
 ----------------------------------------------------------------------
                     翻译面板状态管理（Floating Translation Panels）
 ----------------------------------------------------------------------
+  翻译结果前端只保留 Pinia 内存层（session 内快速切换 0 延迟），
 */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { TranslationPanelInstance } from '../types'
 import { useLibraryStore } from './library'
 import { aiApi } from '../api'
-import { dbPut, dbGetAll, dbClear, STORES } from '../utils/db'
 
 export const useTranslationStore = defineStore('translation', () => {
   const libraryStore = useLibraryStore()
@@ -30,28 +30,9 @@ export const useTranslationStore = defineStore('translation', () => {
   // 侧边栏停靠的翻译面板 ID 列表
   const sidebarDockedPanels = ref<string[]>([])
 
-  // 翻译缓存：paragraphId -> translation
-  const translationCache = ref<Record<string, string>>({})
-
-  // 从 IndexedDB 水合翻译缓存
-  async function hydrateFromDB() {
-    try {
-      const records = await dbGetAll<{ id: string; translation: string }>(STORES.TRANSLATIONS)
-      if (records.length > 0) {
-        const cache: Record<string, string> = {}
-        for (const rec of records) {
-          cache[rec.id] = rec.translation
-        }
-        translationCache.value = cache
-        console.log(`[Translation] Hydrated ${records.length} cached translations from IndexedDB`)
-      }
-    } catch (error) {
-      console.warn('[Translation] Failed to hydrate from IndexedDB:', error)
-    }
-  }
-
-  // 启动时水合
-  hydrateFromDB()
+  // 段落翻译内存缓存（session 级别）：paragraphId → 译文
+  // 全文翻译 / 按页翻译 / 单段翻译成功后均写入此缓存
+  const translatedParagraphsCache = ref<Map<string, string>>(new Map())
 
   // ---------------------- 动作（Actions） ----------------------
 
@@ -95,7 +76,7 @@ export const useTranslationStore = defineStore('translation', () => {
 
   // ---------------------- API 包装 ----------------------
 
-  // 翻译段落 (Translate Paragraph)
+  // 翻译段落
   async function translateParagraph(paragraphId: string, forceRefresh = false): Promise<string | null> {
     try {
       const pdfId = libraryStore.currentDocumentId
@@ -119,11 +100,8 @@ export const useTranslationStore = defineStore('translation', () => {
 
   // ---------------------- 翻译面板管理 ----------------------
 
-  // 打开翻译面板（支持多窗口），会检查缓存并将已存在的面板聚焦
+  // 打开翻译面板（支持多窗口），若已存在同一段落的面板则聚焦
   function openTranslationPanel(paragraphId: string, position: { x: number; y: number }, originalText: string) {
-    // 先尝试从缓存中获取翻译，若存在则直接使用
-    const cached = translationCache.value[paragraphId]
-
     // 若已存在同一段落的翻译面板，则把它移到数组末尾以实现聚焦效果
     const existingPanel = translationPanels.value.find(p => p.paragraphId === paragraphId)
     if (existingPanel) {
@@ -133,14 +111,14 @@ export const useTranslationStore = defineStore('translation', () => {
       return
     }
 
-    // 创建并初始化一个新的翻译面板实例
+    // 创建并初始化一个新的翻译面板实例（始终需要从后端加载翻译）
     const newPanel: TranslationPanelInstance = {
       id: `tp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       paragraphId,
       position,
       size: { width: 420, height: 280 },
-      translation: cached || '',
-      isLoading: !cached,
+      translation: '',
+      isLoading: true,
       originalText,
       snapMode: 'none',
       snapTargetParagraphId: null,
@@ -148,7 +126,6 @@ export const useTranslationStore = defineStore('translation', () => {
     }
 
     translationPanels.value.push(newPanel)
-
   }
 
   // 关闭指定 ID 的翻译面板，并处理侧边栏停靠列表
@@ -203,14 +180,11 @@ export const useTranslationStore = defineStore('translation', () => {
     }
   }
 
-  // 设置翻译结果并更新缓存与所有相关面板状态
+  // 设置翻译结果并更新所有相关面板状态
+  // 注：后端已持久化翻译，前端不再写 IndexedDB
   function setTranslation(paragraphId: string, translation: string) {
-    translationCache.value[paragraphId] = translation
-
-    // 异步写入 IndexedDB
-    dbPut(STORES.TRANSLATIONS, { id: paragraphId, translation }).catch(err => {
-      console.warn('[Translation] Failed to persist translation to IndexedDB:', err)
-    })
+    // 写入段落翻译内存缓存（供图标颜色状态判断使用）
+    translatedParagraphsCache.value.set(paragraphId, translation)
 
     // 更新所有匹配的多窗口翻译面板
     translationPanels.value.forEach(panel => {
@@ -219,6 +193,16 @@ export const useTranslationStore = defineStore('translation', () => {
         panel.isLoading = false
       }
     })
+  }
+
+  // 判断段落是否已翻译（用于图标颜色等状态显示）
+  function isTranslated(paragraphId: string): boolean {
+    return translatedParagraphsCache.value.has(paragraphId)
+  }
+
+  // 获取缓存中的段落译文（若无则返回 null）
+  function getCachedTranslation(paragraphId: string): string | null {
+    return translatedParagraphsCache.value.get(paragraphId) ?? null
   }
 
   // 设置指定多窗口面板的加载状态
@@ -246,14 +230,13 @@ export const useTranslationStore = defineStore('translation', () => {
     sidebarDockedPanels.value = []
   }
 
-  // 清空翻译缓存 (退出登录时)
-  async function clearCache() {
-    translationCache.value = {}
+  // 清空翻译状态（退出登录时）
+  // 注：后端持久化的翻译数据无需前端清理
+  function clearCache() {
     textTranslationResult.value = ''
     textTranslationOriginal.value = ''
+    translatedParagraphsCache.value.clear()
     closeAllPanels()
-    // 同时清空 IndexedDB 中的翻译缓存
-    await dbClear(STORES.TRANSLATIONS)
   }
 
   return {
@@ -261,11 +244,11 @@ export const useTranslationStore = defineStore('translation', () => {
     textPanelPosition,
     translationPanels,
     sidebarDockedPanels,
-    translationCache,
     showTextTranslation,
     isTextTranslating,
     textTranslationResult,
     textTranslationOriginal,
+    translatedParagraphsCache,
 
     // Actions
     translateText,
@@ -281,6 +264,8 @@ export const useTranslationStore = defineStore('translation', () => {
     setPanelLoading,
     bringPanelToFront,
     closeAllPanels,
-    clearCache
+    clearCache,
+    isTranslated,
+    getCachedTranslation
   }
 })

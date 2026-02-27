@@ -282,14 +282,31 @@ class PdfService:
     def _format_paragraph(self, p, pdf_id: str) -> dict:
         """格式化段落数据"""
         para_id = pdf_engine.make_paragraph_id(pdf_id, p.page_number, p.paragraph_index)
+
+        # 将数据库中 [x, y, w, h] 格式转换为前端期望的具名字段对象
+        # 数据库列: bbox JSONB comment="[x, y, w, h] 归一化坐标"
+        # 前端类型: { x0, y0, x1, y1, width, height }
+        bbox = None
+        if p.bbox and isinstance(p.bbox, list) and len(p.bbox) >= 4:
+            x, y, w, h = p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]
+            bbox = {
+                "x0": x,
+                "y0": y,
+                "x1": x + w,
+                "y1": y + h,
+                "width": w,
+                "height": h,
+            }
+
         return {
             "id": para_id,
             "page": p.page_number,
-            "bbox": p.bbox,
+            "bbox": bbox,
             "content": p.original_text,
             "wordCount": len(p.original_text.split()) if p.original_text else 0,
             "translation": p.translation_text,
         }
+
 
     # ================= 读取接口 =========================
 

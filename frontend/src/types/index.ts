@@ -26,6 +26,7 @@ export interface PdfParagraph {
   }
   content: string      // 段落文本内容
   wordCount: number    // 单词数
+  translation?: string // 后端返回的已存在译文（若已翻译则携带，否则为 undefined）
 }
 
 // PDF 文本块
