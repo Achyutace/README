@@ -1,59 +1,98 @@
-## 前端缓存架构
+# 前端说明文档
 
-### 1 前端缓存哪些东西？
-大文件：
- - PDF 文件 Blob 流及完整数据
- 用户业务数据：
- - 用户的论文文献库
- - 用户创建的笔记内容
- - AI 历史对话记录
- - 用户自定义添加的大模型列表
- - 自定义系统提示词
- - 用户填写的个人大模型第三方 API Key 信息
- 用户配置数据：
- - 登录凭证（如 JWT Token）
- - 高级/敏感功能的临时验证凭据（如 Session 级别的 PIN 码状态）
- - 系统主题设置（深色/浅色模式）
- 当前页面信息：
- - 当前选中的默认大模型
- - 当前正在阅读/选中的文档 ID
- - 尚未发送的对话框/笔记输入草稿文本
- - 各侧边栏窗口、弹窗面板的打开/折叠状态
+## 1. 技术栈
 
-### 2 前端有哪些缓存实体？
+本项目使用以下核心技术和库：
 
-磁盘永久存储：
-1. IndexedDB：浏览器磁盘
-  - 占据磁盘空间，几乎无上限
-  - 适合存大文件+大量结构化数据
-  - 永久存储，除非清除浏览器数据等
-2. LocalStorage：浏览器磁盘
-  - 占据磁盘空间，约5MB
-  - 以字符串键值对存储
-  - 永久存储，除非清除浏览器数据等
+- Vue 3：作为核心前端框架，负责响应式界面构建
+- TypeScript：提供静态类型检查，增强代码健壮性
+- Vite：作为构建与开发工具，提供快速的热更新体验
+- Pinia：全局状态管理库，处理跨组件的数据流
+- TailwindCSS：原子化 CSS 框架，负责系统样式
+- pdfjs-dist：处理 PDF 文件的阅读、渲染与解析功能
+- @tiptap/*：提供富文本编辑器的实现方案
+- markdown-it：负责 Markdown 内容的解析与展示
+- axios：处理与后端的 HTTP 请求交互
 
-内存临时存储：
-1. Pinia Store：浏览器运行内存
-  - 几十-几百MB
-  - 全局响应式，读写极快，刷新页面即丢失
-2. SessionStorage：浏览器运行内存
-  - 5MB，只能存储字符串
-  - 与特定标签页绑定，关闭标签页后消失
-3. 组件内状态 (Vue Refs/Reactive)：浏览器运行内存
-  - 与特定组件生命周期绑定，组件销毁即释放销毁
-  - 用于保存高频变化的 UI 状态（如弹窗开关、输入框内容）
-4. Blob URL Cache：浏览器内存
-  - 用于 PDF 等大文件的 Blob 流映射（URL.createObjectURL）
-  - 刷新即断开，需重新从 IndexedDB/后端加载并生成 URL
+## 2. 缓存架构
 
-### 3 数据管理层架构设计
+### 缓存项分类
 
-#### 1. 数据层级与缓存策略
+- 大文件：PDF 文件 Blob 流及解析数据
+- 业务数据：文献库、笔记内容、AI 对话历史、模型列表、系统提示词、API Key 信息
+- 配置数据：登录凭证、验证凭据、系统主题设置
+- 实时信息：当前选中模型、文档 ID、输入草稿、面板折叠状态
 
-| 数据类别 | 典型实体 | 存储媒介 | 读写逻辑|
+### 存储媒介说明
+
+- IndexedDB：持久化存储，用于大文件及大量结构化数据
+- LocalStorage：持久化存储，用于小体积的系统配置
+- Pinia Store：运行内存存储，负责全局响应式数据交互
+- SessionStorage：内存存储，用于存储会话级别的敏感信息
+- 组件状态：管理特定组件生命周期内的临时 UI 状态
+- Blob URL Cache：内存映射，用于 PDF 资源的快速访问
+
+### 数据管理策略
+
+| 数据类别 | 典型实体 | 存储媒介 | 读写逻辑 |
 | :--- | :--- | :--- | :--- |
-| 大文件 | PDF Blob 资源流 + 前端解析资源 | `IndexedDB` (L1)+ `Blob URL` (L2) | UI 层请求 -> 检查 IndexedDB -> 有则直接转换为 Blob URL 展示；无则请求后端下载 -> 存入 IndexedDB -> 转换为 Blob URL。 (需要定时删除) |
-| 核心业务关系数据 | 论文元数据列表、笔记、聊天历史、用户自定义提示词和模型列表 | `IndexedDB (L1)` + `Pinia (L2)` |Pinia 作为唯一真相, 加载时从 IndexedDB 水合到 Pinia；修改时，先更新 Pinia (响应式更新UI) -> 异步写入 IndexedDB -> 异步同步到后端 (携带 `last_synced_at`)。 |
-| 翻译段落 | 段落翻译结果 | 后端数据库（权威）+ `Pinia`（session 内内存缓存） | 后端接口已实现服务端缓存，同一段落 `force=false` 时直接命中缓存返回；前端 Pinia 仅用于当前 session 内快速重读，面板关闭即释放，刷新后重新从后端拉取。 |
-| 敏感/高安全性数据 | 临时 PIN 码验证状态、第三方 API Key | `SessionStorage (L2)` | PIN码状态仅存 SessionStorage；API Key 加密后存储在 LocalStorage 中。 |
-| UI/偏好极小状态 | 深色模式、当前选中大模型、当前选中侧边栏 | `LocalStorage (L1)` + `Pinia (L2)` | 同步持久化：每次 Pinia 状态变更，通过 `watch` 同步覆盖 LocalStorage。极小体积，无性能负担。 |
+| 大文件 | PDF 资源流 | IndexedDB + Blob URL | 优先从本地 IndexedDB 加载，缺失时请求后端并同步更新本地库 |
+| 核心业务 | 文献、笔记、聊天记录 | IndexedDB + Pinia | 以 Pinia 为运行时内存中心，变更同步写入 IndexedDB 与后端 |
+| 翻译段落 | 翻译结果 | 后端数据库 + Pinia | 以后端缓存为权威，Pinia 仅作会话内临时存储 |
+| 安全数据 | PIN 码、API Key | Session/LocalStorage | PIN 码仅存会话，API Key 加密存储 |
+| UI 配置 | 主题、面板状态 | LocalStorage + Pinia | 状态变更实时覆盖本地存储以保证持久化 |
+
+## 3. 项目结构
+
+```
+frontend/
+├── index.html                                 应用入口
+├── vite.config.ts                             Vite 配置
+├── package.json                               项目依赖
+├── tailwind.config.js                         样式配置
+├── src/
+│   ├── main.ts                                程序启动入口
+│   ├── App.vue                                根组件（布局管理）
+│   ├── api/
+│   │   └── index.ts                           所有后端请求接口封装
+│   ├── stores/                                Pinia 状态中心
+│   │   ├── auth.ts                            用户认证、凭证管理
+│   │   ├── chat.ts                            对话历史、消息流转
+│   │   ├── library.ts                         文献库元数据、文档管理
+│   │   ├── pdf.ts                             PDF 渲染状态、缩放设置
+│   │   ├── translation.ts                     划词/全文翻译内容管理
+│   │   ├── theme.ts                           亮暗模式、主题偏好
+│   │   ├── panel.ts                           UI 面板展开/折叠状态
+│   │   └── roadmap.ts                         路线图数据交互
+│   ├── components/                            业务功能组件
+│   │   ├── chat-box/                          对话相关：ChatTab, ChatInputArea, ChatMessageList
+│   │   ├── pdf/                               阅读相关：PdfViewer, PdfToolbar, TranslationPanel
+│   │   ├── notes/                             笔记相关：NotesPanel, NoteEditor
+│   │   ├── sidebar/                           导航相关：LibrarySidebar
+│   │   └── roadmap/                           可视化：RoadmapTab
+│   ├── composables/                           响应式逻辑提取（Hooks）
+│   │   ├── usePdfLoader.ts                    PDF 文件加载
+│   │   ├── usePageRender.ts                   页面逐页渲染
+│   │   ├── usePdfSelection.ts                 PDF 划词选择
+│   │   ├── useDraggableWindow.ts              窗口拖拽
+│   │   └── useMarkdownRenderer.ts             Markdown 渲染
+│   ├── utils/                                 工具函数
+│   │   ├── db.ts                              IndexedDB 数据层封装
+│   │   ├── PdfHelper.ts                       PDF 操作辅助
+│   │   ├── crypto.ts                          API Key 加解密
+│   │   └── broadcast.ts                       跨标签页通信
+│   ├── types/                                 TypeScript 定义
+│   │   ├── index.ts                           通用业务接口
+│   │   └── pdf.ts                             PDF 渲染专用类型
+│   ├── layouts/                               布局骨架
+│   └── style.css                              全局样式与 Tailwind 指令
+```
+
+## 4. 实现具体细节
+
+1. 聊天重试
+  - 点击用户/ai聊天消息下方的重试按钮，会触发重新发送
+  - 前端会在这个会话窗口中保留被重试的消息，刷新/切换会话窗口后消失
+  - 后端会在收到请求后清理该消息之后的所有消息，确保上下文一致
+2. 新聊天
+  - 懒创建，点击新对话不会实际创建会话，只有发出第一条消息之后才会创建会话

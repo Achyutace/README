@@ -8,40 +8,38 @@ readme/
 │   │   ├── logging.py              # 统一日志配置
 │   │   └── llm_provider.py         # LLM 配置抽象层 (解析配置, 创建客户端, 代理支持)
 │   |
-│   ├── api/                # 路由层：接发请求
-│   |   ├── dependencies.py # FastAPI的依赖注入
-│   |   ├── v1/ 
-│   │   |   ├── chat_box.py     # 聊天框相关路由：聊天记录添加、获取、删除；信息发送，获取回答
-│   │   |   ├── highlight.py    # 高亮路由：添加，删除，改颜色         
-│   │   |   ├── notes.py        # 笔记相关路由：添加，删除  
-│   │   |   ├── link.py         # 引用相关路由：请求引用相关内容                                         
-│   │   |   ├── translate.py    # 翻译相关路由：段落翻译+划词翻译
-│   │   |   ├── upload.py       # pdf上传路由  
-│   │   |   ├── library.py      # 文献管理路由：上传，删除，分组
-│   │   |   ├── user.py         # 用户管理相关路由
-│   │   |   ├── keyword.py      # 关键词相关路由
-│   │   |   ├── roadmap.py      # 知识图谱相关路由：获取结点，添加节点，删除节点  
-│   │   └── routers.py              # 统一注册所有路由
+│   ├── route/                # 路由层：接发请求（Flask Blueprints）
+│   │   ├── auth.py             # 用户管理/鉴权相关路由
+│   │   ├── chatbox.py          # 聊天框相关路由：聊天记录添加、获取、删除；信息发送，获取回答
+│   │   ├── highlight.py        # 高亮路由：添加，删除，改颜色         
+│   │   ├── link.py             # 引用相关路由：请求引用相关内容 
+│   │   ├── notes.py            # 笔记相关路由：添加，删除                                          
+│   │   ├── roadmap.py          # 知识图谱相关路由：获取结点，添加节点，删除节点 
+│   │   ├── translate.py        # 翻译相关路由：段落翻译+划词翻译
+│   │   ├── upload.py           # pdf上传与处理路由 
+│   │   ├── library.py          # 文献管理路由：上传，删除，分组
+│   │   └── utils.py            # 路由层通用工具函数
 │   ├── model/                      # 模型层：定义数据长什么样
-│   │   ├── db/                     # SQLAlchemy ORM 模型 (对应数据库表)
-│   │   │   ├── base.py             # Declarative Base
-│   │   │   ├── user_models.py      # User
-│   │   │   ├── doc_models.py       # Paper, Note, Highlight, Image, Formula
-│   │   │   └── graph_models.py     # RoadmapJSON, Node, Edge
-│   │   └── schemas.py                # Pydantic 模型 (对应 API 输入输出 & 工具结构)
+│   │   └── db/                     # SQLAlchemy ORM 模型 (对应数据库表)
+│   │       ├── base.py             # Declarative Base
+│   │       ├── chat_models.py      # 会话及消息模型
+│   │       ├── doc_models.py       # Paper, Note, Highlight, Image, Formula
+│   │       ├── graph_models.py     # RoadmapJSON, Node, Edge
+│   │       └── user_models.py      # User
 │   ├── repository/                 # 数据层：直接操作数据库，提供接口给上层
 │   │   ├── sql_repo.py             # PostgreSQL 操作封装 
-│   │   └── vector_repo.py          # Qdrant 操作封装
+│   │   ├── vector_repo.py          # Qdrant 操作封装
 │   │   └── object_repo.py          # 对象数据库存储
-│   ├── service/                    # 业务层
-│   │   ├── paper_service.py        # 启动异步处理新的论文；对接数据库，返回段落和图表信息；增删段落翻译信息
-│   │   ├── library_service.py      # 文献库管理：上传，删除，分组，获取论文条目和笔记
-│   │   ├── rag_service.py          # 用户全文献库rag服务   
-│   │   ├── chat_service.py         # 聊天框管理服务：获取、增删聊天记录
+│   ├── services/                   # 业务层
+│   │   ├── chat_service.py         # 聊天记录与会话管理
+│   │   ├── image_service.py        # 图片处理相关服务
+│   │   ├── library_service.py      # 文献库管理：上传，删除，获取论文条目和笔记
+│   │   ├── note_service.py         # 笔记服务：添加笔记，删除笔记
+│   │   ├── paper_service.py        # 处理论文、返回段落和图表信息；获取解析状态
+│   │   ├── rag_service.py          # 用户全文献库 RAG 服务   
 │   │   ├── roadmap_service.py      # 知识图谱服务：增删结点、关系；获取结点及相应数据
-│   │   ├── note_service.py         # 笔记服务：添加笔记，删除笔记，修改笔记
-│   │   ├── translate_service.py    # 翻译服务：llm请求
-│   │   └── user_service.py         # 用户管理服务：登录，注册等
+│   │   ├── translate_service.py    # 翻译服务：大模型请求翻译
+│   │   └── websearch_service.py    # 联网检索增强服务
 │   ├── tasks/                      # 异步任务
 │   │   ├── pdf_tasks.py            # pdf段落+图片解析+向量化的异步处理
 │   │   └── chat_task.py            # 聊天框的异步任务：标题异步生成
@@ -60,5 +58,10 @@ readme/
 │   │   ├── text_splitter.py        # 文本切片 (RecursiveCharacterTextSplitter)
 │   │   ├── graph_algo.py           # NetworkX 纯算法 (roadmap可能用到的一些算法)
 │   │   └── ...
+│   └── docs/                       # 项目说明文档
+│       ├── api_docs/               # Swagger/OpenAPI 相关说明
+│       ├── db_docs/                # 数据库设计文档
+│       └── backend.md              # 后端架构与实现细节（当前文件）
+│
 └── config.yaml             # 所有的配置都在这里
 

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import api, { authApi, setCurrentUser, getCurrentUser, clearTokens, setTokens } from '../api'
+import { authApi, setCurrentUser, getCurrentUser, clearTokens, setTokens } from '../api'
 import router from '../router'
 import { useLibraryStore } from './library'
 import { useChatStore } from './chat'

@@ -563,6 +563,23 @@ class SQLRepository:
             )
         ).order_by(asc(ChatMessage.created_at))
         return self.db.execute(stmt).scalars().all()
+
+    def delete_chat_messages_after(self, session_id: uuid.UUID, user_id: uuid.UUID, start_msg_id: int) -> int:
+        """删除指定消息 ID 之后（含）的所有消息"""
+        # 验证 session 归属
+        session = self.get_chat_session(session_id, user_id)
+        if not session:
+            return 0
+        
+        stmt = delete(ChatMessage).where(
+            and_(
+                ChatMessage.session_id == session_id,
+                ChatMessage.id >= start_msg_id
+            )
+        )
+        result = self.db.execute(stmt)
+        self.db.commit()
+        return result.rowcount
     
     # ==================== 图知识库 ====================
 

@@ -410,7 +410,8 @@ export const chatSessionApi = {
     model?: string, // 可选：覆盖后端默认模型
     apiBase?: string, // 可选：自定义 OpenAI-like 的 base URL
     apiKey?: string, // 可选：自定义 API Key（谨慎使用）
-    history?: Array<{ role: string; content: string }> // 可选：重发/编辑时传入的历史覆盖
+    history?: Array<{ role: string; content: string }>, // 可选：重发/编辑时传入的历史覆盖
+    pruneFromId?: string // 可选：裁减历史的消息 ID
   ): Promise<{
     sessionId: string
     response: string
@@ -425,7 +426,8 @@ export const chatSessionApi = {
       pdfId,
       model,
       apiBase,
-      apiKey
+      apiKey,
+      pruneFromId
     }
     if (history) {
       payload.history = history

@@ -113,6 +113,11 @@ class ChatService:
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         return self.repo.update_chat_session_title(s_uuid, user_id, title)
 
+    def prune_history(self, session_id: str, user_id: uuid.UUID, start_msg_id: int) -> int:
+        """清理历史记录"""
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        return self.repo.delete_chat_messages_after(s_uuid, user_id, start_msg_id)
+
     # ==================== 格式化工具 ====================
 
     def _model_to_dict(self, model_obj) -> Dict:

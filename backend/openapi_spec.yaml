@@ -160,6 +160,7 @@ components:
         sessionId: { type: string, format: uuid }
         pdfId: { type: string }
         model: { type: string }
+        pruneFromId: { type: integer, description: "可选。重发消息时指定从哪个消息 ID 开始裁剪历史。" }
         apiKey: { type: string }
         apiBase: { type: string }
         history:
@@ -586,7 +587,7 @@ paths:
   /chatbox/message:
     post:
       tags: [Chat]
-      summary: 发送消息 (非流式)
+      summary: 发送消息 (支持重发裁减)
       requestBody:
         required: true
         content:
@@ -602,7 +603,7 @@ paths:
   /chatbox/simple-chat:
     post:
       tags: [Chat]
-      summary: 简单对话 (直接全文上下文)
+      summary: 简单对话 (支持重发裁减)
       requestBody:
         required: true
         content:
@@ -618,7 +619,7 @@ paths:
   /chatbox/stream:
     post:
       tags: [Chat]
-      summary: 流式对话 (SSE)
+      summary: 流式对话 (支持重发裁减)
       requestBody:
         required: true
         content:

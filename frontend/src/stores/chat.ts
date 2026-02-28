@@ -57,13 +57,14 @@ export const useChatStore = defineStore('chat', () => {
                 }))
 
                 if (pdfId) {
-                    const otherSessions = chatSessions.value.filter(s => s.pdfId !== pdfId)
+                    const otherSessions = chatSessions.value.filter(s => s.pdfId !== pdfId || s.id.startsWith('temp_'))
                     chatSessions.value = [...backendSessions, ...otherSessions]
                 } else {
-                    chatSessions.value = backendSessions
+                    const tempSessions = chatSessions.value.filter(s => s.id.startsWith('temp_'))
+                    chatSessions.value = [...backendSessions, ...tempSessions]
                 }
 
-                if (currentSessionId.value) {
+                if (currentSessionId.value && !currentSessionId.value.startsWith('temp_')) {
                     const stillExists = chatSessions.value.some(s => s.id === currentSessionId.value)
                     if (!stillExists) {
                         console.warn(`[Chat Store] Session ${currentSessionId.value} no longer exists on backend. Resetting.`)
@@ -139,8 +140,10 @@ export const useChatStore = defineStore('chat', () => {
                     }
                 }
 
-                dbPut(STORES.CHAT_SESSIONS, { ...session, messages: [] }).catch(e => console.warn(e))
-                dbPut(STORES.CHAT_MESSAGES, { id: session.id, messages: session.messages }).catch(e => console.warn(e))
+                if (!session.id.startsWith('temp_')) {
+                    dbPut(STORES.CHAT_SESSIONS, { ...session, messages: [] }).catch(e => console.warn(e))
+                    dbPut(STORES.CHAT_MESSAGES, { id: session.id, messages: session.messages }).catch(e => console.warn(e))
+                }
             }
         }
     }
@@ -168,33 +171,78 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     async function createNewSession(pdfId: string): Promise<string> {
-        try {
-            const data = await chatSessionApi.createSession()
+        // 防止连续创建多个空会话，并修复之前误匹配到后端发回的真实空会话 bug
+        const existingTemp = chatSessions.value.find(s => s.pdfId === pdfId && s.id.startsWith('temp_'))
+        if (existingTemp) {
+            currentSessionId.value = existingTemp.id
+            chatMessages.value = existingTemp.messages || []
+            return existingTemp.id
+        }
 
-            const newSession: ChatSession = {
-                id: data.sessionId,
-                pdfId,
-                title: data.title || '新对话',
-                messages: [],
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
+        const tempId = `temp_${Date.now()}_${crypto.randomUUID()}`
+        const newSession: ChatSession = {
+            id: tempId,
+            pdfId,
+            title: '新对话',
+            messages: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        }
+
+        chatSessions.value.unshift(newSession)
+        currentSessionId.value = tempId
+        chatMessages.value = []
+
+        return tempId
+    }
+
+    async function ensureRealSession(pdfId: string): Promise<string> {
+        if (!currentSessionId.value || currentSessionId.value.startsWith('temp_')) {
+            const tempId = currentSessionId.value;
+            const data = await chatSessionApi.createSession();
+            // @ts-ignore
+            if (!data.sessionId) {
+                throw new Error('Failed to create real session from backend');
+            }
+            // @ts-ignore
+            const realId = data.sessionId;
+
+            if (tempId) {
+                const sessionIndex = chatSessions.value.findIndex(s => s.id === tempId);
+                if (sessionIndex !== -1) {
+                    const session = chatSessions.value[sessionIndex] as ChatSession;
+                    session.id = realId;
+                    // @ts-ignore
+                    session.title = data.title || session.title || '新对话';
+
+                    dbDelete(STORES.CHAT_SESSIONS, tempId).catch(e => console.warn(e));
+                    dbDelete(STORES.CHAT_MESSAGES, tempId).catch(e => console.warn(e));
+
+                    dbPut(STORES.CHAT_SESSIONS, { ...session, messages: [] }).catch(e => console.warn(e));
+                    dbPut(STORES.CHAT_MESSAGES, { id: realId, messages: chatMessages.value as ChatMessage[] }).catch(e => console.warn(e));
+                }
+            } else {
+                const newSession: ChatSession = {
+                    id: realId,
+                    pdfId,
+                    // @ts-ignore
+                    title: data.title || '新对话',
+                    messages: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                }
+                chatSessions.value.unshift(newSession)
             }
 
-            chatSessions.value.unshift(newSession)
-            currentSessionId.value = data.sessionId!
-            chatMessages.value = []
-
-            // dbPut 会在发送真正第一条消息 addChatMessage 时再执行持久化
+            currentSessionId.value = realId;
 
             import('../utils/broadcast').then(({ broadcastSync }) => {
                 broadcastSync('RELOAD_SESSIONS', pdfId)
             })
 
-            return data.sessionId!
-        } catch (error) {
-            console.error('Failed to create session on backend:', error)
-            throw error
+            return realId;
         }
+        return currentSessionId.value;
     }
 
     async function loadSession(sessionId: string) {
@@ -229,7 +277,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     function getSessionsByPdfId(pdfId: string): ChatSession[] {
-        return chatSessions.value.filter(s => s.pdfId === pdfId)
+        return chatSessions.value.filter(s => s.pdfId === pdfId && !s.id.startsWith('temp_'))
     }
 
     async function deleteSession(sessionId: string) {
@@ -306,6 +354,7 @@ export const useChatStore = defineStore('chat', () => {
         addChatMessage,
         clearChat,
         createNewSession,
+        ensureRealSession,
         loadSession,
         loadSessionsFromBackend,
         loadSessionMessagesFromBackend,

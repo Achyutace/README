@@ -78,6 +78,12 @@ def send_message():
     # 1. 懒创建会话
     handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
 
+    # 1.5 处理重发裁减 (如果前端指定了从哪个消息 ID 开始重发)
+    prune_from_id = data.get('pruneFromId')
+    if prune_from_id:
+        logger.info(f"Pruning history starting from ID: {prune_from_id}")
+        chat_service.prune_history(session_id, user_id, int(prune_from_id))
+
     # 2. 存储用户消息
     chat_service.add_user_message(session_id, user_id, user_query)
 
@@ -145,6 +151,12 @@ def simple_chat():
     # 1. 懒创建
     handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
 
+    # 1.5 处理重发裁减
+    prune_from_id = data.get('pruneFromId')
+    if prune_from_id:
+        logger.info(f"Pruning history starting from ID: {prune_from_id}")
+        chat_service.prune_history(session_id, user_id, int(prune_from_id))
+
     # 2. 存储用户消息
     chat_service.add_user_message(session_id, user_id, user_query)
 
@@ -204,6 +216,12 @@ def stream_message():
         try:
             # 1. 懒创建
             handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+
+            # 1.5 处理重发裁减
+            prune_from_id = data.get('pruneFromId')
+            if prune_from_id:
+                logger.info(f"Pruning history starting from ID: {prune_from_id}")
+                chat_service.prune_history(session_id, user_id, int(prune_from_id))
 
             # 2. 存储用户消息
             chat_service.add_user_message(session_id, user_id, user_query)

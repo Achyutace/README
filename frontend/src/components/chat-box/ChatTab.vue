@@ -154,13 +154,25 @@ const handleResend = async (index: number) => {
   const message = chatStore.chatMessages[index]
   if (!message || chatStore.isLoadingChat) return
   
-  // 构造历史：取该消息之前的所有消息
-  const history = chatStore.chatMessages.slice(0, index).map(m => ({
+  let targetContent = message.content
+  let historyIndex = index
+  
+  // 如果点的是 AI 消息的重试，说明需要“重新生成”，即重发上一条用户消息
+  if (message.role === 'assistant' && index > 0) {
+    const prevMsg = chatStore.chatMessages[index - 1]
+    if (prevMsg && prevMsg.role === 'user') {
+      targetContent = prevMsg.content
+      historyIndex = index - 1
+    }
+  }
+
+  // 构造历史：取历史点之前的所有消息
+  const history = chatStore.chatMessages.slice(0, historyIndex).map(m => ({
     role: m.role,
     content: m.content
   }))
 
-  await executeSendMessage(message.content, history, { resendFromIndex: index })
+  await executeSendMessage(targetContent, history, { resendFromIndex: index })
 }
 
 const handleResendEdited = async (index: number, newContent: string) => {
@@ -192,37 +204,54 @@ const executeSendMessage = async (
     apiKey = customModel.apiKey
   }
 
-  // 1. 乐观 UI 更新
-  chatStore.addChatMessage({
-    role: 'user',
-    content: content,
-    meta: meta
-  })
+    // 1. 乐观 UI 更新
+    // 如果是重发且不是编辑，我们可能需要特殊处理
+    // 根据用户要求，前端保留旧信息（软裁减）
+    
+    let pruneFromId: string | undefined = undefined
+    if (meta?.resendFromIndex !== undefined) {
+      const originalMsg = chatStore.chatMessages[meta.resendFromIndex]
+      if (originalMsg && originalMsg.id && !originalMsg.id.includes('-')) {
+        /**
+         * 为什么使用 id >= pruneFromId 是合理正确的？
+         * 1. 确定性：数据库 ID 在单表自增序列中是严格单调递增的，它比 timestamp 更能代表物理插入顺序。
+         * 2. 裁减范围：当用户重发消息 i 时，意味着他想“回滚”到 i 之前的状态并开启新分支。
+         *    删除 id >= id(i) 的所有记录，可以精确清除该位置及其之后的所有数据库污染，且不会误删在该位置之前的并发消息。
+         */
+        pruneFromId = originalMsg.id
+      }
+    }
 
-  chatStore.isLoadingChat = true
+    chatStore.addChatMessage({
+      role: 'user',
+      content: content,
+      meta: meta
+    })
 
-  try {
-    if (!chatStore.currentSessionId || !libraryStore.currentDocumentId) {
-      if (libraryStore.currentDocumentId) {
-        await chatStore.createNewSession(libraryStore.currentDocumentId)
-      } else {
+    chatStore.isLoadingChat = true
+
+    try {
+      if (!libraryStore.currentDocumentId) {
         alert("找不到有效文档，请先在左侧选择 PDF。")
         chatStore.isLoadingChat = false
         return
       }
-    }
-    
-    // 调用 API，传入 historyOverride
-    const data = await chatSessionApi.sendMessage(
-      chatStore.currentSessionId!,
-      content,
-      libraryStore.currentDocumentId,
-      chatMode.value,
-      selectedModel.value,
-      apiBase,
-      apiKey,
-      historyOverride
-    )
+
+      // 确保如果是临时会话，先在后端真实创建一个
+      const realSessionId = await chatStore.ensureRealSession(libraryStore.currentDocumentId);
+      
+      // 调用 API，传入 historyOverride 和 pruneFromId
+      const data = await chatSessionApi.sendMessage(
+        realSessionId,
+        content,
+        libraryStore.currentDocumentId,
+        chatMode.value,
+        selectedModel.value,
+        apiBase,
+        apiKey,
+        historyOverride,
+        pruneFromId
+      )
     
     chatStore.addChatMessage({
       role: 'assistant',
