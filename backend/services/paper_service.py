@@ -12,7 +12,6 @@ pdf查询：
 import os
 import uuid
 import logging
-from pathlib import Path
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 import shutil
@@ -368,78 +367,69 @@ class PdfService:
     # ================= 图片 ========================
 
     def get_images_list(self, pdf_id: str) -> list[dict]:
+        """获取图片元数据列表"""
         """
-        获取图片元数据列表。
-        优先从 DB 读取（MinerU 解析结果），
-        如果 DB 为空则回退到 PyMuPDF 提取。
-        """
-        repo = SQLRepository(db.session)
+        db, repo = self._get_repo()
         try:
             db_imgs = repo.get_images(pdf_id)
             if db_imgs and len(db_imgs) > 0:
                 result = []
                 for img in db_imgs:
-                    image_id = pdf_engine.make_image_id(pdf_id, img.image_index)
+                    image_index = img.image_index
+                    image_id = pdf_engine.make_image_id(pdf_id, image_index)
                     result.append({
                         "id": image_id,
                         "page": img.page_number,
-                        "index": img.image_index,
-                        "bbox": img.bbox or [],
-                        "image_path": img.image_path,
+                        "bbox": img.bbox
                     })
                 return result
         except Exception as e:
             logger.warning(f"Failed to fetch images from DB for {pdf_id}: {e}")
+        finally:
+            db.close()
 
-        # 回退: 用 PyMuPDF 提取
         try:
             filepath = self.get_filepath(pdf_id)
-            return pdf_engine.get_images_list(filepath, pdf_id)
+            images_list = pdf_engine.get_images_list(filepath, pdf_id)
+
+            db, repo = self._get_repo()
+            try:
+                images_to_save = []
+                for img in images_list:
+                    images_to_save.append({
+                        "page_number": img['page'],
+                        "image_index": img['index'],
+                        "bbox": img['bbox'],
+                        "caption": ""
+                    })
+                repo.save_images(pdf_id, images_to_save)
+                logger.info(f"Recovered and saved {len(images_to_save)} images meta for {pdf_id}")
+            except Exception as save_err:
+                logger.error(f"Failed to save recovered images to DB for {pdf_id}: {save_err}")
+            finally:
+                db.close()
+
+            return images_list
+
         except Exception as e:
             logger.error(f"Error fetching images list for {pdf_id}: {e}")
             return []
-
-    def get_image_data(self, image_id: str) -> dict:
         """
-        获取图片 Base64 数据。
-        如果 DB 中有 image_path（MinerU 提取），直接读取文件。
-        否则回退到 PyMuPDF xref 提取。
+        pass
+    
+    def get_image_data(self, image_id: str) -> dict:
+        """获取图片 Base64 数据"""
         """
         try:
             pdf_id, image_index = pdf_engine.parse_image_id(image_id)
-
-            # 1. 尝试从 DB 获取存储路径
-            repo = SQLRepository(db.session)
-            db_imgs = repo.get_images(pdf_id, image_index=image_index)
-            if db_imgs:
-                img_record = db_imgs[0]
-                if img_record.image_path:
-                    # MinerU 提取的图片：通过缓存目录中的文件路径读取
-                    from app import app
-                    # image_path 格式: mineru/<file_hash>/images/<filename>
-                    # 实际存储位置: <user_cache>/mineru/<file_hash>/...
-                    # 或者 storage/images/mineru/...
-                    # 在 pdf_tasks 中缓存到 uploads/../cache/mineru/<file_hash>/...
-                    # 所以我们需要在多个可能的位置查找
-                    possible_roots = [
-                        Path(self.upload_folder).parent / "cache",
-                        Path(app.config['STORAGE_ROOT']) / "images",
-                    ]
-                    for root in possible_roots:
-                        full_path = root / img_record.image_path
-                        if full_path.exists():
-                            result = pdf_engine.get_image_data_from_path(str(full_path))
-                            result['id'] = image_id
-                            return result
-
-            # 2. 回退: PyMuPDF 提取
             filepath = self.get_filepath(pdf_id)
             result = pdf_engine.get_image_data(filepath, image_index)
             if result:
                 result['id'] = image_id
             return result
-
         except Exception as e:
             logger.error(f"Error fetching image data {image_id}: {e}")
             return None
+        """
+        pass
 

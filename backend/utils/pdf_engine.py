@@ -136,117 +136,60 @@ def parse_paragraphs(filepath: str, pdf_id: str, page_numbers: list[int] = None)
     
     return paragraphs
 
-def get_images_list(filepath: str, pdf_id: str, page_numbers: list[int] = None) -> list[dict]:
+def get_images_list(filepath: str, pdf_id: str) -> list[dict]:
     """
     获取PDF所有图片的元数据列表（ID、页码、坐标），不包含Base64内容。
-    如果 MinerU 已在 Celery 任务中提取过图片并写入 DB，
-    这个函数主要作为回退方案使用。
-
-    Args:
-        filepath: PDF 文件路径
-        pdf_id: PDF 唯一标识
-        page_numbers: 可选，指定页码列表 (1-based)
     """
+    '''
     doc = fitz.open(filepath)
     images_meta = []
-
+    
     try:
-        if page_numbers:
-            pages_to_process = [p - 1 for p in page_numbers if 1 <= p <= len(doc)]
-        else:
-            pages_to_process = range(len(doc))
-
-        global_index = 0
-        for page_idx in pages_to_process:
-            page = doc[page_idx]
-            page_num = page_idx + 1
+        for page_num, page in enumerate(doc):
+            # get_image_info(xrefs=True) 返回页面图片信息
             page_images = page.get_image_info(xrefs=True)
-
+            
             for img in page_images:
-                xref = img['xref']
+                # 目前逻辑上将 PDF 的 xref 映射为 image_index
+                image_index = img['xref']
                 bbox = img['bbox']
-                image_id = make_image_id(pdf_id, global_index)
-
+                
+                # 构造逻辑图片ID
+                image_id = make_image_id(pdf_id, image_index)
+                
                 images_meta.append({
                     "id": image_id,
-                    "page": page_num,
-                    "index": global_index,
-                    "bbox": [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]],
-                    "xref": xref,
+                    "page": page_num + 1,
+                    "index": image_index,
+                    "bbox": [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]]
                 })
-                global_index += 1
     finally:
         doc.close()
-
     return images_meta
+    '''
+    pass
 
 def get_image_data(filepath: str, image_index: int) -> dict:
     """
-    根据图片索引（xref）获取 Base64 编码数据。
-    这是一个基础的 PyMuPDF 提取方式，
-    MinerU 提取的高质量图片直接通过文件路径读取。
+    根据图片索引（目前为xref）获取Base64编码数据。
     """
+    '''
     doc = fitz.open(filepath)
     try:
-        # 遍历所有页面找到对应 xref 的图片
-        # image_index 在这里是逻辑索引，需要遍历匹配
-        global_idx = 0
-        for page in doc:
-            page_images = page.get_image_info(xrefs=True)
-            for img in page_images:
-                if global_idx == image_index:
-                    xref = img['xref']
-                    base_image = doc.extract_image(xref)
-                    image_bytes = base_image["image"]
-                    image_ext = base_image["ext"]
-
-                    base64_str = base64.b64encode(image_bytes).decode('utf-8')
-                    mime_type = f"image/{image_ext}"
-
-                    return {
-                        "mimeType": mime_type,
-                        "base64": f"data:{mime_type};base64,{base64_str}"
-                    }
-                global_idx += 1
-
-        raise ValueError(f"Image index {image_index} not found in PDF")
+        # 目前直接使用 image_index 作为 xref 提取图片
+        base_image = doc.extract_image(image_index)
+        image_bytes = base_image["image"]
+        image_ext = base_image["ext"]
+        
+        # 转为 Base64
+        base64_str = base64.b64encode(image_bytes).decode('utf-8')
+        mime_type = f"image/{image_ext}"
+        
+        return {
+            "mimeType": mime_type,
+            "base64": f"data:{mime_type};base64,{base64_str}"
+        }
     finally:
         doc.close()
-
-
-def get_image_data_from_path(image_path: str) -> dict:
-    """
-    从本地文件路径读取图片并返回 Base64 编码数据。
-    用于读取 MinerU 提取出的高质量图片。
-
-    Args:
-        image_path: 图片文件的绝对路径
-
-    Returns:
-        {"mimeType": str, "base64": str}
-    """
-    from pathlib import Path
-    p = Path(image_path)
-    if not p.exists():
-        raise FileNotFoundError(f"Image file not found: {image_path}")
-
-    ext = p.suffix.lower().lstrip(".")
-    mime_map = {
-        "png": "image/png",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "gif": "image/gif",
-        "bmp": "image/bmp",
-        "webp": "image/webp",
-        "svg": "image/svg+xml",
-    }
-    mime_type = mime_map.get(ext, f"image/{ext}")
-
-    with open(p, "rb") as f:
-        image_bytes = f.read()
-
-    base64_str = base64.b64encode(image_bytes).decode("utf-8")
-    return {
-        "mimeType": mime_type,
-        "base64": f"data:{mime_type};base64,{base64_str}",
-    }
+    '''
+    pass

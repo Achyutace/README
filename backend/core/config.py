@@ -31,13 +31,13 @@ class AppInfoConfig(BaseModel):
     port: int = 5000
 
 class SceneModelConfig(BaseModel):
-    """单个场景的模型配置（支持可选的独立 API 凭证�?""
+    """单个场景的模型配置（支持可选的独立 API 凭证）"""
     model: str
     api_key: Optional[str] = None
     api_base: Optional[str] = None
 
 class ModelsConfig(BaseModel):
-    """按场景分配模�?""
+    """按场景分配模型"""
     chat: SceneModelConfig = SceneModelConfig(model="qwen-plus")
     translate: SceneModelConfig = SceneModelConfig(model="qwen-plus")
     vision: SceneModelConfig = SceneModelConfig(model="gpt-4o-mini")
@@ -88,17 +88,12 @@ class JWTConfig(BaseModel):
     refresh_expire_days: int = 7
 
 
-class MinerUConfig(BaseModel):
-    api_token: str = ""
-    model_version: str = "vlm"   # pipeline | vlm | MinerU-HTML
-
-
 # ==================== 解析辅助 ====================
 
 def _parse_scene_model(value) -> SceneModelConfig:
     """解析场景模型配置，支持简写和详写两种格式"""
     if isinstance(value, str):
-        # 简�? "qwen-plus"
+        # 简写: "qwen-plus"
         return SceneModelConfig(model=value)
     elif isinstance(value, dict):
         # 详写: { model: "xxx", api_key: "...", api_base: "..." }
@@ -111,7 +106,7 @@ def _parse_scene_model(value) -> SceneModelConfig:
 
 
 def _parse_models_config(raw: Dict[str, Any]) -> ModelsConfig:
-    """�?raw config 解析 models �?""
+    """从 raw config 解析 models 块"""
     models_raw = raw.get("models", {})
     if not models_raw:
         return ModelsConfig()
@@ -139,21 +134,21 @@ class AppConfig:
         )
 
         def get_sec(key: str) -> Dict[str, Any]:
-            """辅助获取配置节，支持环境特定的覆�?""
+            """辅助获取配置节，支持环境特定的覆盖"""
             base = raw.get(key, {})
-            # 尝试从当前环境节中获取覆盖配�?(例如: production.database)
+            # 尝试从当前环境节中获取覆盖配置 (例如: production.database)
             overrides = raw.get(self.env, {}).get(key, {})
             if isinstance(base, dict) and isinstance(overrides, dict):
                 return {**base, **overrides}
             return overrides if overrides is not None else (base if base is not None else {})
 
-        # 2. 从合并后的配置中解析各部�?
+        # 2. 从合并后的配置中解析各部分
         
         # OpenAI (全局默认凭证)
         oa_conf = get_sec("openai")
         self.openai = OpenAIConfig(**oa_conf) if oa_conf else OpenAIConfig(api_key="", api_base="")
 
-        # Models (按场景分�?
+        # Models (按场景分配)
         models_raw = get_sec("models")
         self.models = _parse_models_config({"models": models_raw})
 
@@ -221,27 +216,15 @@ class AppConfig:
         )
         self.jwt_secret = self.jwt.secret
 
-        # MinerU
-        mineru_conf = get_sec("mineru")
-        self.mineru = MinerUConfig(
-            api_token=mineru_conf.get("api_token", ""),
-            model_version=mineru_conf.get("model_version", "vlm"),
-        )
-
     @property
     def has_openai_key(self) -> bool:
         return self.openai is not None and bool(self.openai.api_key)
 
     @property
     def debug(self) -> bool:
-        """根据环境自动推导是否开启调试模�?"""
+        """根据环境自动推导是否开启调试模式"""
         return self.env == "development"
-
-    @property
-    def has_mineru_token(self) -> bool:
-        return bool(self.mineru.api_token)
 
 
 # Global Instance
 settings = AppConfig(_raw_config)
-
