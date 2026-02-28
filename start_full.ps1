@@ -59,7 +59,11 @@ if ($isRedisActive) {
     $redisCmd = Get-Command "redis-server" -ErrorAction SilentlyContinue
     if ($redisCmd) { $redisPath = $redisCmd.Source }
     if (-not $redisPath) {
-        $redisPath = where.exe redis-server 2>$null | Select-Object -First 1
+        try {
+            $redisPath = (where.exe redis-server 2>$null | Select-Object -First 1)
+        } catch {
+            $redisPath = $null
+        }
     }
 
     if ($redisPath) {

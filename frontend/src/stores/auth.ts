@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, setCurrentUser, getCurrentUser, clearTokens, setTokens } from '../api'
+import { authApi, setCurrentUser, getCurrentUser, clearTokens, setTokens, getAccessToken } from '../api'
 import router from '../router'
 import { useLibraryStore } from './library'
 import { useChatStore } from './chat'
@@ -33,12 +33,14 @@ export const useAuthStore = defineStore('auth', () => {
    *    - 其他网络错误 → 保留本地缓存状态（离线容错）。
    */
   async function checkAuth() {
+    const accessToken = getAccessToken()
     // Step 1：读取本地缓存的用户信息
     // 因为 refreshToken 在 HttpOnly Cookie 中，我们无法直接判断其是否存在。
     // 但是只要有 cachedUser，我们就假设当前可能是登录状态，从而触发后台验证
     const cachedUser = getCurrentUser()
-    if (!cachedUser) {
+    if (!cachedUser || !accessToken) {
       // 没有缓存用户，说明确定未登录（或者是首次打开未登录态）
+      clearTokens()
       user.value = null
       authChecked.value = true
       return
@@ -76,7 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           // 直接调用 refresh 接口，携带 HttpOnly Cookie，绕过 axios 拦截器
           const { data } = await axios.post(
-            `${import.meta.env.VITE_API_URL}/auth/refresh`,
+            `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/refresh`,
             {},
             { withCredentials: true }
           )

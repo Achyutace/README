@@ -36,9 +36,11 @@ export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_TOKEN_KEY)
 }
 
-export function setTokens(accessToken: string, refreshToken: string) {
+export function setTokens(accessToken: string, refreshToken?: string) {
   localStorage.setItem(TOKEN_KEY, accessToken)
-  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+  if (refreshToken) {
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+  }
 }
 
 export function clearTokens() {
@@ -232,6 +234,29 @@ export interface PdfUploadResponse {
 }
 
 // 提取文本接口返回结构（按块）
+export interface PdfStatusResponse {
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'not_found' | 'error' | 'unknown'
+  currentPage: number
+  totalPages: number
+  error?: string | null
+  paragraphs?: PdfParagraph[]
+}
+
+export interface PdfListResponse {
+  items: Array<{
+    pdfId: string
+    title: string
+    tags?: string[]
+    addedAt?: string | null
+    fileSize?: number
+    totalPages?: number
+    processStatus?: string
+    readStatus?: string
+  }>
+  page: number
+  pageSize: number
+}
+
 export interface ExtractTextResponse {
   text: string
   blocks: Array<{
@@ -257,6 +282,20 @@ export interface InternalLinkData {
 // 对应后端： router/upload.py
 // -----------------------------
 export const pdfApi = {
+  list: async (params?: {
+    page?: number
+    pageSize?: number
+    group?: string
+    keyword?: string
+  }): Promise<PdfListResponse> => {
+    const { data } = await api.get('/pdf/', { params })
+    return {
+      items: Array.isArray(data?.items) ? data.items : [],
+      page: Number(data?.page || params?.page || 1),
+      pageSize: Number(data?.pageSize || params?.pageSize || 50),
+    }
+  },
+
   // 上传 PDF 文件，返回 PdfUploadResponse
   upload: async (file: File): Promise<PdfUploadResponse> => {
     const formData = new FormData()
@@ -272,6 +311,13 @@ export const pdfApi = {
   extractText: async (pdfId: string, pageNumber?: number): Promise<ExtractTextResponse> => {
     const params = pageNumber ? { page: pageNumber } : {}
     const { data } = await api.get<ExtractTextResponse>(`/pdf/${pdfId}/text`, { params })
+    return data
+  },
+
+  getStatus: async (pdfId: string, fromPage: number = 1): Promise<PdfStatusResponse> => {
+    const { data } = await api.get<PdfStatusResponse>(`/pdf/${pdfId}/status`, {
+      params: { from_page: fromPage }
+    })
     return data
   },
 

@@ -103,6 +103,10 @@ export const usePdfStore = defineStore('pdf', () => {
     return allParagraphs.value[currentDocumentId.value] || []
   })
 
+  const activeReaderId = computed(() => currentDocumentId.value)
+  const pageTranslationStatus = ref<Record<number, 'idle' | 'loading' | 'done' | 'error'>>({})
+  const fullTranslationStatus = ref<'idle' | 'loading' | 'done' | 'error'>('idle')
+
 
 
   // ---------------------- 全文预翻译状态 ----------------------
@@ -361,6 +365,18 @@ export const usePdfStore = defineStore('pdf', () => {
     allParagraphs.value[documentId] = paragraphsData
   }
 
+  function appendParagraphs(documentId: string, paragraphsData: PdfParagraph[]) {
+    if (!paragraphsData || paragraphsData.length === 0) return
+    const current = allParagraphs.value[documentId] || []
+    const merged = new Map<string, PdfParagraph>()
+    for (const p of current) merged.set(p.id, p)
+    for (const p of paragraphsData) merged.set(p.id, p)
+    allParagraphs.value[documentId] = Array.from(merged.values()).sort((a, b) => {
+      if (a.page !== b.page) return a.page - b.page
+      return a.id.localeCompare(b.id)
+    })
+  }
+
   // 获取指定页面对应的段落列表（用于显示翻译、跳转等）
   function getParagraphsByPage(page: number): PdfParagraph[] {
     return paragraphs.value.filter(p => p.page === page)
@@ -388,6 +404,47 @@ export const usePdfStore = defineStore('pdf', () => {
     await processPreTranslateQueue()
   }
 
+  async function startFullPreTranslation() {
+    if (!currentDocumentId.value) return
+    fullTranslationStatus.value = 'loading'
+    try {
+      await startPreTranslation(currentDocumentId.value)
+      fullTranslationStatus.value = 'done'
+    } catch (error) {
+      console.error('Full pre-translation failed:', error)
+      fullTranslationStatus.value = 'error'
+    }
+  }
+
+  async function startPagePreTranslation(page: number) {
+    if (!currentDocumentId.value) return
+    const pdfId = currentDocumentId.value
+    const target = getParagraphsByPage(page)
+    if (!target.length) return
+
+    const { useTranslationStore } = await import('./translation')
+    const translationStore = useTranslationStore()
+    pageTranslationStatus.value[page] = 'loading'
+
+    try {
+      for (const p of target) {
+        if (translationStore.translatedParagraphsCache.has(p.id)) continue
+        try {
+          const result = await aiApi.translateParagraph(pdfId, p.id)
+          if (result.success) {
+            translationStore.setTranslation(p.id, result.translation)
+          }
+        } catch (err) {
+          console.error(`Page pre-translation failed: page=${page}, paragraph=${p.id}`, err)
+        }
+      }
+      pageTranslationStatus.value[page] = 'done'
+    } catch (error) {
+      console.error(`Page pre-translation failed: page=${page}`, error)
+      pageTranslationStatus.value[page] = 'error'
+    }
+  }
+
   // 逐个处理预翻译队列
   async function processPreTranslateQueue() {
     // 延迟导入 translation store 避免循环依赖
@@ -398,7 +455,7 @@ export const usePdfStore = defineStore('pdf', () => {
       const paragraphId = preTranslateQueue.value[0] as string
 
       // 已缓存则跳过
-      if (translationStore.translationCache[paragraphId]) {
+      if (translationStore.translatedParagraphsCache.has(paragraphId)) {
         preTranslateQueue.value.shift()
         preTranslateCompleted.value++
         continue
@@ -613,13 +670,11 @@ export const usePdfStore = defineStore('pdf', () => {
 
         let x0 = 0, y0 = 0, x1 = 0, y1 = 0
         if (rawBbox.length === 4) {
-          // Heuristic: if third element > first and fourth > second treat as x1,y1
-          if (rawBbox[2] > rawBbox[0] && rawBbox[3] > rawBbox[1]) {
-            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[2]; y1 = rawBbox[3]
-          } else {
-            // treat as x,y,w,h
-            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[0] + rawBbox[2]; y1 = rawBbox[1] + rawBbox[3]
-          }
+          // Backend normalizes bbox to [x, y, w, h].
+          x0 = Number(rawBbox[0] || 0)
+          y0 = Number(rawBbox[1] || 0)
+          x1 = x0 + Number(rawBbox[2] || 0)
+          y1 = y0 + Number(rawBbox[3] || 0)
         }
 
         const width = x1 - x0
@@ -639,27 +694,36 @@ export const usePdfStore = defineStore('pdf', () => {
       // 解析 images / tables / formulas 为 overlays
       const pushOverlay = (item: any, type: 'image' | 'table' | 'formula', idxBase = 0) => {
         const page = item.page || item.page_no || 1
-        const rawBbox = Array.isArray(item.bbox) ? item.bbox : []
-        let x0 = 0, y0 = 0, x1 = 0, y1 = 0
-        if (rawBbox.length === 4) {
-          if (rawBbox[2] > rawBbox[0] && rawBbox[3] > rawBbox[1]) {
-            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[2]; y1 = rawBbox[3]
-          } else {
-            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[0] + rawBbox[2]; y1 = rawBbox[1] + rawBbox[3]
+        const bboxNorm = item.bboxNorm
+        let left = 0
+        let top = 0
+        let w = 0
+        let h = 0
+
+        if (bboxNorm && typeof bboxNorm === 'object') {
+          left = Number(bboxNorm.left || 0)
+          top = Number(bboxNorm.top || 0)
+          w = Number(bboxNorm.width || 0)
+          h = Number(bboxNorm.height || 0)
+        } else {
+          // Backward compatibility for older backend payloads.
+          const rawBbox = Array.isArray(item.bbox) ? item.bbox : []
+          if (rawBbox.length === 4) {
+            const x0 = Number(rawBbox[0] || 0)
+            const y0 = Number(rawBbox[1] || 0)
+            const bw = Number(rawBbox[2] || 0)
+            const bh = Number(rawBbox[3] || 0)
+
+            const pageSize = pageSizesArray.value?.[page - 1] || pageSizesConstant.value || { width: 1, height: 1 }
+            const pw = pageSize.width || 1
+            const ph = pageSize.height || 1
+
+            left = x0 / pw
+            top = y0 / ph
+            w = bw / pw
+            h = bh / ph
           }
         }
-        const width = x1 - x0
-        const height = y1 - y0
-
-        // Normalize to relative coordinates based on page size if available
-        const pageSize = pageSizesArray.value?.[page - 1] || pageSizesConstant.value || { width: 1, height: 1 }
-        const pw = pageSize.width || 1
-        const ph = pageSize.height || 1
-
-        const left = x0 / pw
-        const top = y0 / ph
-        const w = width / pw
-        const h = height / ph
 
         const id = `${type}_${String(pdfId).slice(0,8)}_${page}_${idxBase || item.index || 0}`
         overlays.push({ id, page, left, top, width: w, height: h, type, meta: item })
@@ -742,9 +806,11 @@ export const usePdfStore = defineStore('pdf', () => {
     toggleAutoHighlight,
     toggleAutoTranslate,
     toggleImageDescription,
+    activeReaderId,
     // 段落管理
     paragraphs,
     setParagraphs,
+    appendParagraphs,
     fetchLayoutForPdf,
     getParagraphsByPage,
     // 页面尺寸
@@ -766,10 +832,14 @@ export const usePdfStore = defineStore('pdf', () => {
     updateSmartRefPosition,
     // 全文预翻译
     isPreTranslating,
+    pageTranslationStatus,
+    fullTranslationStatus,
     preTranslateTotal,
     preTranslateCompleted,
     preTranslateProgress,
     startPreTranslation,
+    startFullPreTranslation,
+    startPagePreTranslation,
     stopPreTranslation,
     prioritizeParagraph,
     // 内部链接弹窗

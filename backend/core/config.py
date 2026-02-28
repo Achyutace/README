@@ -64,6 +64,11 @@ class CeleryConfig(BaseModel):
     result_backend: str = "redis://localhost:6379/1"
 
 
+class MinerUConfig(BaseModel):
+    api_token: Optional[str] = None
+    model_version: str = "vlm"
+
+
 class DatabaseConfig(BaseModel):
     url: str
 
@@ -205,6 +210,13 @@ class AppConfig:
         self.celery = CeleryConfig(
             broker_url=celery_conf.get("broker_url", "redis://localhost:6379/0"),
             result_backend=celery_conf.get("result_backend", "redis://localhost:6379/1"),
+        )
+
+        # MinerU
+        mineru_conf = get_sec("mineru")
+        self.mineru = MinerUConfig(
+            api_token=mineru_conf.get("api_token"),
+            model_version=mineru_conf.get("model_version", "vlm"),
         )
 
         # JWT

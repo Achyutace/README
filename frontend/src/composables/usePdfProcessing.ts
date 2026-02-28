@@ -3,7 +3,7 @@ import { pdfApi } from '../api'
 import { usePdfStore } from '../stores/pdf'
 import { useTranslationStore } from '../stores/translation'
 
-type PdfProcessStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'unknown'
+type PdfProcessStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'not_found' | 'error' | 'unknown'
 const POLL_INTERVAL_MS = 2000
 const MAX_RETRIES = 3
 

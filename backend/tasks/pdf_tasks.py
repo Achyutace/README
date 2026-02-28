@@ -15,6 +15,7 @@ PDF 异步处理任务 (MinerU-first)
 import os
 import logging
 import uuid
+from pathlib import Path
 from celery_app import celery
 
 from core.database import db
