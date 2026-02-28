@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 from core.security import jwt_required
 from route.utils import parse_paragraph_id
 from utils.pdf_engine import make_paragraph_id
+from utils.text_utils import build_context_string
 from core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -107,7 +108,12 @@ def translate_text():
     # 2. 获取上下文 (如果提供了 pdfId)
     context = None
     if pdf_id:
-        context = translate_service_build_context(pdf_id, context_paragraphs)
+        try:
+            pdf_service = g.pdf_service
+            paragraphs = pdf_service.get_paragraph(pdf_id)
+            context = build_context_string(paragraphs, context_paragraphs)
+        except Exception as e:
+            logger.warning(f"Failed to fetch paragraphs for context {pdf_id}: {e}")
 
     # 3. 调用 translate_service
     translate_service = current_app.translate_service
@@ -120,20 +126,3 @@ def translate_text():
         'hasContext': result['hasContext'],
         'contextLength': result['contextLength']
     })
-
-
-# ==================== 内部辅助 ====================
-
-def translate_service_build_context(pdf_id: str, max_paragraphs: int = 3) -> str | None:
-    """
-    从 paper_service 获取前 N 段原文, 拼接为上下文字符串
-    """
-    try:
-        pdf_service = g.pdf_service
-        paragraphs = pdf_service.get_paragraph(pdf_id)
-        if paragraphs:
-            context_parts = [p.get('original_text', '') for p in paragraphs[:max_paragraphs]]
-            return '\n\n'.join(context_parts)
-    except Exception as e:
-        logger.warning(f"Failed to build context for {pdf_id}: {e}")
-    return None

@@ -24,11 +24,10 @@ class LibraryService:
         """
         将GlobalFile中注册好的PDF绑定到用户库中。
         """
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
+        repo = self._repo()
         try:
-            if isinstance(user_id, str):
-                user_id = uuid.UUID(user_id)
-            repo = self._repo()
-
             existing = repo.get_user_paper(user_id, pdf_id)
             if existing:
                 logger.info(f"Paper {pdf_id} already in user {user_id} library.")
@@ -45,21 +44,23 @@ class LibraryService:
 
     def delete_pdf(self, pdf_id: str, user_id) -> bool:
         """删除 PDF (仅解除用户关联，不删除物理文件)"""
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
         try:
-            if isinstance(user_id, str):
-                user_id = uuid.UUID(user_id)
             success = self._repo().delete_user_paper(user_id, pdf_id)
+            db.session.commit()
             return success
         except Exception as e:
+            db.session.rollback()
             logger.error(f"Error deleting PDF {pdf_id} for user {user_id}: {e}")
             return False
 
     def set_paper_group(self, pdf_id: str, user_id, group_name: str) -> bool:
         """设置论文分组 (Tags)"""
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
+        repo = self._repo()
         try:
-            if isinstance(user_id, str):
-                user_id = uuid.UUID(user_id)
-            repo = self._repo()
             user_paper = repo.get_user_paper(user_id, pdf_id)
             if not user_paper:
                 return False
@@ -76,10 +77,10 @@ class LibraryService:
 
     def remove_paper_group(self, pdf_id: str, user_id, group_name: str) -> bool:
         """移除论文分组 (Tags)"""
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
+        repo = self._repo()
         try:
-            if isinstance(user_id, str):
-                user_id = uuid.UUID(user_id)
-            repo = self._repo()
             user_paper = repo.get_user_paper(user_id, pdf_id)
             if not user_paper or not user_paper.tags:
                 return False

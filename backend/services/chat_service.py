@@ -8,6 +8,10 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from repository.sql_repo import SQLRepository 
+from tasks.chat_tasks import generate_session_title_task
+from core.logging import get_logger
+from core.database import db
+logger = get_logger(__name__)
 
 class ChatService:
     def __init__(self, db_repo: SQLRepository):
@@ -19,28 +23,63 @@ class ChatService:
 
     # ==================== 业务逻辑 ====================
 
+    def lazy_create_session(self, session_id: str, pdf_id: str, user_query: str, user_id: uuid.UUID):
+        """
+        处理会话的懒创建：
+        如果数据库中不存在该 session_id，则同步创建会话，再通过 Celery 异步生成标题
+        """
+        existing_session = self.get_session(session_id, str(user_id))
+
+        if not existing_session:
+            logger.info(f"Lazy creating session: {session_id}")
+            try:
+                self.create_session(
+                    user_id=user_id,
+                    file_hash=pdf_id,
+                    title="新对话",
+                    session_id=session_id
+                )
+                # 丢给 Celery 异步生成标题（独立 DB 连接，不阻塞请求）
+                generate_session_title_task.delay(session_id, user_id, user_query)
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error lazy creating session: {e}")
+                raise
+
     def add_user_message(self, session_id: str, user_id: uuid.UUID, content: str) -> Dict:
         """添加用户消息"""
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        msg = self.repo.add_chat_message(
-            session_id=s_uuid,
-            user_id=user_id,
-            role="user",
-            content=content
-        )
-        return self._model_to_dict(msg)
+        try:
+            msg = self.repo.add_chat_message(
+                session_id=s_uuid,
+                user_id=user_id,
+                role="user",
+                content=content
+            )
+            db.session.commit()
+            return self._model_to_dict(msg)
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error adding user message: {e}")
+            raise
 
     def add_ai_message(self, session_id: str, user_id: uuid.UUID, content: str, citations: List[Dict] = None) -> Dict:
         """添加 AI 回复"""
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        msg = self.repo.add_chat_message(
-            session_id=s_uuid,
-            user_id=user_id,
-            role="assistant",
-            content=content,
-            citations=citations
-        )
-        return self._model_to_dict(msg)
+        try:
+            msg = self.repo.add_chat_message(
+                session_id=s_uuid,
+                user_id=user_id,
+                role="assistant",
+                content=content,
+                citations=citations
+            )
+            db.session.commit()
+            return self._model_to_dict(msg)
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error adding AI message: {e}")
+            raise
 
     def get_formatted_history(self, session_id: str, user_id: uuid.UUID, limit: int = 10) -> List[Dict]:
         """
@@ -74,20 +113,26 @@ class ChatService:
         else:
             s_uuid = uuid.uuid4()
         
-        session = self.repo.create_chat_session(
-            session_id=s_uuid,
-            user_id=user_id,
-            file_hash=file_hash,
-            title=title
-        )
-        
-        return {
-            'id': str(session.id),
-            'pdfId': file_hash,
-            'title': session.title,
-            'createdAt': session.created_at.isoformat() if session.created_at else None,
-            'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
-        }
+        try:
+            session = self.repo.create_chat_session(
+                session_id=s_uuid,
+                user_id=user_id,
+                file_hash=file_hash,
+                title=title
+            )
+            db.session.commit()
+            
+            return {
+                'id': str(session.id),
+                'pdfId': file_hash,
+                'title': session.title,
+                'createdAt': session.created_at.isoformat() if session.created_at else None,
+                'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
+            }
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating session: {e}")
+            raise
 
     def get_session(self, session_id: str, user_id: str) -> Optional[Dict]:
         """获取单个会话详情"""
@@ -107,16 +152,37 @@ class ChatService:
 
     def delete_session(self, session_id: str, user_id: uuid.UUID) -> int:
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        return self.repo.delete_chat_session(s_uuid, user_id)
+        try:
+            res = self.repo.delete_chat_session(s_uuid, user_id)
+            db.session.commit()
+            return res
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error deleting session: {e}")
+            raise
 
     def update_title(self, session_id: str, user_id: uuid.UUID, title: str) -> bool:
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        return self.repo.update_chat_session_title(s_uuid, user_id, title)
+        try:
+            res = self.repo.update_chat_session_title(s_uuid, user_id, title)
+            db.session.commit()
+            return res
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating title: {e}")
+            raise
 
     def prune_history(self, session_id: str, user_id: uuid.UUID, start_msg_id: int) -> int:
         """清理历史记录"""
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        return self.repo.delete_chat_messages_after(s_uuid, user_id, start_msg_id)
+        try:
+            res = self.repo.delete_chat_messages_after(s_uuid, user_id, start_msg_id)
+            db.session.commit()
+            return res
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error pruning history: {e}")
+            raise
 
     # ==================== 格式化工具 ====================
 

@@ -7,36 +7,13 @@ import json
 import uuid
 from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app, g
 from core.security import jwt_required
-from tasks.chat_tasks import generate_session_title_task
+
 from core.logging import get_logger
 
 logger = get_logger(__name__)
 
 # 定义 Blueprint
 chatbox_bp = Blueprint('chatbox', __name__, url_prefix='/api/chatbox')
-
-# ==================== 辅助函数 ====================
-
-def handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id):
-    """
-    处理会话的懒创建：
-    如果数据库中不存在该 session_id，则同步创建会话，再通过 Celery 异步生成标题
-    """
-    existing_session = chat_service.get_session(session_id, user_id)
-
-    if not existing_session:
-        logger.info(f"Lazy creating session: {session_id}")
-
-        chat_service.create_session(
-            user_id=user_id,
-            file_hash=pdf_id,
-            title="新对话",
-            session_id=session_id
-        )
-
-        # 丢给 Celery 异步生成标题（独立 DB 连接，不阻塞请求）
-        generate_session_title_task.delay(session_id, user_id, user_query)
-
 
 # ==================== 路由接口 ====================
 
@@ -76,7 +53,7 @@ def send_message():
     chat_service = g.chat_service
 
     # 1. 懒创建会话
-    handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+    chat_service.lazy_create_session(session_id, pdf_id, user_query, user_id)
 
     # 1.5 处理重发裁减 (如果前端指定了从哪个消息 ID 开始重发)
     prune_from_id = data.get('pruneFromId')
@@ -149,7 +126,7 @@ def simple_chat():
     chat_service = g.chat_service
 
     # 1. 懒创建
-    handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+    chat_service.lazy_create_session(session_id, pdf_id, user_query, user_id)
 
     # 1.5 处理重发裁减
     prune_from_id = data.get('pruneFromId')
@@ -215,7 +192,7 @@ def stream_message():
 
         try:
             # 1. 懒创建
-            handle_lazy_session_creation(chat_service, session_id, pdf_id, user_query, user_id)
+            chat_service.lazy_create_session(session_id, pdf_id, user_query, user_id)
 
             # 1.5 处理重发裁减
             prune_from_id = data.get('pruneFromId')

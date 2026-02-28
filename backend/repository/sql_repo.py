@@ -43,7 +43,7 @@ class SQLRepository:
         """创建新用户"""
         user = User(username=username, email=email, password_hash=password_hash)
         self.db.add(user)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(user)
         return user
 
@@ -70,7 +70,7 @@ class SQLRepository:
             process_status="pending" 
         )
         self.db.add(global_file)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(global_file)
         return global_file
 
@@ -94,7 +94,7 @@ class SQLRepository:
             read_status="unread"
         )
         self.db.add(user_paper)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(user_paper)
         return user_paper
         
@@ -122,7 +122,7 @@ class SQLRepository:
             user_paper.is_deleted = True
             user_paper.deleted_at = func.now()
             
-        self.db.commit()
+        self.db.flush()
         return True
         
     def restore_user_paper(self, user_id: uuid.UUID, file_hash: str) -> bool:
@@ -135,7 +135,7 @@ class SQLRepository:
         if user_paper and user_paper.is_deleted:
             user_paper.is_deleted = False
             user_paper.deleted_at = None
-            self.db.commit()
+            self.db.flush()
             return True
         return False
         
@@ -146,7 +146,7 @@ class SQLRepository:
             error_message=error
         )
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def update_pdf_task(self, file_hash: str, task_id: str):
         """绑定 Celery 任务 ID 到全局文件"""
@@ -154,7 +154,7 @@ class SQLRepository:
             task_id=task_id
         )
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def get_process_progress(self, file_hash: str) -> dict:
         """
@@ -196,7 +196,7 @@ class SQLRepository:
             
         if objects:
             self.db.add_all(objects)
-            self.db.commit()
+            self.db.flush()
 
     def get_paragraphs(self, file_hash: str, page_number: Optional[int] = None, paragraph_index: Optional[int] = None) -> List[PdfParagraph]:
         """按文件哈希、页码或段落索引获取段落"""
@@ -241,7 +241,7 @@ class SQLRepository:
             )
         ).values(translation_text=translation)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def get_paragraph_text_by_y(self, file_hash: str, page_number: int, y_coord: float) -> Optional[str]:
         """根据纵坐标获取所在页面的段落文本内容"""
@@ -275,7 +275,7 @@ class SQLRepository:
             
         if objects:
             self.db.add_all(objects)
-            self.db.commit()
+            self.db.flush()
 
     def get_images(self, file_hash: str, page_number: Optional[int] = None, image_index: Optional[int] = None) -> List[PdfImage]:
         """按文件哈希、页码或图片索引获取图片信息"""
@@ -307,7 +307,7 @@ class SQLRepository:
             
         if objects:
             self.db.add_all(objects)
-            self.db.commit()
+            self.db.flush()
 
     def get_formulas(self, file_hash: str, page_number: Optional[int] = None, formula_index: Optional[int] = None) -> List[PdfFormula]:
         """按文件哈希、页码或公式索引获取公式信息"""
@@ -335,7 +335,7 @@ class SQLRepository:
             latex_content=latex_content
         )
         self.db.add(formula)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(formula)
         return formula
 
@@ -350,7 +350,7 @@ class SQLRepository:
         if values:
             stmt = update(PdfFormula).where(PdfFormula.id == formula_id).values(**values)
             self.db.execute(stmt)
-            self.db.commit()
+            self.db.flush()
 
     def update_formula_by_location(self, file_hash: str, page_number: int, formula_index: int, latex_content: str = None, bbox: List[float] = None):
         """更新公式信息(按联合索引位置定位)"""
@@ -369,13 +369,13 @@ class SQLRepository:
                 )
             ).values(**values)
             self.db.execute(stmt)
-            self.db.commit()
+            self.db.flush()
 
     def delete_formula(self, formula_id: int):
         """删除公式(按主键id)"""
         stmt = delete(PdfFormula).where(PdfFormula.id == formula_id)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     # ==================== 笔记 ====================
 
@@ -388,7 +388,7 @@ class SQLRepository:
             keywords=keywords or []
         )
         self.db.add(note)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(note)
         return note
 
@@ -412,13 +412,13 @@ class SQLRepository:
         if values:
             stmt = stmt.values(**values)
             self.db.execute(stmt)
-            self.db.commit()
+            self.db.flush()
 
     def delete_note(self, note_id: int):
         """删除指定笔记"""
         stmt = delete(UserNote).where(UserNote.id == note_id)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def get_note_by_id(self, note_id: int) -> Optional[UserNote]:
         """根据ID获取单个笔记"""
@@ -437,7 +437,7 @@ class SQLRepository:
             color=color
         )
         self.db.add(highlight)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(highlight)
         return highlight
 
@@ -452,7 +452,7 @@ class SQLRepository:
         """删除指定高亮记录"""
         stmt = delete(UserHighlight).where(UserHighlight.id == highlight_id)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
         
     def update_highlight(self, highlight_id: int, color: str = None):
         """更新高亮颜色"""
@@ -460,7 +460,7 @@ class SQLRepository:
         if color:
             stmt = update(UserHighlight).where(UserHighlight.id == highlight_id).values(color=color)
             self.db.execute(stmt)
-            self.db.commit()
+            self.db.flush()
 
     # ==================== 聊天 ====================
 
@@ -479,7 +479,7 @@ class SQLRepository:
             title=title
         )
         self.db.add(session)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(session)
         return session
     
@@ -504,7 +504,7 @@ class SQLRepository:
             and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
         ).values(title=title)
         result = self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
         return result.rowcount > 0
         
     def delete_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID) -> int:
@@ -520,7 +520,7 @@ class SQLRepository:
             and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
         )
         result = self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
         return result.rowcount
     
     def add_chat_message(self, session_id: uuid.UUID, user_id: uuid.UUID, role: str, content: str, citations: List[Dict] = None, attachments: List[Dict] = None) -> ChatMessage:
@@ -537,7 +537,7 @@ class SQLRepository:
             citations=citations or []
         )
         self.db.add(msg)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(msg)
 
         # 处理附件
@@ -550,7 +550,7 @@ class SQLRepository:
                     data=att_data.get('data') or {}
                 )
                 self.db.add(attachment)
-            self.db.commit()
+            self.db.flush()
             self.db.refresh(msg)
             
         return msg
@@ -578,7 +578,7 @@ class SQLRepository:
             )
         )
         result = self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
         return result.rowcount
     
     # ==================== 图知识库 ====================
@@ -592,7 +592,7 @@ class SQLRepository:
             description=description
         )
         self.db.add(project)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(project)
         return project
 
@@ -617,13 +617,13 @@ class SQLRepository:
         
         stmt = update(UserGraphProject).where(UserGraphProject.id == project_id).values(**values)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def delete_graph_project(self, project_id: uuid.UUID):
         """删除指定图谱项目"""
         stmt = delete(UserGraphProject).where(UserGraphProject.id == project_id)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     # --- 图节点 ---
     def create_graph_node(self, project_id: uuid.UUID, label: str, properties: str = None) -> GraphNode:
@@ -635,7 +635,7 @@ class SQLRepository:
         )
         self.db.add(node)
         try:
-            self.db.commit()
+            self.db.flush()
             self.db.refresh(node)
         except Exception: 
             self.db.rollback()
@@ -653,7 +653,7 @@ class SQLRepository:
         """删除指定节点"""
         stmt = delete(GraphNode).where(GraphNode.id == node_id)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     # --- 图边 ---
     def create_graph_edge(self, project_id: uuid.UUID, source: uuid.UUID, target: uuid.UUID, relation: str = "related_to", desc: str = None) -> GraphEdge:
@@ -666,7 +666,7 @@ class SQLRepository:
             description=desc
         )
         self.db.add(edge)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(edge)
         return edge
 
@@ -679,7 +679,7 @@ class SQLRepository:
         """删除指定边"""
         stmt = delete(GraphEdge).where(GraphEdge.id == edge_id)
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     # --- 关联关系 ---
     
@@ -689,7 +689,7 @@ class SQLRepository:
         stmt = insert(graph_paper_association).values(graph_id=project_id, user_paper_id=user_paper_id)
         stmt = stmt.on_conflict_do_nothing()
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def remove_paper_from_project(self, project_id: uuid.UUID, user_paper_id: uuid.UUID):
         """从图谱项目中移除论文关联"""
@@ -700,19 +700,19 @@ class SQLRepository:
             )
         )
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def link_node_to_paper(self, node_id: uuid.UUID, user_paper_id: uuid.UUID):
         """建立节点与论文的链接记录"""
         stmt = insert(paper_node_link).values(graph_node_id=node_id, user_paper_id=user_paper_id)
         stmt = stmt.on_conflict_do_nothing()
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 
     def link_node_to_note(self, node_id: uuid.UUID, note_id: int):
         """建立节点与笔记的链接记录"""
         stmt = insert(note_node_link).values(graph_node_id=node_id, user_note_id=note_id)
         stmt = stmt.on_conflict_do_nothing()
         self.db.execute(stmt)
-        self.db.commit()
+        self.db.flush()
 

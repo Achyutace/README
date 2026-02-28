@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Any
 from repository.sql_repo import SQLRepository
 from model.db.doc_models import UserNote, UserHighlight
 
+from core.database import db
 logger = logging.getLogger(__name__)
 
 class NoteService:
@@ -38,15 +39,20 @@ class NoteService:
             user_paper = self.repo.create_user_paper(u_uuid, file_hash, title="Reference Document")
 
         # 3. 保存到数据库
-        note = self.repo.add_note(
-            user_paper_id=user_paper.id,
-            content=content,
-            title=title,
-            keywords=keywords or []
-        )
-        
-        logger.info(f"Note created with ID: {note.id}")
-        return note.id
+        try:
+            note = self.repo.add_note(
+                user_paper_id=user_paper.id,
+                content=content,
+                title=title,
+                keywords=keywords or []
+            )
+            db.session.commit()
+            logger.info(f"Note created with ID: {note.id}")
+            return note.id
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating note: {e}")
+            raise
 
     def delete_note(self, note_id: int) -> bool:
         """
@@ -56,6 +62,7 @@ class NoteService:
         """
         try:
             self.repo.delete_note(note_id)
+            db.session.commit()
             logger.info(f"Note deleted: {note_id}")
             return True
         except Exception as e:
@@ -72,8 +79,14 @@ class NoteService:
         :return: 是否成功
         """
 
-        self.repo.update_note(note_id, title=title, content=content, keywords=keywords)
-        return True
+        try:
+            self.repo.update_note(note_id, title=title, content=content, keywords=keywords)
+            db.session.commit()
+            return True
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating note {note_id}: {e}")
+            return False
 
     def get_notes(self, user_id: uuid.UUID, file_hash: str) -> List[Dict]:
         """
@@ -149,15 +162,21 @@ class NoteService:
             logger.warning(f"UserPaper not found: user={user_id}, file={file_hash}")
             return None
 
-        highlight = self.repo.add_highlight(
-            user_paper_id=user_paper_id,
-            page_number=page_number,
-            rects=rects,
-            selected_text=selected_text,
-            color=color
-        )
-        logger.info(f"Highlight created: id={highlight.id}")
-        return highlight.id
+        try:
+            highlight = self.repo.add_highlight(
+                user_paper_id=user_paper_id,
+                page_number=page_number,
+                rects=rects,
+                selected_text=selected_text,
+                color=color
+            )
+            db.session.commit()
+            logger.info(f"Highlight created: id={highlight.id}")
+            return highlight.id
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error adding highlight: {e}")
+            return None
 
     def get_highlights(self, user_id: uuid.UUID, file_hash: str,
                        page_number: Optional[int] = None) -> List[Dict]:
@@ -187,6 +206,7 @@ class NoteService:
         """删除高亮"""
         try:
             self.repo.delete_highlight(highlight_id)
+            db.session.commit()
             logger.info(f"Highlight deleted: {highlight_id}")
             return True
         except Exception as e:
@@ -197,6 +217,7 @@ class NoteService:
         """更新高亮颜色"""
         try:
             self.repo.update_highlight(highlight_id, color=color)
+            db.session.commit()
             return True
         except Exception as e:
             logger.error(f"Error updating highlight {highlight_id}: {e}")

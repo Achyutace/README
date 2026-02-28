@@ -74,69 +74,7 @@ class PdfService:
             return filepath
         raise FileNotFoundError(f"PDF file not found locally or in storage: {pdf_id}")
 
-    # ===================== 文件处理异步 =====================
-    def _dispatch_celery_task(self, gf, pdf_id: str, filename: str, page_count: int, user_id=None, is_restart: bool = False) -> str:
-        """
-        统一更新 GlobalFile 状态为 pending 并启动 Celery 任务。
-        返回新的 task_id。
-        """
-        from tasks.pdf_tasks import process_pdf
-        tag = "[Restart]" if is_restart else "[Ingest]"
-        
-        new_task_id = str(uuid.uuid4())
-        gf.process_status = "pending"
-        gf.error_message = None
-        gf.current_page = 0
-        gf.updated_at = datetime.now()
-        gf.task_id = new_task_id
-        
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"{tag} DB transaction failed: {e}")
-            raise e
-            
-        try:
-            process_pdf.apply_async(
-                args=[pdf_id, self.upload_folder, filename, page_count, user_id],
-                kwargs={"is_restart": is_restart},
-                task_id=new_task_id,
-            )
-            logger.info(f"{tag} Dispatched Celery task {new_task_id} for {pdf_id} (user={user_id})")
-        except Exception as e:
-            logger.error(f"{tag} Failed to dispatch Celery task for {pdf_id}: {e}")
-            gf.process_status = "failed"
-            gf.error_message = f"Task dispatch failed: {str(e)}"
-            try:
-                db.session.commit()
-            except Exception:
-                db.session.rollback()
-            raise e
-            
-        return new_task_id
-
-    def _check_and_restart_stuck_task(self, gf, pdf_id: str, timeout_minutes: int, user_id=None) -> bool:
-        """
-        检查判断任务是否卡死并重启。
-        如果卡死并重启，返回 True，否则返回 False。
-        """
-        is_stuck = False
-        if gf.process_status in ("pending", "processing") and gf.updated_at:
-            if datetime.now() - gf.updated_at > timedelta(minutes=timeout_minutes):
-                is_stuck = True
-                
-        if not is_stuck:
-            return False
-            
-        logger.warning(f"[Ingest/Poll] Task {gf.task_id} for {pdf_id} stuck > {timeout_minutes}m. Restarting.")
-        
-        page_count = gf.total_pages or 0
-        try:
-            self._dispatch_celery_task(gf, pdf_id, f"{pdf_id}.pdf", page_count, user_id, is_restart=True)
-            return True
-        except Exception:
-            return False
+    from tasks.dispatcher import dispatch_pdf_task, check_and_restart_stuck_task
 
     def ingest_file(self, file_obj, filename: str, user_id: uuid.UUID = None) -> dict:
         """
@@ -172,7 +110,7 @@ class PdfService:
                 is_completed = gf.process_status == "completed"
                 
                 # 检测是否卡死并重启
-                restarted = self._check_and_restart_stuck_task(gf, pdf_id, STUCK_TIMEOUT_MINUTES, user_id)
+                restarted = check_and_restart_stuck_task(gf, pdf_id, self.upload_folder, STUCK_TIMEOUT_MINUTES, user_id)
                 
                 # 任务已完成，或者正在处理且未卡死：直接返回
                 # 如果重启了，状态会变成 pending，也应当直接返回
@@ -249,7 +187,7 @@ class PdfService:
                 )
             
             # 统一启动异步任务
-            new_task_id = self._dispatch_celery_task(gf, pdf_id, safe_filename, page_count, user_id, is_restart=False)
+            new_task_id = dispatch_pdf_task(gf, pdf_id, self.upload_folder, safe_filename, page_count, user_id, is_restart=False)
         except Exception as e:
             raise e
 
@@ -292,7 +230,7 @@ class PdfService:
                 return {"status": "not_found", "error": "PDF not found"}
 
             # 检测并重启卡死的任务 (阈值 15 分钟)
-            self._check_and_restart_stuck_task(gf, pdf_id, timeout_minutes=15)
+            check_and_restart_stuck_task(gf, pdf_id, self.upload_folder, timeout_minutes=15)
 
             # 读取最新状态
             status = gf.process_status

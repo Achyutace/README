@@ -120,7 +120,14 @@ class TranslateService:
         translated_text = self.translate(original_text)
 
         # 3. 存储结果
-        repo.update_paragraph_translation(file_hash, page_number, paragraph_index, translated_text)
+        try:
+            repo.update_paragraph_translation(file_hash, page_number, paragraph_index, translated_text)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error saving paragraph translation: {e}")
+            # 注意：此处不一定非要 raise，因为翻译已经生成，返回结果给前端展示，只是数据库没存上
+            # 但为了严谨，这里还是记录错误
 
         return {
             'translation': translated_text,
