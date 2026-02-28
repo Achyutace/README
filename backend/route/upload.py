@@ -10,6 +10,9 @@
 任务状态轮询接口:
     GET /api/pdf/<pdf_id>/status?from_page=1
 
+PDF 内容获取接口:
+    GET /api/pdf/<pdf_id>/paragraphs?page=1
+
 状态定义: pending | processing | completed | failed
 """
 from flask import Blueprint, request, jsonify, g, send_file, current_app
@@ -21,37 +24,6 @@ logger = get_logger(__name__)
 
 # 定义蓝图
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/pdf')
-
-
-# ==========================================
-# 列表接口
-# ==========================================
-
-@upload_bp.route('/', methods=['GET'])
-@jwt_required()
-def list_user_papers():
-    """
-    获取当前用户的文献库列表
-    Query Params:
-        page (int): 当前页码
-        pageSize (int): 每页数量
-        group (str): 分组名称
-        keyword (str): 关键词
-    """
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('pageSize', 50, type=int)
-    group = request.args.get('group')
-    keyword = request.args.get('keyword')
-
-    library_service = current_app.library_service
-    result = library_service.get_user_papers(
-        user_id=g.user_id,
-        page=page,
-        page_size=page_size,
-        group_filter=group,
-        keyword=keyword
-    )
-    return jsonify(result)
 
 
 # ==========================================
@@ -145,18 +117,7 @@ def get_task_status(pdf_id):
     return jsonify(result)
 
 
-# ================== PDF 信息获取接口 ========================
-
-@upload_bp.route('/<pdf_id>/info', methods=['GET'])
-@jwt_required()
-def get_pdf_info(pdf_id):
-    """获取 PDF 元数据"""
-    try:
-        info = g.pdf_service.get_info(pdf_id)
-        return jsonify(info)
-    except FileNotFoundError:
-        raise NotFoundError('PDF not found')
-
+# ================== PDF 内容获取接口 ========================
 
 @upload_bp.route('/<pdf_id>/paragraphs', methods=['GET'])
 @jwt_required()
@@ -166,20 +127,3 @@ def get_pdf_paragraphs(pdf_id):
     result = g.pdf_service.get_paragraph(pdf_id, pagenumber=page)
     return jsonify({'paragraphs': result})
 
-
-@upload_bp.route('/<pdf_id>/source', methods=['GET'])
-@jwt_required()
-def get_pdf_source(pdf_id):
-    """
-    获取 PDF 源文件流 (支持浏览器直接预览/渲染)
-    """
-    try:
-        file_obj = g.pdf_service.get_file_obj(pdf_id)
-        return send_file(
-            file_obj,
-            mimetype='application/pdf',
-            as_attachment=False,
-            download_name=f"{pdf_id}.pdf"
-        )
-    except FileNotFoundError:
-        raise NotFoundError('PDF file not found')

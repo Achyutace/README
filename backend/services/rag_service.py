@@ -141,35 +141,6 @@ class RAGService:
             vector_repo.create_collection(self.COLLECTION_NAME)
             vector_repo.create_payload_index(self.COLLECTION_NAME, "file_hash")
 
-            # Check if vectors already exist for this file (globally)
-            if vector_repo.count(self.COLLECTION_NAME, {'file_hash': file_hash}) > 0:
-                # Append user_id to existing vectors
-                points = vector_repo.scroll(self.COLLECTION_NAME, {'file_hash': file_hash}, limit=1)
-                if points:
-                    current_payload = points[0].payload
-                    existing_users = current_payload.get('user_ids', [])
-                    if not isinstance(existing_users, list):
-                        existing_users = [str(existing_users)] if existing_users else []
-                    
-                    if user_id_str not in existing_users:
-                        existing_users.append(user_id_str)
-                        vector_repo.set_payload(
-                            self.COLLECTION_NAME, 
-                            {'user_ids': existing_users}, 
-                            filters={'file_hash': file_hash}
-                        )
-                        return {
-                            'success': True,
-                            'message': f'Updated access for user {user_id_str} on file {file_hash}',
-                            'chunks_count': len(chunks)
-                        }
-                    else:
-                        return {
-                            'success': True,
-                            'message': 'User already has access',
-                            'chunks_count': len(chunks)
-                        }
-            
             # 2. 生成 Embeddings
             embeddings = self.embeddings.embed_documents(texts)
             
@@ -450,15 +421,6 @@ class RAGService:
             Dict: 索引结果
         """
         try:
-            # 检查是否已存在
-            if self.check_exists(file_hash, user_id):
-                 return {
-                    'success': True,
-                    'message': 'Paper already indexed for this user',
-                    'chunks_created': 0,
-                    'file_hash': file_hash
-                }
-
             # 从段落对象创建文本块
             chunks = self._create_chunks_from_paragraphs(paragraphs)
             

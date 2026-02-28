@@ -7,7 +7,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { PdfDocument, PdfParagraph } from '../types'
 import { usePdfStore } from './pdf'
-import { pdfApi } from '../api'
+import { pdfApi, libraryApi, notesApi } from '../api'
+import type { Note } from '../api' // also import Note
 import { savePdfToCache, getPdfFromCache, removePdfFromCache } from '../utils/pdfCache'
 import { broadcastSync, syncChannel } from '../utils/broadcast'
 import type { SyncMessage } from '../utils/broadcast'
@@ -33,20 +34,24 @@ export const useLibraryStore = defineStore('library', () => {
   //   - pdf.ts 中的：「PDF 渲染器当前展示的」文件，用于高亮和段落定位
   const currentDocumentId = ref<string | null>(storedCurrent || null)
 
+  // 缓存各文档的笔记
+  const notesCache = ref<Record<string, Note[]>>({})
+
   // 是否已完成 IndexedDB 水合
   const isHydrated = ref(false)
 
   // 从 IndexedDB 水合文献元数据到 Pinia
   async function hydrateFromDB() {
     try {
-      const records = await dbGetAll<{ id: string; name: string; pageCount?: number; uploadedAt: string }>(STORES.LIBRARY)
+      const records = await dbGetAll<{ id: string; name: string; pageCount?: number; uploadedAt: string; tags?: string[] }>(STORES.LIBRARY)
       if (records.length > 0) {
         documents.value = records.map(rec => ({
           id: rec.id,
           name: rec.name,
           url: '', // Blob URL 刷新后即失效，后续选中时自动拉取
           uploadedAt: rec.uploadedAt ? new Date(rec.uploadedAt) : new Date(),
-          pageCount: rec.pageCount
+          pageCount: rec.pageCount,
+          tags: rec.tags || []
         }))
         console.log(`[Library] Hydrated ${records.length} documents from IndexedDB`)
       }
@@ -64,7 +69,8 @@ export const useLibraryStore = defineStore('library', () => {
         id: doc.id,
         name: doc.name,
         pageCount: doc.pageCount,
-        uploadedAt: doc.uploadedAt.toISOString()
+        uploadedAt: doc.uploadedAt.toISOString(),
+        tags: doc.tags || []
       }))
       // 先清空再批量写入，确保删除操作也被同步
       await dbClear(STORES.LIBRARY)
@@ -94,6 +100,15 @@ export const useLibraryStore = defineStore('library', () => {
     documents.value.find(doc => doc.id === currentDocumentId.value) || null
   )
 
+  // 计算应用中所有已存在的唯一标签
+  const allTags = computed(() => {
+    const tags = new Set<string>()
+    documents.value.forEach(doc => {
+      if (doc.tags) doc.tags.forEach(t => tags.add(t))
+    })
+    return Array.from(tags).sort()
+  })
+
   // 上传文件并将文档信息加入到 library 中，返回创建的 PdfDocument 对象
   async function addDocument(file: File): Promise<PdfDocument> {
     try {
@@ -110,7 +125,8 @@ export const useLibraryStore = defineStore('library', () => {
         name: file.name || data.filename,    // 保持原始上传的文件名
         url: URL.createObjectURL(file),    // 预览仍然使用本地 Blob（便于即时查看）
         uploadedAt: new Date(),    // 记录上传时间
-        pageCount: data.pageCount    // 总页数
+        pageCount: data.pageCount,    // 总页数
+        tags: []
       }
 
       // 避免重复添加（若后端返回的是已存在的记录，可根据需要处理）
@@ -143,30 +159,34 @@ export const useLibraryStore = defineStore('library', () => {
     }
   }
 
-  // 从库中移除指定 id 的文档，释放 Blob URL 并更新当前选中文档
-  function removeDocument(id: string) {
+  // 从库中移除指定 id 的文档 (持久化)
+  async function removeDocument(id: string) {
     const index = documents.value.findIndex(doc => doc.id === id)
     if (index !== -1) {
       const doc = documents.value[index]
       if (doc && doc.url) {
-        // 释放通过 URL.createObjectURL 创建的临时对象 URL
         URL.revokeObjectURL(doc.url)
       }
-      // 从文档列表中移除该文档
+
+      // 先进行本地移除 (乐观 UI)
       documents.value.splice(index, 1)
-      // 如果移除的是当前选中文档，则将当前选中置为第一个文档或 null
+
       if (currentDocumentId.value === id) {
         currentDocumentId.value = documents.value[0]?.id || null
       }
 
-      // 停止后台轮询
       stopPolling(id)
-
-      // 彻底清理 IndexedDB 中的缓存
       removePdfFromCache(id)
 
-      // 广播到其它标签页
-      broadcastSync('RELOAD_LIBRARY')
+      // 调用后端接口移除关联
+      try {
+        await libraryApi.delete(id)
+        broadcastSync('RELOAD_LIBRARY')
+      } catch (err) {
+        console.error('Failed to delete document from backend:', err)
+        // 刷新列表以保证同步
+        fetchDocuments()
+      }
     }
   }
 
@@ -235,8 +255,7 @@ export const useLibraryStore = defineStore('library', () => {
   // 从后端获取全量文献列表，刷新缓存
   async function fetchDocuments(force: boolean = false) {
     try {
-      // 这里的 50 可以根据后端分页情况调整，一般前期满足全量展示
-      const data = await pdfApi.list({ pageSize: 50 })
+      const data = await libraryApi.list({ pageSize: 50 })
       if (data && Array.isArray(data.items)) {
         // 将后端返回的格式转换为前端 PdfDocument 格式
         const remoteDocs: PdfDocument[] = data.items.map((item: any) => ({
@@ -244,7 +263,8 @@ export const useLibraryStore = defineStore('library', () => {
           name: item.title,
           url: '', // 初始化时暂无 Blob URL，点击时加载
           uploadedAt: item.addedAt ? new Date(item.addedAt) : new Date(),
-          pageCount: item.totalPages || 0
+          pageCount: item.totalPages || 0,
+          tags: item.tags || []
         }))
 
         // 后端同步策略:
@@ -257,19 +277,29 @@ export const useLibraryStore = defineStore('library', () => {
           })
           documents.value = remoteDocs
         } else {
+          // 增量同步策略:
+          // 1. 更新或添加来自服务器的文档
           remoteDocs.forEach(rd => {
             const idx = documents.value.findIndex(d => d.id === rd.id)
             if (idx !== -1) {
               const doc = documents.value[idx]
               if (doc) {
-                // 更新元数据
                 doc.name = rd.name
                 doc.pageCount = rd.pageCount
+                doc.tags = rd.tags
               }
             } else {
-              // 补充缺失文档
               documents.value.push(rd)
             }
+          })
+          // 2. 移除本地存在但服务器上已不存在的文档
+          const remoteIds = new Set(remoteDocs.map(rd => rd.id))
+          documents.value = documents.value.filter(doc => {
+            const exists = remoteIds.has(doc.id)
+            if (!exists && doc.url) {
+              URL.revokeObjectURL(doc.url)
+            }
+            return exists
           })
         }
       }
@@ -287,6 +317,7 @@ export const useLibraryStore = defineStore('library', () => {
     })
 
     documents.value = []
+    notesCache.value = {}
     currentDocumentId.value = null
     localStorage.removeItem(LIBRARY_CURRENT_KEY)
     // 同时清空 IndexedDB 中的 library store
@@ -326,6 +357,82 @@ export const useLibraryStore = defineStore('library', () => {
     }
   })
 
+  // -------------------------
+  // 标签管理 Action
+  // -------------------------
+
+  async function addTagToDocument(pdfId: string, tag: string) {
+    if (!tag.trim()) return false
+    const trimmedTag = tag.trim()
+    const doc = documents.value.find(d => d.id === pdfId)
+    if (!doc) return false
+
+    // 乐观更新
+    if (!doc.tags) doc.tags = []
+    if (!doc.tags.includes(trimmedTag)) {
+      doc.tags.push(trimmedTag)
+    }
+
+    try {
+      const result = await libraryApi.addTag(pdfId, trimmedTag)
+      if (!result.success) {
+        // 请求失败，回滚
+        doc.tags = doc.tags.filter(t => t !== trimmedTag)
+        console.error('Failed to add tag:', result.error)
+        return false
+      }
+      return true
+    } catch (err) {
+      doc.tags = doc.tags.filter(t => t !== trimmedTag)
+      console.error('API Error adding tag:', err)
+      return false
+    }
+  }
+
+  async function removeTagFromDocument(pdfId: string, tag: string) {
+    const doc = documents.value.find(d => d.id === pdfId)
+    if (!doc || !doc.tags || !doc.tags.includes(tag)) return false
+
+    // 乐观更新
+    doc.tags = doc.tags.filter(t => t !== tag)
+
+    try {
+      const result = await libraryApi.removeTag(pdfId, tag)
+      if (!result.success) {
+        // 回滚
+        doc.tags.push(tag)
+        console.error('Failed to remove tag:', result.error)
+        return false
+      }
+      return true
+    } catch (err) {
+      doc.tags.push(tag)
+      console.error('API Error removing tag:', err)
+      return false
+    }
+  }
+
+  // -------------------------
+  // 笔记缓存读取 Action
+  // -------------------------
+  async function getDocumentNotes(pdfId: string, forceRefresh = false): Promise<Note[]> {
+    if (!forceRefresh && notesCache.value[pdfId]) {
+      return notesCache.value[pdfId]
+    }
+
+    try {
+      const response = await notesApi.getNotes(pdfId)
+      if (response && response.success) {
+        notesCache.value[pdfId] = response.notes || []
+        return notesCache.value[pdfId]
+      }
+      return []
+    } catch (err) {
+      console.error(`Error fetching notes for ${pdfId}:`, err)
+      return []
+    }
+  }
+
   // 导出状态与方法供组件使用
   return {
     documents,
@@ -337,5 +444,10 @@ export const useLibraryStore = defineStore('library', () => {
     updateDocumentPageCount,
     fetchDocuments,
     clearLibrary,
+    addTagToDocument,
+    removeTagFromDocument,
+    getDocumentNotes,
+    notesCache,
+    allTags
   }
 })

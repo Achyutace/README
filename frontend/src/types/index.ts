@@ -10,6 +10,7 @@ export interface PdfDocument {
   url: string    // 本地预览URL（Blob URL），不应存储在后端
   uploadedAt: Date    // 上传时间
   pageCount?: number    // 可选的页数属性，后端返回时包含
+  tags?: string[]    // 可选的标签属性
 }
 
 // PDF 段落信息
@@ -191,6 +192,17 @@ export interface NoteActionResponse {
   success: boolean
   message: string
   id?: number // 仅在创建时返回
+}
+
+// 内部链接数据返回类型
+export interface InternalLinkData {
+  title: string
+  url: string
+  snippet: string
+  published_date: string
+  authors: string[]
+  source: string
+  valid: number  // 1 表示内容完整，0 表示有缺失项
 }
 
 // 笔记列表响应

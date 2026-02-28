@@ -35,7 +35,7 @@ readme/
 │   │   ├── image_service.py        # 图片处理相关服务
 │   │   ├── library_service.py      # 文献库管理：上传，删除，获取论文条目和笔记
 │   │   ├── note_service.py         # 笔记服务：添加笔记，删除笔记
-│   │   ├── paper_service.py        # 处理论文、返回段落和图表信息；获取解析状态
+│   │   ├── paper_service.py        # 论文核心服务：提取段落、管理解析状态及文件访问
 │   │   ├── rag_service.py          # 用户全文献库 RAG 服务   
 │   │   ├── roadmap_service.py      # 知识图谱服务：增删结点、关系；获取结点及相应数据
 │   │   ├── translate_service.py    # 翻译服务：大模型请求翻译

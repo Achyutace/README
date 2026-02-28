@@ -53,14 +53,23 @@ frontend/
 ├── src/
 │   ├── main.ts                                程序启动入口
 │   ├── App.vue                                根组件（布局管理）
-│   ├── api/
-│   │   └── index.ts                           所有后端请求接口封装
+│   ├── api/                                后端请求接口（模块化拆分）
+│   │   ├── index.ts                       入口：子模块聚合导出中心
+│   │   ├── client.ts                      核心：Axios 实例与 Token 刷新拦截器
+│   │   ├── auth.ts                        认证：登录、注册、用户信息
+│   │   ├── pdf.ts                         阅读：上传、解析状态、段落获取
+│   │   ├── library.ts                     文献：列表、删除、标签管理
+│   │   ├── ai.ts                          智能：摘要、全文/段落翻译、路线图
+│   │   ├── chat.ts                        对话：会话管理、消息发送
+│   │   └── misc.ts                        其他：笔记、高亮、内部链接
 │   ├── stores/                                Pinia 状态中心
 │   │   ├── auth.ts                            用户认证、凭证管理
 │   │   ├── chat.ts                            对话历史、消息流转
 │   │   ├── library.ts                         文献库元数据、文档管理
-│   │   ├── pdf.ts                             PDF 渲染状态、缩放设置
-│   │   ├── translation.ts                     划词/全文翻译内容管理
+│   │   ├── pdf.ts                             PDF 核心状态（拆分后仅保留核心渲染数据）
+│   │   ├── pdf-ui.ts                          PDF UI 状态（解耦：悬浮窗、弹窗）
+│   │   ├── pdf-translation.ts                 PDF 翻译引擎（解耦：流水线预翻译逻辑）
+│   │   ├── translation.ts                     划词/全文翻译内容缓存
 │   │   ├── theme.ts                           亮暗模式、主题偏好
 │   │   ├── panel.ts                           UI 面板展开/折叠状态
 │   │   └── roadmap.ts                         路线图数据交互

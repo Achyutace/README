@@ -41,7 +41,7 @@ paths:
     $ref: "./paths/pdf.yaml#/info"
   "/pdf/{pdf_id}/paragraphs":
     $ref: "./paths/pdf.yaml#/paragraphs"
-  "/pdf/{pdf_id}/source":
+  "/library/{pdf_id}/source":
     $ref: "./paths/pdf.yaml#/source"
 
   # --- Chat 相关 API ---

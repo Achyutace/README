@@ -13,7 +13,6 @@ import { usePdfStore } from '../../stores/pdf'
 import { useChatStore } from '../../stores/chat'
 import { useRoadmapStore } from '../../stores/roadmap'
 import { useAuthStore } from '../../stores/auth'
-import { authApi } from '../../api'
 import { useRouter } from 'vue-router'
 
 // ------------------------- 初始化 store 实例 -------------------------
@@ -25,9 +24,11 @@ const roadmapStore = useRoadmapStore()
 const authStore = useAuthStore()
 const router = useRouter()
 
+// 从库中获取所有唯一标签用于侧边栏展示
+const uniqueTags = computed(() => libraryStore.allTags)
+
 function handleLogout() {
-  authApi.logout()
-  router.push('/login')
+  authStore.handleLogout()
 }
 
 // ------------------------- 初始化侧边栏折叠与交互状态 -------------------------
@@ -160,7 +161,7 @@ function removeDocument(id: string, event: Event) {
     >
       <!-- Logo Area -->
       <div class="h-[42px] flex items-center justify-between px-4 pt-1">
-        <h1 v-if="showFullContent" class="text-2xl font-extrabold tracking-tight text-primary-500">
+        <h1 v-if="showFullContent" class="text-2xl font-extrabold tracking-tight text-primary-500 cursor-pointer" @click="router.push('/')">
           README
         </h1>
         <button
@@ -199,39 +200,66 @@ function removeDocument(id: string, event: Event) {
       </div>
 
       <!-- Document List -->
-      <div class="flex-1 overflow-y-auto px-2">
-        <div v-if="showFullContent" class="px-2 py-2 text-xs text-gray-400 uppercase tracking-wider">
-          文献库
-        </div>
-        <ul class="space-y-1">
-          <li
-            v-for="doc in libraryStore.documents"
-            :key="doc.id"
-            @click="selectDocument(doc.id)"
-            :class="[
-              'flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors group',
-              libraryStore.currentDocumentId === doc.id
-                ? 'bg-primary-600/20 text-primary-400'
-                : 'hover:bg-gray-700/50 text-gray-300'
-            ]"
+      <div class="flex-1 overflow-y-auto px-2 mt-2 space-y-4">
+        
+        <!-- 文献总库入口 -->
+        <div>
+          <div 
+            v-if="showFullContent" 
+            class="px-2 py-2 text-xs text-gray-400 uppercase tracking-wider cursor-pointer hover:text-white flex items-center justify-between group"
+            @click="router.push('/library')"
           >
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <span v-if="showFullContent" class="flex-1 truncate text-sm">
-              {{ doc.name }}
-            </span>
-            <button
-              v-if="showFullContent"
-              @click="removeDocument(doc.id, $event)"
-              class="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-600/20 rounded transition-all"
+            <span>文献库管理</span>
+            <svg class="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+          </div>
+          <ul class="space-y-1">
+            <li
+              v-for="doc in libraryStore.documents"
+              :key="doc.id"
+              @click="selectDocument(doc.id)"
+              :class="[
+                'flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors group',
+                libraryStore.currentDocumentId === doc.id
+                  ? 'bg-primary-600/20 text-primary-400'
+                  : 'hover:bg-gray-700/50 text-gray-300'
+              ]"
             >
-              <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-            </button>
-          </li>
-        </ul>
+              <span v-if="showFullContent" class="flex-1 truncate text-sm">
+                {{ doc.name }}
+              </span>
+              <button
+                v-if="showFullContent"
+                @click="removeDocument(doc.id, $event)"
+                class="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-600/20 rounded transition-all"
+              >
+                <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 标签分组入口 (由文献提取出的唯一标签) -->
+        <div v-if="showFullContent && uniqueTags.length > 0">
+           <div class="px-2 py-2 text-xs text-gray-400 uppercase tracking-wider">
+            标签分组
+          </div>
+          <ul class="space-y-1 text-sm">
+             <li
+              v-for="tag in uniqueTags"
+              :key="tag"
+              @click="router.push(`/library?tag=${encodeURIComponent(tag)}`)"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors hover:bg-gray-700/50 text-gray-300"
+            >
+              <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
+              <span class="truncate">{{ tag }}</span>
+            </li>
+          </ul>
+        </div>
 
         <!-- Empty State -->
         <div

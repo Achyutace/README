@@ -150,7 +150,7 @@ paragraphs:
 
 source:
   get:
-    tags: [PDF]
+    tags: [Library]
     summary: 获取PDF源文件
     security:
       - BearerAuth: []

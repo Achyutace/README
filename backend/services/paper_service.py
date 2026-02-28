@@ -75,6 +75,69 @@ class PdfService:
         raise FileNotFoundError(f"PDF file not found locally or in storage: {pdf_id}")
 
     # ===================== 文件处理异步 =====================
+    def _dispatch_celery_task(self, gf, pdf_id: str, filename: str, page_count: int, user_id=None, is_restart: bool = False) -> str:
+        """
+        统一更新 GlobalFile 状态为 pending 并启动 Celery 任务。
+        返回新的 task_id。
+        """
+        from tasks.pdf_tasks import process_pdf
+        tag = "[Restart]" if is_restart else "[Ingest]"
+        
+        new_task_id = str(uuid.uuid4())
+        gf.process_status = "pending"
+        gf.error_message = None
+        gf.current_page = 0
+        gf.updated_at = datetime.now()
+        gf.task_id = new_task_id
+        
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"{tag} DB transaction failed: {e}")
+            raise e
+            
+        try:
+            process_pdf.apply_async(
+                args=[pdf_id, self.upload_folder, filename, page_count, user_id],
+                kwargs={"is_restart": is_restart},
+                task_id=new_task_id,
+            )
+            logger.info(f"{tag} Dispatched Celery task {new_task_id} for {pdf_id} (user={user_id})")
+        except Exception as e:
+            logger.error(f"{tag} Failed to dispatch Celery task for {pdf_id}: {e}")
+            gf.process_status = "failed"
+            gf.error_message = f"Task dispatch failed: {str(e)}"
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+            raise e
+            
+        return new_task_id
+
+    def _check_and_restart_stuck_task(self, gf, pdf_id: str, timeout_minutes: int, user_id=None) -> bool:
+        """
+        检查判断任务是否卡死并重启。
+        如果卡死并重启，返回 True，否则返回 False。
+        """
+        is_stuck = False
+        if gf.process_status in ("pending", "processing") and gf.updated_at:
+            if datetime.now() - gf.updated_at > timedelta(minutes=timeout_minutes):
+                is_stuck = True
+                
+        if not is_stuck:
+            return False
+            
+        logger.warning(f"[Ingest/Poll] Task {gf.task_id} for {pdf_id} stuck > {timeout_minutes}m. Restarting.")
+        
+        page_count = gf.total_pages or 0
+        try:
+            self._dispatch_celery_task(gf, pdf_id, f"{pdf_id}.pdf", page_count, user_id, is_restart=True)
+            return True
+        except Exception:
+            return False
+
     def ingest_file(self, file_obj, filename: str, user_id: uuid.UUID = None) -> dict:
         """
         摄入文件：负责查重、存储、更新GlobalFile、触发Celery。
@@ -107,17 +170,13 @@ class PdfService:
             if gf:
                 # 判定当前任务状态
                 is_completed = gf.process_status == "completed"
-                is_processing = gf.process_status == "processing"
                 
-                # 检查是否卡死 (Processing 但很久没更新)
-                is_stuck = False
-                if is_processing and gf.updated_at:
-                    if datetime.now() - gf.updated_at > timedelta(minutes=STUCK_TIMEOUT_MINUTES):
-                        is_stuck = True
-                        logger.warning(f"[Ingest] Task {gf.task_id} for {pdf_id} stuck > {STUCK_TIMEOUT_MINUTES}m. Restarting.")
-
+                # 检测是否卡死并重启
+                restarted = self._check_and_restart_stuck_task(gf, pdf_id, STUCK_TIMEOUT_MINUTES, user_id)
+                
                 # 任务已完成，或者正在处理且未卡死：直接返回
-                if is_completed or (is_processing and not is_stuck):
+                # 如果重启了，状态会变成 pending，也应当直接返回
+                if is_completed or restarted or (gf.process_status in ("pending", "processing")):
                     logger.info(f"[Ingest] File {pdf_id} exists (status={gf.process_status}). Instant return.")
                     return {
                         "pdf_id": pdf_id,
@@ -127,7 +186,7 @@ class PdfService:
                         "is_new": False
                     }
                 
-                logger.info(f"[Ingest] File {pdf_id} status={gf.process_status} (stuck/failed), re-dispatching...")
+                logger.info(f"[Ingest] File {pdf_id} status={gf.process_status} (failed), re-dispatching...")
         except Exception as e:
             db.session.rollback()
             raise
@@ -169,23 +228,15 @@ class PdfService:
         except Exception:
             pass
             
-        # 准备新的 Task ID
-        new_task_id = str(uuid.uuid4())
-        
-        # 6. 更新 GlobalFile (Pending)
+        # 6. 更新 GlobalFile (Pending) 或 创建
         repo = SQLRepository(db.session)
         try:
             gf = repo.get_global_file(pdf_id)
             if gf:
-                # 重置旧任务状态
-                gf.process_status = "pending"
-                gf.error_message = None
+                # 只更新需要刷新的信息
                 gf.total_pages = page_count
-                gf.current_page = 0
                 gf.metadata_info = metadata
                 gf.dimensions = dimensions
-                gf.updated_at = datetime.now()
-                gf.task_id = new_task_id
             else:
                 # 创建新任务
                 gf = repo.create_global_file(
@@ -196,28 +247,10 @@ class PdfService:
                     metadata=metadata,
                     dimensions=dimensions,
                 )
-                gf.task_id = new_task_id
-            db.session.commit()
+            
+            # 统一启动异步任务
+            new_task_id = self._dispatch_celery_task(gf, pdf_id, safe_filename, page_count, user_id, is_restart=False)
         except Exception as e:
-            db.session.rollback()
-            logger.error(f"[Ingest] DB transaction failed: {e}")
-            raise e
-
-        # 7. 启动 Celery 异步处理
-        try:
-            process_pdf.apply_async(
-                args=[pdf_id, self.upload_folder, safe_filename, page_count, user_id],
-                task_id=new_task_id,
-            )
-            logger.info(f"[Ingest] Dispatched Celery task {new_task_id} for {pdf_id} (user={user_id})")
-        except Exception as e:
-            logger.error(f"[Ingest] Failed to dispatch Celery task for {pdf_id}: {e}")
-            # 如果分发失败，更新状态为 failed
-            gf = repo.get_global_file(pdf_id)
-            if gf:
-                gf.process_status = "failed"
-                gf.error_message = f"Task dispatch failed: {str(e)}"
-                db.session.commit()
             raise e
 
         # 更新内存缓存
@@ -253,14 +286,19 @@ class PdfService:
         """
         repo = SQLRepository(db.session)
         try:
-            progress = repo.get_process_progress(pdf_id)
-            if not progress:
+            # 获取 GlobalFile 自身以检测卡死情况
+            gf = repo.get_global_file(pdf_id)
+            if not gf:
                 return {"status": "not_found", "error": "PDF not found"}
 
-            status = progress["status"]
-            current_page = progress["current_page"]
-            total_pages = progress["total_pages"]
-            error_msg = progress.get("error")
+            # 检测并重启卡死的任务 (阈值 15 分钟)
+            self._check_and_restart_stuck_task(gf, pdf_id, timeout_minutes=15)
+
+            # 读取最新状态
+            status = gf.process_status
+            current_page = gf.current_page or 0
+            total_pages = gf.total_pages or 0
+            error_msg = gf.error_message
 
             paragraphs = []
             if current_page > 0 and from_page <= current_page:
@@ -354,6 +392,7 @@ class PdfService:
 
         return paragraphs
 
+
     def get_file_obj(self, pdf_id: str):
         """
         根据 pdf_id 获取文件对象 (二进制流)
@@ -362,74 +401,4 @@ class PdfService:
         """
         filepath = self.get_filepath(pdf_id)
         return open(filepath, 'rb')
-    
-
-    # ================= 图片 ========================
-
-    def get_images_list(self, pdf_id: str) -> list[dict]:
-        """获取图片元数据列表"""
-        """
-        db, repo = self._get_repo()
-        try:
-            db_imgs = repo.get_images(pdf_id)
-            if db_imgs and len(db_imgs) > 0:
-                result = []
-                for img in db_imgs:
-                    image_index = img.image_index
-                    image_id = pdf_engine.make_image_id(pdf_id, image_index)
-                    result.append({
-                        "id": image_id,
-                        "page": img.page_number,
-                        "bbox": img.bbox
-                    })
-                return result
-        except Exception as e:
-            logger.warning(f"Failed to fetch images from DB for {pdf_id}: {e}")
-        finally:
-            db.close()
-
-        try:
-            filepath = self.get_filepath(pdf_id)
-            images_list = pdf_engine.get_images_list(filepath, pdf_id)
-
-            db, repo = self._get_repo()
-            try:
-                images_to_save = []
-                for img in images_list:
-                    images_to_save.append({
-                        "page_number": img['page'],
-                        "image_index": img['index'],
-                        "bbox": img['bbox'],
-                        "caption": ""
-                    })
-                repo.save_images(pdf_id, images_to_save)
-                logger.info(f"Recovered and saved {len(images_to_save)} images meta for {pdf_id}")
-            except Exception as save_err:
-                logger.error(f"Failed to save recovered images to DB for {pdf_id}: {save_err}")
-            finally:
-                db.close()
-
-            return images_list
-
-        except Exception as e:
-            logger.error(f"Error fetching images list for {pdf_id}: {e}")
-            return []
-        """
-        pass
-    
-    def get_image_data(self, image_id: str) -> dict:
-        """获取图片 Base64 数据"""
-        """
-        try:
-            pdf_id, image_index = pdf_engine.parse_image_id(image_id)
-            filepath = self.get_filepath(pdf_id)
-            result = pdf_engine.get_image_data(filepath, image_index)
-            if result:
-                result['id'] = image_id
-            return result
-        except Exception as e:
-            logger.error(f"Error fetching image data {image_id}: {e}")
-            return None
-        """
-        pass
 

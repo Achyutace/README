@@ -218,11 +218,6 @@ export interface InternalLinkData {
 // 对应后端： router/upload.py
 // -----------------------------
 export const pdfApi = {
-  // 获取文献库列表
-  list: async (params?: { page?: number; pageSize?: number; group?: string; keyword?: string }) => {
-    const { data } = await api.get('/pdf/', { params })
-    return data
-  },
 
   // 上传 PDF 文件，返回 PdfUploadResponse
   upload: async (file: File): Promise<PdfUploadResponse> => {
@@ -245,7 +240,7 @@ export const pdfApi = {
   // 获取 PDF 的原始二进制源文件数据
   getSource: async (pdfId: string): Promise<Blob> => {
     // 设置 responseType 为 blob 确保 axios 原样返回二进制文件
-    const response = await api.get(`/pdf/${pdfId}/source`, {
+    const response = await api.get(`/library/${pdfId}/source`, {
       responseType: 'blob'
     })
     return response.data
@@ -264,6 +259,62 @@ export const pdfApi = {
     })
     return data
   },
+
+  // 获取已解析的段落 (按页)
+  getParagraphs: async (pdfId: string, pageNumber: number): Promise<{ paragraphs: PdfParagraph[] }> => {
+    const { data } = await api.get(`/pdf/${pdfId}/paragraphs`, {
+      params: { page: pageNumber }
+    })
+    return data
+  }
+}
+
+/**
+ * 文献库管理 API
+ * 对应后端： router/library.py
+ */
+export const libraryApi = {
+  // 获取文献库列表
+  list: async (params?: { page?: number; pageSize?: number; group?: string; keyword?: string }) => {
+    const { data } = await api.get('/library/', { params })
+    return data
+  },
+
+  // 获取单篇文献元数据
+  getInfo: async (pdfId: string) => {
+    const { data } = await api.get(`/library/${pdfId}/info`)
+    return data
+  },
+
+  // 为文献添加标签
+  addTag: async (pdfId: string, tag: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { data } = await api.post(`/library/${pdfId}/tags`, { tag })
+      return data
+    } catch (err: any) {
+      return { success: false, error: err.response?.data?.error || err.message }
+    }
+  },
+
+  // 移除文献标签
+  removeTag: async (pdfId: string, tag: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { data } = await api.delete(`/library/${pdfId}/tags/${encodeURIComponent(tag)}`)
+      return data
+    } catch (err: any) {
+      return { success: false, error: err.response?.data?.error || err.message }
+    }
+  },
+
+  // 从书架移除文献 (软删除)
+  delete: async (pdfId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { data } = await api.delete(`/library/${pdfId}`)
+      return data
+    } catch (err: any) {
+      return { success: false, error: err.response?.data?.error || err.message }
+    }
+  }
 }
 
 // -----------------------------

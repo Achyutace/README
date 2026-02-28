@@ -61,7 +61,7 @@ def _resolve_filepath(file_hash: str, upload_folder: str) -> str:
 @celery.task(bind=True, name="tasks.pdf_tasks.process_pdf",
              max_retries=3, default_retry_delay=60)
 
-def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: uuid.UUID = None):
+def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_count: int, user_id: uuid.UUID = None, is_restart: bool = False):
     """
     PDF 全流程异步处理任务。
 
@@ -80,10 +80,22 @@ def process_pdf(self, file_hash: str, upload_folder: str, filename: str, page_co
         try:
             filepath = _resolve_filepath(file_hash, upload_folder)
 
+            # ================= 计算需要继续处理的断点页码 ===========================
+            start_page = 1
+            if is_restart:
+                try:
+                    repo = SQLRepository(db.session)
+                    gf = repo.get_global_file(file_hash)
+                    if gf and gf.current_page:
+                        start_page = gf.current_page + 1
+                        logger.info(f"[Task {task_id}] Restart triggered. Resuming from page {start_page} for {file_hash}...")
+                except Exception as e:
+                    logger.warning(f"[Task {task_id}] Failed to fetch current_page for resume: {e}")
+
             # ================= 逐页解析段落 + 图片元数据 ===========================
             _update_status(file_hash, STATUS_PROCESSING, task_id=task_id)
 
-            for page_num in range(1, page_count + 1):
+            for page_num in range(start_page, page_count + 1):
                 logger.info(f"[Task {task_id}] Processing page {page_num}/{page_count}")
 
                 # 解析段落

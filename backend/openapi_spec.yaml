@@ -482,7 +482,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MeResponse' }
 
-  # ================= PDF =================
+  # ================= PDF (Ingestion & Content) =================
   /pdf/upload:
     post:
       tags: [PDF]
@@ -511,28 +511,16 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: from_page
+          in: query
+          required: false
+          schema: { type: integer, default: 1 }
       responses:
         200:
           description: 状态信息
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StatusResponse' }
-
-  /pdf/{pdf_id}/info:
-    get:
-      tags: [PDF]
-      summary: 获取 PDF 元数据信息
-      parameters:
-        - name: pdf_id
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        200:
-          description: PDF 信息
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/InfoResponse' }
 
   /pdf/{pdf_id}/paragraphs:
     get:
@@ -553,12 +541,18 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Paragraph' }
+                type: object
+                properties:
+                  paragraphs:
+                    type: array
+                    items: { $ref: '#/components/schemas/Paragraph' }
 
-  /pdf/{pdf_id}/source:
+
+  # ================= Library (Management) =================
+  
+  /library/{pdf_id}/source:
     get:
-      tags: [PDF]
+      tags: [Library]
       summary: 获取 PDF 源文件
       parameters:
         - name: pdf_id
@@ -571,6 +565,113 @@ paths:
           content:
             application/pdf:
               schema: { type: string, format: binary }
+
+  /library/:
+    get:
+      tags: [Library]
+      summary: 获取当前用户的文献库列表
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: group
+          in: query
+          schema: { type: string }
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        200:
+          description: 文献列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/InfoResponse' }
+                  total: { type: integer }
+
+  /library/{pdf_id}/info:
+    get:
+      tags: [Library]
+      summary: 获取 PDF 元数据信息
+      parameters:
+        - name: pdf_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: PDF 信息
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfoResponse' }
+
+  /library/{pdf_id}/tags:
+    post:
+      tags: [Library]
+      summary: 为文档添加标签
+      parameters:
+        - name: pdf_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag: { type: string }
+      responses:
+        200:
+          description: 添加成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /library/{pdf_id}/tags/{tag}:
+    delete:
+      tags: [Library]
+      summary: 移除文档的标签
+      parameters:
+        - name: pdf_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: tag
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: 移除成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /library/{pdf_id}:
+    delete:
+      tags: [Library]
+      summary: 从书架移除文献 (软删除)
+      parameters:
+        - name: pdf_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: 移除成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
 
   # ================= Chat =================
   /chatbox/new:

@@ -33,6 +33,7 @@ from route.notes import notes_bp
 from route.auth import auth_bp
 from route.link import link_bp
 from route.roadmap import roadmap_bp
+from route.library import library_bp
 
 # ==================== 2.1 Celery ====================
 from celery_app import celery  # noqa: F401  (确保 Worker 能发现任务)
@@ -200,6 +201,7 @@ app.register_blueprint(notes_bp)       # URL 前缀: /api/notes
 app.register_blueprint(auth_bp)        # URL 前缀: /api/auth
 app.register_blueprint(roadmap_bp)     # URL 前缀: /api/roadmap
 app.register_blueprint(link_bp)        # URL 前缀: /api/link
+app.register_blueprint(library_bp)     # URL 前缀: /api/library
 
 # ==================== 7. 健康检查接口 ====================
 

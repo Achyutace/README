@@ -22,6 +22,12 @@ const router = createRouter({
       component: () => import('../layouts/MainLayout.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/library',
+      name: 'library',
+      component: () => import('../layouts/LibraryLayout.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
