@@ -1,9 +1,8 @@
 from typing import List, Dict, Optional, Any, Union
 import uuid
 from datetime import datetime
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, update, func, and_, desc, asc
-from sqlalchemy.dialects.postgresql import insert
 
 # Using absolute imports
 from model.db.base import Base
@@ -468,10 +467,13 @@ class SQLRepository:
         """创建新的聊天会话"""
         user_paper_id = None
         if file_hash:
-            user_paper = self.get_user_paper(user_id, file_hash)
+            # 通过 file_hash 查找对应的 UserPaper
+            stmt = select(UserPaper).where(
+                and_(UserPaper.user_id == user_id, UserPaper.file_hash == file_hash)
+            )
+            user_paper = self.db.execute(stmt).scalar_one_or_none()
             if user_paper:
                 user_paper_id = user_paper.id
-                
         session = ChatSession(
             id=session_id,
             user_id=user_id,
@@ -485,16 +487,19 @@ class SQLRepository:
     
     def get_chat_session(self, session_id: uuid.UUID, user_id: uuid.UUID) -> Optional[ChatSession]:
         """获取指定用户的聊天会话"""
-        stmt = select(ChatSession).options(selectinload(ChatSession.user_paper)).where(
+        stmt = select(ChatSession).where(
             and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
         )
         return self.db.execute(stmt).scalar_one_or_none()
         
     def list_chat_sessions(self, user_id: uuid.UUID, file_hash: Optional[str] = None, limit: int = 50) -> List[ChatSession]:
         """列出用户的聊天会话列表"""
-        stmt = select(ChatSession).options(selectinload(ChatSession.user_paper)).where(ChatSession.user_id == user_id)
+        stmt = select(ChatSession).where(ChatSession.user_id == user_id)
         if file_hash:
-            stmt = stmt.join(UserPaper, ChatSession.user_paper_id == UserPaper.id).where(UserPaper.file_hash == file_hash)
+            # ChatSession 通过 user_paper_id 关联 UserPaper，UserPaper 才有 file_hash
+            stmt = stmt.join(UserPaper, ChatSession.user_paper_id == UserPaper.id).where(
+                UserPaper.file_hash == file_hash
+            )
         stmt = stmt.order_by(desc(ChatSession.updated_at)).limit(limit)
         return self.db.execute(stmt).scalars().all()
     
@@ -563,23 +568,6 @@ class SQLRepository:
             )
         ).order_by(asc(ChatMessage.created_at))
         return self.db.execute(stmt).scalars().all()
-
-    def delete_chat_messages_after(self, session_id: uuid.UUID, user_id: uuid.UUID, start_msg_id: int) -> int:
-        """删除指定消息 ID 之后（含）的所有消息"""
-        # 验证 session 归属
-        session = self.get_chat_session(session_id, user_id)
-        if not session:
-            return 0
-        
-        stmt = delete(ChatMessage).where(
-            and_(
-                ChatMessage.session_id == session_id,
-                ChatMessage.id >= start_msg_id
-            )
-        )
-        result = self.db.execute(stmt)
-        self.db.commit()
-        return result.rowcount
     
     # ==================== 图知识库 ====================
 
@@ -685,11 +673,11 @@ class SQLRepository:
     
     def add_paper_to_project(self, project_id: uuid.UUID, user_paper_id: uuid.UUID):
         """将论文关联到图谱项目"""
-        # M2M table insert
-        stmt = insert(graph_paper_association).values(graph_id=project_id, user_paper_id=user_paper_id)
-        stmt = stmt.on_conflict_do_nothing()
-        self.db.execute(stmt)
-        self.db.commit()
+        try:
+            self.db.execute(graph_paper_association.insert().values(graph_id=project_id, user_paper_id=user_paper_id))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
 
     def remove_paper_from_project(self, project_id: uuid.UUID, user_paper_id: uuid.UUID):
         """从图谱项目中移除论文关联"""
@@ -704,15 +692,17 @@ class SQLRepository:
 
     def link_node_to_paper(self, node_id: uuid.UUID, user_paper_id: uuid.UUID):
         """建立节点与论文的链接记录"""
-        stmt = insert(paper_node_link).values(graph_node_id=node_id, user_paper_id=user_paper_id)
-        stmt = stmt.on_conflict_do_nothing()
-        self.db.execute(stmt)
-        self.db.commit()
+        try:
+            self.db.execute(paper_node_link.insert().values(graph_node_id=node_id, user_paper_id=user_paper_id))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
 
     def link_node_to_note(self, node_id: uuid.UUID, note_id: int):
         """建立节点与笔记的链接记录"""
-        stmt = insert(note_node_link).values(graph_node_id=node_id, user_note_id=note_id)
-        stmt = stmt.on_conflict_do_nothing()
-        self.db.execute(stmt)
-        self.db.commit()
+        try:
+            self.db.execute(note_node_link.insert().values(graph_node_id=node_id, user_note_id=note_id))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
 

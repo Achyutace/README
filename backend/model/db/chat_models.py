@@ -1,5 +1,4 @@
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, Uuid, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -16,11 +15,11 @@ class ChatSession(Base):
     """
     __tablename__ = "chat_sessions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=False, index=True)
     
     # 可选：绑定特定论文。如果为空，则是"全库对话"模式
-    user_paper_id = Column(UUID(as_uuid=True), ForeignKey("user_papers.id"), nullable=True)
+    user_paper_id = Column(Uuid, ForeignKey("user_papers.id"), nullable=True)
     
     title = Column(String(255), default="New Chat")
     
@@ -36,7 +35,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id"), nullable=False, index=True)
+    session_id = Column(Uuid, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     
     role = Column(String(20), nullable=False) # 'user' | 'assistant'
     content = Column(Text, nullable=False)
@@ -44,7 +43,7 @@ class ChatMessage(Base):
     # RAG 引用源：非常重要
     # 存储: [{ "source_type": "vector", "id": "vec_123", "text": "...", "score": 0.8 }, 
     #       { "source_type": "graph", "id": "node_456", "name": "Transformer" }]
-    citations = Column(JSONB, nullable=True) 
+    citations = Column(JSON, nullable=True) 
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -68,7 +67,7 @@ class ChatAttachment(Base):
     file_path = Column(String, nullable=True)
     
     # 其他数据/内容 (针对 citation/note, 或文件的 metadata)
-    data = Column(JSONB, nullable=True)
+    data = Column(JSON, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

@@ -5,23 +5,38 @@
 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { PdfParagraph, Highlight, NormalizedRect, HighlightsStorage } from '../types'
+import type { PdfParagraph } from '../types'
 import type { PageSize } from '../types/pdf'
-import { highlightApi, type InternalLinkData } from '../api'
+import { highlightApi, pdfApi, aiApi, type InternalLinkData } from '../api'
 
 // 实际缩放 150%，显示为 100%
 const DEFAULT_SCALE = 1.5
+// 矩形框（左上角坐标 + 宽高）
+type NormalizedRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+// 高亮对象结构
+type Highlight = {
+  id: string    // 唯一标识符
+  page: number    // 所在页码
+  rects: NormalizedRect[]    // 该高亮覆盖的多个矩形区域
+  text: string    // 高亮的文本内容
+  color: string    // 高亮颜色（十六进制字符串）
+}
+
+// 存储结构：文档ID -> 高亮列表
+type HighlightsStorage = Record<string, Highlight[]>
 
 export type { Highlight, NormalizedRect }
 
 export const usePdfStore = defineStore('pdf', () => {
   // ---------------------- 可观察的状态（state） ----------------------
   const currentPdfUrl = ref<string | null>(null) // 当前打开的 PDF 文件 URL
-  // PDF 渲染器当前展示的文档 ID（用于高亮隔离、段落定位）
-  // 注：与 library.ts 中的 currentDocumentId 语义不同——
-  //   - pdf.ts 这里的：渲染器上下文 ID，随 setCurrentPdf 切换
-  //   - library.ts 中的：用户在文献库选中的 ID，驱动文件 Blob 加载
-  const activeReaderId = ref<string | null>(null) // 当前文档 ID（用于区分不同文档的高亮与段落）
+  const currentDocumentId = ref<string | null>(null) // 当前文档 ID（用于区分不同文档的高亮与段落）
   const currentPage = ref(1) // 当前页码（从 1 开始）
   const totalPages = ref(0) // 文档总页数
   const scale = ref(DEFAULT_SCALE) // 当前缩放比例（内部以 1.5 为基准）
@@ -42,8 +57,8 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 当前文档的高亮（计算属性，若没有当前文档则返回空数组）
   const highlights = computed(() => {
-    if (!activeReaderId.value) return []
-    return allHighlights.value[activeReaderId.value] || []
+    if (!currentDocumentId.value) return []
+    return allHighlights.value[currentDocumentId.value] || []
   })
 
   // 默认高亮颜色（亮黄色）
@@ -62,20 +77,44 @@ export const usePdfStore = defineStore('pdf', () => {
   const pageSizesConstant = ref<PageSize | null>(null)
   const pageSizesArray = ref<PageSize[] | null>(null)
 
+  // overlays: images / tables / formulas
+  type OverlayItem = {
+    id: string
+    page: number
+    left: number
+    top: number
+    width: number
+    height: number
+    type: 'image' | 'table' | 'formula'
+    meta?: any
+  }
+
+  const allOverlays = ref<Record<string, OverlayItem[]>>({})
+
+  function getOverlaysByPage(page: number) {
+    if (!currentDocumentId.value) return [] as OverlayItem[]
+    const list = allOverlays.value[currentDocumentId.value] || []
+    return list.filter(o => o.page === page)
+  }
+
   // 当前文档的段落（计算属性）
   const paragraphs = computed(() => {
-    if (!activeReaderId.value) return []
-    return allParagraphs.value[activeReaderId.value] || []
+    if (!currentDocumentId.value) return []
+    return allParagraphs.value[currentDocumentId.value] || []
   })
 
 
 
-  // ---------------------- 按页预翻译状态 ----------------------
-  // 记录每一页的翻译状态: 'idle' | 'loading' | 'done' | 'error'
-  const pageTranslationStatus = ref<Record<number, 'idle' | 'loading' | 'done' | 'error'>>({})
-
-  // 全文翻译状态
-  const fullTranslationStatus = ref<'idle' | 'loading' | 'done' | 'error'>('idle')
+  // ---------------------- 全文预翻译状态 ----------------------
+  const isPreTranslating = ref(false)
+  const preTranslateQueue = ref<string[]>([])
+  const preTranslateTotal = ref(0)
+  const preTranslateCompleted = ref(0)
+  const preTranslatePdfId = ref<string | null>(null)
+  const preTranslateProgress = computed(() => {
+    if (preTranslateTotal.value === 0) return 0
+    return Math.round((preTranslateCompleted.value / preTranslateTotal.value) * 100)
+  })
 
   // UI 显示的缩放百分比
   const scalePercent = computed(() => Math.round((scale.value / DEFAULT_SCALE) * 100))
@@ -88,12 +127,10 @@ export const usePdfStore = defineStore('pdf', () => {
     clearHighlightSelection()
 
     currentPdfUrl.value = url
-    activeReaderId.value = documentId || null
+    currentDocumentId.value = documentId || null
     currentPage.value = 1
     scale.value = DEFAULT_SCALE
     isLoading.value = true
-    pageTranslationStatus.value = {}
-    fullTranslationStatus.value = 'idle'
 
     // 确保当前文档在高亮存储中存在对应数组（避免未定义访问）
     if (documentId) {
@@ -174,14 +211,14 @@ export const usePdfStore = defineStore('pdf', () => {
   // 从当前选择创建一个高亮并保存到当前文档
   async function addHighlightFromSelection() {
     // 需要有选择信息、选中文本且存在当前文档 ID
-    if (!selectionInfo.value || !selectedText.value || !activeReaderId.value) {
+    if (!selectionInfo.value || !selectedText.value || !currentDocumentId.value) {
       if (!selectionInfo.value) console.warn('Cannot add highlight: no selection info')
       if (!selectedText.value) console.warn('Cannot add highlight: no selected text')
-      if (!activeReaderId.value) console.warn('Cannot add highlight: no document ID')
+      if (!currentDocumentId.value) console.warn('Cannot add highlight: no document ID')
       return
     }
 
-    const docId = activeReaderId.value
+    const docId = currentDocumentId.value
     const page = selectionInfo.value.page
     const pageData = pageSizesArray.value?.[page - 1] || pageSizesConstant.value
     const pageWidth = pageData?.width || 800
@@ -239,12 +276,12 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 删除当前文档下的某条高亮
   async function removeHighlight(id: string) {
-    if (!activeReaderId.value) {
+    if (!currentDocumentId.value) {
       console.warn('Cannot remove highlight: no current document')
       return
     }
 
-    const docId = activeReaderId.value
+    const docId = currentDocumentId.value
     try {
       await highlightApi.deleteHighlight(id)
       // 后台删除成功后同步本地缓存
@@ -263,12 +300,12 @@ export const usePdfStore = defineStore('pdf', () => {
 
   // 更新某条高亮的颜色
   async function updateHighlightColor(id: string, color: string) {
-    if (!activeReaderId.value) {
+    if (!currentDocumentId.value) {
       console.warn('Cannot update highlight color: no current document')
       return
     }
 
-    const docId = activeReaderId.value
+    const docId = currentDocumentId.value
     try {
       await highlightApi.updateHighlight(id, color)
       // 更新成功后，改本地样式
@@ -324,20 +361,6 @@ export const usePdfStore = defineStore('pdf', () => {
     allParagraphs.value[documentId] = paragraphsData
   }
 
-  // 增量追加段落（用于后台解析轮询）
-  function appendParagraphs(documentId: string, newParagraphs: PdfParagraph[]) {
-    if (!newParagraphs.length) return
-    const existing = allParagraphs.value[documentId] ?? []
-    const existingIds = new Set(existing.map(p => p.id))
-    const toAdd = newParagraphs.filter(p => !existingIds.has(p.id))
-    if (!toAdd.length) return
-
-    const merged = [...existing, ...toAdd]
-    // 确保同一页内的段落按纵坐标正确排序，以防追加错乱
-    merged.sort((a, b) => a.page - b.page || (a.bbox?.y0 ?? 0) - (b.bbox?.y0 ?? 0))
-    allParagraphs.value[documentId] = merged
-  }
-
   // 获取指定页面对应的段落列表（用于显示翻译、跳转等）
   function getParagraphsByPage(page: number): PdfParagraph[] {
     return paragraphs.value.filter(p => p.page === page)
@@ -349,86 +372,77 @@ export const usePdfStore = defineStore('pdf', () => {
     pageSizesArray.value = array
   }
 
-  // ---------------------- 按页预翻译 ----------------------
-  // ---------------------- 翻译核心引擎 ----------------------
+  // ---------------------- 全文预翻译 ----------------------
 
-  /**
-   * 预翻译核心逻辑：翻译指定页面的所有段落
-   * @param pageNumber 页码
-   * @param skipIfProcessing 如果该页已经在翻译中，是否忽略（防止重复请求）
-   */
-  async function startPagePreTranslation(pageNumber: number, skipIfProcessing = true) {
-    if (!activeReaderId.value) return
-    const pdfId = activeReaderId.value
-
-    // 【关键防护】：同步检查并设置状态。
-    // 由于 JS 单线程特性，在第一个 await 之前设置状态可以确保并发调用被拦截。
-    if (skipIfProcessing && pageTranslationStatus.value[pageNumber] === 'loading') {
-      return
-    }
-
+  // 启动全文预翻译
+  async function startPreTranslation(pdfId: string) {
     const docParagraphs = allParagraphs.value[pdfId]
-    if (!docParagraphs) return
+    if (!docParagraphs || docParagraphs.length === 0) return
 
-    const pageParagraphs = docParagraphs.filter(p => p.page === pageNumber)
-    if (!pageParagraphs.length) {
-      pageTranslationStatus.value[pageNumber] = 'done'
-      return
-    }
+    isPreTranslating.value = true
+    preTranslatePdfId.value = pdfId
+    preTranslateQueue.value = docParagraphs.map(p => p.id)
+    preTranslateTotal.value = docParagraphs.length
+    preTranslateCompleted.value = 0
 
-    // 同步标记为加载中
-    pageTranslationStatus.value[pageNumber] = 'loading'
-
-    const { useTranslationStore } = await import('./translation')
-    const translationStore = useTranslationStore()
-    const { aiApi } = await import('../api')
-
-    let allSuccess = true
-
-    // 逐段翻译（如果前端有缓存则直接跳过，不再请求后端）
-    for (const p of pageParagraphs) {
-      if (translationStore.getCachedTranslation(p.id)) {
-        continue
-      }
-      try {
-        const result = await aiApi.translateParagraph(pdfId, p.id)
-        if (result.success) {
-          translationStore.setTranslation(p.id, result.translation)
-        } else {
-          allSuccess = false
-        }
-      } catch (error) {
-        console.error(`[Pre-translate] Failed for paragraph ${p.id}:`, error)
-        allSuccess = false
-      }
-    }
-
-    pageTranslationStatus.value[pageNumber] = allSuccess ? 'done' : 'error'
-    return allSuccess
+    await processPreTranslateQueue()
   }
 
-  /**
-   * 全文预翻译：按页序执行
-   */
-  async function startFullPreTranslation() {
-    if (!activeReaderId.value || fullTranslationStatus.value === 'loading') return
+  // 逐个处理预翻译队列
+  async function processPreTranslateQueue() {
+    // 延迟导入 translation store 避免循环依赖
+    const { useTranslationStore } = await import('./translation')
+    const translationStore = useTranslationStore()
 
-    fullTranslationStatus.value = 'loading'
-    const total = totalPages.value
-    let hasError = false
+    while (preTranslateQueue.value.length > 0 && isPreTranslating.value) {
+      const paragraphId = preTranslateQueue.value[0] as string
 
-    try {
-      // 采用顺序执行，避免瞬间数千个段落请求压垮后端/浏览器
-      // 同时可以让用户看到预览进度
-      for (let i = 1; i <= total; i++) {
-        const success = await startPagePreTranslation(i, true)
-        if (success === false) hasError = true
+      // 已缓存则跳过
+      if (translationStore.translationCache[paragraphId]) {
+        preTranslateQueue.value.shift()
+        preTranslateCompleted.value++
+        continue
       }
 
-      fullTranslationStatus.value = hasError ? 'error' : 'done'
-    } catch (e) {
-      console.error('[Full Pre-translate] Interrupted:', e)
-      fullTranslationStatus.value = 'error'
+      try {
+        const pdfId = preTranslatePdfId.value
+        if (pdfId) {
+          const result = await aiApi.translateParagraph(pdfId, paragraphId)
+          if (result.success) {
+            translationStore.setTranslation(paragraphId, result.translation)
+          }
+        }
+      } catch (error) {
+        console.error(`Pre-translate failed for ${paragraphId}:`, error)
+      }
+
+      // 按值移除（防止队列被 prioritize 重排后误删）
+      const idx = preTranslateQueue.value.indexOf(paragraphId)
+      if (idx !== -1) {
+        preTranslateQueue.value.splice(idx, 1)
+      }
+      preTranslateCompleted.value++
+    }
+
+    // 完成
+    isPreTranslating.value = false
+    preTranslatePdfId.value = null
+  }
+
+  // 停止预翻译
+  function stopPreTranslation() {
+    isPreTranslating.value = false
+    preTranslateQueue.value = []
+    preTranslatePdfId.value = null
+  }
+
+  // 优先翻译指定段落（移到队列最前面）
+  function prioritizeParagraph(paragraphId: string) {
+    if (!isPreTranslating.value) return
+    const index = preTranslateQueue.value.indexOf(paragraphId)
+    if (index > 0) {
+      preTranslateQueue.value.splice(index, 1)
+      preTranslateQueue.value.unshift(paragraphId)
     }
   }
 
@@ -579,12 +593,105 @@ export const usePdfStore = defineStore('pdf', () => {
     }
   }
 
+  // 从后端获取 MinerU layout 并将段落写入本地 store
+  async function fetchLayoutForPdf(pdfId: string) {
+    if (!pdfId) return
+    try {
+      const resp = await pdfApi.getLayout(pdfId)
+      if (!resp || !resp.layout) return
+
+      const parsed = resp.layout
+      const paragraphs: PdfParagraph[] = []
+      const overlays: OverlayItem[] = []
+
+      // 解析段落列表（backend 返回的 bbox 可能为 [x0,y0,x1,y1] 或 [x,y,w,h]
+      for (const p of parsed.paragraphs || []) {
+        const page = p.page
+        const index = p.index ?? 0
+        const content = p.content || ''
+        const rawBbox = Array.isArray(p.bbox) ? p.bbox : []
+
+        let x0 = 0, y0 = 0, x1 = 0, y1 = 0
+        if (rawBbox.length === 4) {
+          // Heuristic: if third element > first and fourth > second treat as x1,y1
+          if (rawBbox[2] > rawBbox[0] && rawBbox[3] > rawBbox[1]) {
+            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[2]; y1 = rawBbox[3]
+          } else {
+            // treat as x,y,w,h
+            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[0] + rawBbox[2]; y1 = rawBbox[1] + rawBbox[3]
+          }
+        }
+
+        const width = x1 - x0
+        const height = y1 - y0
+
+        const paraId = `pdf_chk_${String(pdfId).slice(0,8)}_${page}_${index}`
+
+        paragraphs.push({
+          id: paraId,
+          page,
+          bbox: { x0, y0, x1, y1, width, height },
+          content,
+          wordCount: content ? content.split('\n').join(' ').split(' ').filter(Boolean).length : 0
+        })
+      }
+
+      // 解析 images / tables / formulas 为 overlays
+      const pushOverlay = (item: any, type: 'image' | 'table' | 'formula', idxBase = 0) => {
+        const page = item.page || item.page_no || 1
+        const rawBbox = Array.isArray(item.bbox) ? item.bbox : []
+        let x0 = 0, y0 = 0, x1 = 0, y1 = 0
+        if (rawBbox.length === 4) {
+          if (rawBbox[2] > rawBbox[0] && rawBbox[3] > rawBbox[1]) {
+            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[2]; y1 = rawBbox[3]
+          } else {
+            x0 = rawBbox[0]; y0 = rawBbox[1]; x1 = rawBbox[0] + rawBbox[2]; y1 = rawBbox[1] + rawBbox[3]
+          }
+        }
+        const width = x1 - x0
+        const height = y1 - y0
+
+        // Normalize to relative coordinates based on page size if available
+        const pageSize = pageSizesArray.value?.[page - 1] || pageSizesConstant.value || { width: 1, height: 1 }
+        const pw = pageSize.width || 1
+        const ph = pageSize.height || 1
+
+        const left = x0 / pw
+        const top = y0 / ph
+        const w = width / pw
+        const h = height / ph
+
+        const id = `${type}_${String(pdfId).slice(0,8)}_${page}_${idxBase || item.index || 0}`
+        overlays.push({ id, page, left, top, width: w, height: h, type, meta: item })
+      }
+
+      ;(parsed.images || []).forEach((it: any, i: number) => pushOverlay(it, 'image', i))
+      ;(parsed.tables || []).forEach((it: any, i: number) => pushOverlay(it, 'table', i))
+      ;(parsed.formulas || []).forEach((it: any, i: number) => pushOverlay(it, 'formula', i))
+
+      setParagraphs(pdfId, paragraphs)
+      // store overlays
+      allOverlays.value[pdfId] = overlays
+      // expose debug info for browser console inspection
+      try {
+        ;(window as any).__pdfDebug = (window as any).__pdfDebug || {}
+        ;(window as any).__pdfDebug.lastLayout = parsed
+        ;(window as any).__pdfDebug.lastOverlays = overlays
+      } catch (err) {
+        // ignore
+      }
+      console.log(`[pdf store] fetchLayoutForPdf ${pdfId}: paragraphs=${paragraphs.length} overlays=${overlays.length}`)
+    } catch (e) {
+      console.error('Failed to fetch layout for pdf', pdfId, e)
+    }
+  }
+
   // ---------------------- 跨标签监听 ----------------------
   import('../utils/broadcast').then(({ syncChannel }) => {
     syncChannel.addEventListener('message', (event) => {
       const { type, payload } = event.data
       if (type === 'RELOAD_HIGHLIGHTS') {
-        if (payload && payload === activeReaderId.value) {
+        if (payload && payload === currentDocumentId.value) {
           fetchHighlightsForPdf(payload)
           console.log(`[Broadcast] Required reloading highlights for PDF: ${payload}`)
         }
@@ -595,7 +702,7 @@ export const usePdfStore = defineStore('pdf', () => {
   // ---------------------- 导出 store 接口 ----------------------
   return {
     currentPdfUrl,
-    activeReaderId: activeReaderId,
+    currentDocumentId,
     currentPage,
     totalPages,
     scale,
@@ -638,12 +745,15 @@ export const usePdfStore = defineStore('pdf', () => {
     // 段落管理
     paragraphs,
     setParagraphs,
-    appendParagraphs,
+    fetchLayoutForPdf,
     getParagraphsByPage,
     // 页面尺寸
     pageSizesConstant,
     pageSizesArray,
     setPageSizes,
+    // overlays
+    getOverlaysByPage,
+    allOverlays,
     // 笔记预览卡片
     notePreviewCard,
     openNotePreviewCard,
@@ -654,11 +764,14 @@ export const usePdfStore = defineStore('pdf', () => {
     openSmartRefCard,
     closeSmartRefCard,
     updateSmartRefPosition,
-    // 按页预翻译
-    pageTranslationStatus,
-    fullTranslationStatus,
-    startPagePreTranslation,
-    startFullPreTranslation,
+    // 全文预翻译
+    isPreTranslating,
+    preTranslateTotal,
+    preTranslateCompleted,
+    preTranslateProgress,
+    startPreTranslation,
+    stopPreTranslation,
+    prioritizeParagraph,
     // 内部链接弹窗
     internalLinkPopup,
     openInternalLinkPopup,

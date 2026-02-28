@@ -1,5 +1,4 @@
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, Table, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, Table, UniqueConstraint, Uuid
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -11,22 +10,22 @@ from .base import Base
 # 1. 论文 <-> 图谱节点 (代表这篇论文包含这个核心关键词)
 paper_node_link = Table(
     'paper_node_link', Base.metadata,
-    Column('user_paper_id', UUID(as_uuid=True), ForeignKey('user_papers.id', ondelete="CASCADE"), primary_key=True),
-    Column('graph_node_id', UUID(as_uuid=True), ForeignKey('graph_nodes.id', ondelete="CASCADE"), primary_key=True)
+    Column('user_paper_id', Uuid, ForeignKey('user_papers.id', ondelete="CASCADE"), primary_key=True),
+    Column('graph_node_id', Uuid, ForeignKey('graph_nodes.id', ondelete="CASCADE"), primary_key=True)
 )
 
 # 2. 笔记 <-> 图谱节点 (代表这条笔记关联了这个核心关键词)
 note_node_link = Table(
     'note_node_link', Base.metadata,
     Column('user_note_id', Integer, ForeignKey('user_notes.id', ondelete="CASCADE"), primary_key=True),
-    Column('graph_node_id', UUID(as_uuid=True), ForeignKey('graph_nodes.id', ondelete="CASCADE"), primary_key=True)
+    Column('graph_node_id', Uuid, ForeignKey('graph_nodes.id', ondelete="CASCADE"), primary_key=True)
 )
 
 # 3. 论文 <-> 图谱项目 (论文属于哪个图谱上下文)
 graph_paper_association = Table(
     'graph_paper_association', Base.metadata,
-    Column('graph_id', UUID(as_uuid=True), ForeignKey('user_graph_projects.id', ondelete="CASCADE"), primary_key=True),
-    Column('user_paper_id', UUID(as_uuid=True), ForeignKey('user_papers.id', ondelete="CASCADE"), primary_key=True)
+    Column('graph_id', Uuid, ForeignKey('user_graph_projects.id', ondelete="CASCADE"), primary_key=True),
+    Column('user_paper_id', Uuid, ForeignKey('user_papers.id', ondelete="CASCADE"), primary_key=True)
 )
 
 
@@ -38,8 +37,8 @@ class UserGraphProject(Base):
     """
     __tablename__ = "user_graph_projects"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=False, index=True)
     
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
@@ -66,8 +65,8 @@ class GraphNode(Base):
     """
     __tablename__ = "graph_nodes"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("user_graph_projects.id"), nullable=False, index=True)
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(Uuid, ForeignKey("user_graph_projects.id"), nullable=False, index=True)
     
     # 节点核心信息 (即关键词)
     label = Column(String(255), nullable=False, comment="显示的关键词，如 'Transformer'")
@@ -98,11 +97,11 @@ class GraphEdge(Base):
     """
     __tablename__ = "graph_edges"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("user_graph_projects.id"), nullable=False, index=True)
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(Uuid, ForeignKey("user_graph_projects.id"), nullable=False, index=True)
     
-    source_node_id = Column(UUID(as_uuid=True), ForeignKey("graph_nodes.id", ondelete="CASCADE"), nullable=False)
-    target_node_id = Column(UUID(as_uuid=True), ForeignKey("graph_nodes.id", ondelete="CASCADE"), nullable=False)
+    source_node_id = Column(Uuid, ForeignKey("graph_nodes.id", ondelete="CASCADE"), nullable=False)
+    target_node_id = Column(Uuid, ForeignKey("graph_nodes.id", ondelete="CASCADE"), nullable=False)
     
     # 关系类型 TODO
     # 建议在代码层或数据库层做 Enum 约束，例如: 

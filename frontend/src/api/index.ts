@@ -16,37 +16,35 @@ import type { Keyword, Summary, Translation, ChatMessage, Roadmap, PdfParagraph,
 export type { Note, CreateNoteRequest, UpdateNoteRequest, NoteActionResponse, NoteListResponse } from '../types'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL, // 依靠 .env 环境变量注入 API 地址
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   timeout: 60000, // AI 生成可能较慢，增加超时时间
-  withCredentials: true, // 允许跨域请求带上 HttpOnly Cookie
 })
 
 // 请求拦截器：为所有请求自动注入 Authorization 头
 // 备注：这里可以统一注入 token、traceId 等通用头信息
 // ==================== Token 管理 ====================
 
+const TOKEN_KEY = 'readme_access_token'
+const REFRESH_TOKEN_KEY = 'readme_refresh_token'
 const USER_KEY = 'readme_user'
 
-let memoryAccessToken: string | null = null
-
 export function getAccessToken(): string | null {
-  return memoryAccessToken
+  return localStorage.getItem(TOKEN_KEY)
 }
 
 export function getRefreshToken(): string | null {
-  // refreshToken 已经改为 HttpOnly Cookie，前端 JS 无法也无需读取
-  return null
+  return localStorage.getItem(REFRESH_TOKEN_KEY)
 }
 
-export function setTokens(accessToken: string) {
-  memoryAccessToken = accessToken
+export function setTokens(accessToken: string, refreshToken: string) {
+  localStorage.setItem(TOKEN_KEY, accessToken)
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
 }
 
 export function clearTokens() {
-  memoryAccessToken = null
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
-  // 如果需要完全登出清除 Cookie，最好再调用一个后端的 /auth/logout 接口
-  // 目前我们只清除前端内存和可访问的存储
 }
 
 export function setCurrentUser(user: { id: string; username: string; email: string }) {
@@ -63,6 +61,38 @@ export function isAuthenticated(): boolean {
   return !!getAccessToken()
 }
 
+// ==================== 临时 Mock 认证初始化 ====================
+/**
+ * 临时解决方案：在没有正式登录界面时，为浏览器预填一个 Mock Token。
+ * 如果已有 token 则先验证是否有效，无效则重新登录。
+ */
+// TODO
+export async function initMockAuth() {
+  // 如果已有 token，先验证是否有效
+  if (getAccessToken()) {
+    try {
+      await authApi.getMe();
+      console.log('Existing token is valid.');
+      return;
+    } catch {
+      console.warn('Existing token is invalid, re-authenticating...');
+      clearTokens();
+    }
+  }
+
+  // 没有有效 token，尝试登录/注册
+  try {
+    await authApi.login('guest@example.com', 'guest123456');
+    console.log('Auto login successful.');
+  } catch {
+    try {
+      await authApi.register('Guest', 'guest@example.com', 'guest123456');
+      console.log('Auto register + login successful.');
+    } catch (regErr) {
+      console.warn('Auto auth failed, some features may not work:', regErr);
+    }
+  }
+}
 
 // ==================== 请求拦截器：自动注入 Bearer Token ====================
 
@@ -99,8 +129,9 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
-    // 仅在 401 且非 auth 接口时尝试刷新
-    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/')) {
+    // 在 401 或 422(flask-jwt-extended token 无效) 且非 auth 接口时尝试刷新
+    const status = error.response?.status
+    if ((status === 401 || status === 422) && !originalRequest._retry && !originalRequest.url?.includes('/auth/')) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject })
@@ -113,14 +144,20 @@ api.interceptors.response.use(
       originalRequest._retry = true
       isRefreshing = true
 
+      const refreshToken = getRefreshToken()
+      if (!refreshToken) {
+        clearTokens()
+        window.dispatchEvent(new CustomEvent('auth:logout'))
+        return Promise.reject(error)
+      }
+
       try {
         const { data } = await axios.post(
           `${api.defaults.baseURL}/auth/refresh`,
-          {},
-          { withCredentials: true } // 确保带上 HttpOnly Cookie
+          { refreshToken },
         )
         const newAccessToken = data.accessToken
-        setTokens(newAccessToken)
+        localStorage.setItem(TOKEN_KEY, newAccessToken)
         processQueue(null, newAccessToken)
         originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
         return api(originalRequest)
@@ -147,7 +184,7 @@ export const authApi = {
   register: async (username: string, email: string, password: string) => {
     const { data } = await api.post('/auth/register', { username, email, password })
     if (data.accessToken) {
-      setTokens(data.accessToken)
+      setTokens(data.accessToken, data.refreshToken)
       setCurrentUser(data.user)
     }
     return data
@@ -157,7 +194,7 @@ export const authApi = {
   login: async (email: string, password: string) => {
     const { data } = await api.post('/auth/login', { email, password })
     if (data.accessToken) {
-      setTokens(data.accessToken)
+      setTokens(data.accessToken, data.refreshToken)
       setCurrentUser(data.user)
     }
     return data
@@ -177,8 +214,10 @@ export const authApi = {
 
   // 刷新 Token
   refreshToken: async () => {
-    const { data } = await api.post('/auth/refresh')
-    setTokens(data.accessToken)
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) throw new Error('No refresh token')
+    const { data } = await api.post('/auth/refresh', { refreshToken })
+    localStorage.setItem(TOKEN_KEY, data.accessToken)
     return data
   },
 }
@@ -218,12 +257,6 @@ export interface InternalLinkData {
 // 对应后端： router/upload.py
 // -----------------------------
 export const pdfApi = {
-  // 获取文献库列表
-  list: async (params?: { page?: number; pageSize?: number; group?: string; keyword?: string }) => {
-    const { data } = await api.get('/pdf/', { params })
-    return data
-  },
-
   // 上传 PDF 文件，返回 PdfUploadResponse
   upload: async (file: File): Promise<PdfUploadResponse> => {
     const formData = new FormData()
@@ -250,18 +283,10 @@ export const pdfApi = {
     })
     return response.data
   },
-
-  // 查询 PDF 处理进度（用于前端轮询）
-  getStatus: async (pdfId: string, fromPage: number = 1): Promise<{
-    status: 'pending' | 'processing' | 'completed' | 'failed'
-    currentPage: number
-    totalPages: number
-    error: string | null
-    paragraphs: PdfParagraph[]
-  }> => {
-    const { data } = await api.get(`/pdf/${pdfId}/status`, {
-      params: { from_page: fromPage }
-    })
+  
+  // 获取 PDF 的布局信息（包含段落/images/tables 的 bbox）
+  getLayout: async (pdfId: string): Promise<any> => {
+    const { data } = await api.get(`/pdf/${pdfId}/layout`)
     return data
   },
 }
@@ -410,8 +435,7 @@ export const chatSessionApi = {
     model?: string, // 可选：覆盖后端默认模型
     apiBase?: string, // 可选：自定义 OpenAI-like 的 base URL
     apiKey?: string, // 可选：自定义 API Key（谨慎使用）
-    history?: Array<{ role: string; content: string }>, // 可选：重发/编辑时传入的历史覆盖
-    pruneFromId?: string // 可选：裁减历史的消息 ID
+    history?: Array<{ role: string; content: string }> // 可选：重发/编辑时传入的历史覆盖
   ): Promise<{
     sessionId: string
     response: string
@@ -426,8 +450,7 @@ export const chatSessionApi = {
       pdfId,
       model,
       apiBase,
-      apiKey,
-      pruneFromId
+      apiKey
     }
     if (history) {
       payload.history = history
@@ -444,7 +467,15 @@ export const chatSessionApi = {
 export const linkApi = {
   // 获取内部链接数据（发送 pdfId 和 paragraphId，返回论文信息）
   getLinkData: async (pdfId: string, targetParagraphId: string): Promise<InternalLinkData> => {
-
+    // const defaultData: InternalLinkData = {
+    //   title: 'Attention Is All You Need',
+    //   url: 'https://arxiv.org/abs/1706.03762',
+    //   snippet: '这是一个示例论文的摘要片段，用于展示内部链接数据的结构。',
+    //   published_date: '2024-01-01',
+    //   authors: ['作者 A', '作者 B'],
+    //   source: 'arXiv',
+    //   valid: 1
+    // }
     const defaultData: InternalLinkData = {
       title: "",
       url: '',

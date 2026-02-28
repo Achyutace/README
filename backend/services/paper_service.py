@@ -111,8 +111,8 @@ class PdfService:
                 
                 # 检查是否卡死 (Processing 但很久没更新)
                 is_stuck = False
-                if is_processing and gf.updated_at:
-                    if datetime.now() - gf.updated_at > timedelta(minutes=STUCK_TIMEOUT_MINUTES):
+                if is_processing and gf.last_accessed_at:
+                    if datetime.now() - gf.last_accessed_at > timedelta(minutes=STUCK_TIMEOUT_MINUTES):
                         is_stuck = True
                         logger.warning(f"[Ingest] Task {gf.task_id} for {pdf_id} stuck > {STUCK_TIMEOUT_MINUTES}m. Restarting.")
 
@@ -184,7 +184,7 @@ class PdfService:
                 gf.current_page = 0
                 gf.metadata_info = metadata
                 gf.dimensions = dimensions
-                gf.updated_at = datetime.now()
+                gf.last_accessed_at = datetime.now()
                 gf.task_id = new_task_id
             else:
                 # 创建新任务
@@ -203,7 +203,7 @@ class PdfService:
             logger.error(f"[Ingest] DB transaction failed: {e}")
             raise e
 
-        # 7. 启动 Celery 异步处理
+        # 7. 启动 Celery 异步处理（Redis 不可用时降级为同步）
         try:
             process_pdf.apply_async(
                 args=[pdf_id, self.upload_folder, safe_filename, page_count, user_id],
@@ -211,14 +211,18 @@ class PdfService:
             )
             logger.info(f"[Ingest] Dispatched Celery task {new_task_id} for {pdf_id} (user={user_id})")
         except Exception as e:
-            logger.error(f"[Ingest] Failed to dispatch Celery task for {pdf_id}: {e}")
-            # 如果分发失败，更新状态为 failed
-            gf = repo.get_global_file(pdf_id)
-            if gf:
-                gf.process_status = "failed"
-                gf.error_message = f"Task dispatch failed: {str(e)}"
-                db.session.commit()
-            raise e
+            logger.warning(f"[Ingest] Celery dispatch failed ({e}), falling back to synchronous processing...")
+            try:
+                from tasks.pdf_tasks import process_pdf_sync
+                process_pdf_sync(pdf_id, self.upload_folder, safe_filename, page_count, user_id)
+                logger.info(f"[Ingest] Synchronous processing completed for {pdf_id}")
+            except Exception as sync_err:
+                logger.error(f"[Ingest] Sync processing also failed: {sync_err}")
+                gf = repo.get_global_file(pdf_id)
+                if gf:
+                    gf.process_status = "failed"
+                    gf.error_message = f"Processing failed: {str(sync_err)}"
+                    db.session.commit()
 
         # 更新内存缓存
         self.pdf_registry[pdf_id] = {
@@ -418,10 +422,53 @@ class PdfService:
         pass
     
     def get_image_data(self, image_id: str) -> dict:
-        """获取图片 Base64 数据"""
+        """获取图片 Base64 数据。
+
+        优先根据数据库记录中的 `image_path` 定位 MinerU 缓存的文件（`cache/mineru/<file_hash>/...`），
+        找到后使用 `pdf_engine.get_image_data_from_path` 读取文件并返回；否则回退到 PyMuPDF 提取。
         """
         try:
             pdf_id, image_index = pdf_engine.parse_image_id(image_id)
+
+            # 1. 尝试从 DB 获取存储路径
+            repo = SQLRepository(db.session)
+            db_imgs = repo.get_images(pdf_id, image_index=image_index)
+            if db_imgs:
+                img_record = db_imgs[0]
+                if getattr(img_record, 'image_path', None):
+                    from pathlib import Path as _Path
+                    ip = _Path(img_record.image_path)
+                    parts = ip.parts
+                    if len(parts) >= 2:
+                        file_hash_from_path = parts[1]
+                        relative_tail = str(_Path(*parts[2:])) if len(parts) > 2 else ""
+                    else:
+                        file_hash_from_path = pdf_id
+                        relative_tail = str(ip)
+
+                    cache_root = _Path(self.upload_folder).parent / "cache"
+                    mineru_dir = cache_root / "mineru" / file_hash_from_path
+
+                    # 策略 1: 直接拼接
+                    if relative_tail:
+                        direct_path = mineru_dir / relative_tail
+                        if direct_path.exists():
+                            result = pdf_engine.get_image_data_from_path(str(direct_path))
+                            if result:
+                                result['id'] = image_id
+                                return result
+
+                    # 策略 2: 在 mineru_dir 递归搜索同名文件
+                    target_name = ip.name
+                    if mineru_dir.exists():
+                        for found in mineru_dir.rglob(target_name):
+                            if found.is_file():
+                                result = pdf_engine.get_image_data_from_path(str(found))
+                                if result:
+                                    result['id'] = image_id
+                                    return result
+
+            # 2. 回退: PyMuPDF 提取
             filepath = self.get_filepath(pdf_id)
             result = pdf_engine.get_image_data(filepath, image_index)
             if result:
@@ -430,6 +477,4 @@ class PdfService:
         except Exception as e:
             logger.error(f"Error fetching image data {image_id}: {e}")
             return None
-        """
-        pass
 

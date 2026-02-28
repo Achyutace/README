@@ -22,14 +22,33 @@ db = SQLAlchemy(model_class=Base)
 
 
 def init_db(app):
-    """在 Flask app 上初始化 Flask-SQLAlchemy"""
-    # 处理云数据库常见的连接断开问题
-    database_url = settings.DATABASE_URL
-    if "sslmode" not in database_url:
-        separator = "&" if "?" in database_url else "?"
-        database_url = f"{database_url}{separator}sslmode=require"
+    """在 Flask app 上初始化 Flask-SQLAlchemy。
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    逻辑说明：如果是 SQLite 且为相对路径，解析为绝对路径并创建目录；
+    否则保留原始 DATABASE_URL，并对 Postgres 添加 sslmode=require（若未指定）。
+    同时在 app context 中自动创建表以便开发环境能开箱即用。
+    """
+    from pathlib import Path
+
+    db_url = settings.DATABASE_URL
+
+    # 如果是 sqlite 且为相对路径，解析为项目根下的绝对路径
+    if db_url and db_url.startswith("sqlite:///") and not db_url.startswith("sqlite:////"):
+        relative_part = db_url[len("sqlite:///"):]
+        if not (len(relative_part) >= 2 and relative_part[1] == ':'):
+            project_root = Path(__file__).resolve().parent.parent.parent
+            abs_path = project_root / relative_part
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            db_url = f"sqlite:///{abs_path}"
+            logger.info(f"SQLite database path resolved to: {abs_path}")
+
+    # 对非-sqlite 的数据库，确保 sslmode 参数（常见于 Postgres in cloud）
+    if db_url and not db_url.startswith("sqlite:"):
+        if "sslmode" not in db_url:
+            separator = "&" if "?" in db_url else "?"
+            db_url = f"{db_url}{separator}sslmode=require"
+
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     
     # 优化连接池设置，防止连接断开
@@ -41,16 +60,14 @@ def init_db(app):
     }
     db.init_app(app)
 
-    # 确保所有模型在建表前被导入
-    import model.db.user_models
-    import model.db.doc_models
-    import model.db.chat_models
-    import model.db.graph_models
-
-# 生产环境改为数据库迁移
-#    with app.app_context():
-#        db.create_all()
-#        logger.info("Database tables verified/created successfully.")
+    # 自动创建所有表（开发环境方便）
+    import model.db.user_models   # noqa: F401
+    import model.db.doc_models    # noqa: F401
+    import model.db.chat_models   # noqa: F401
+    import model.db.graph_models  # noqa: F401
+    with app.app_context():
+        Base.metadata.create_all(bind=db.engine)
+        logger.info("Database tables created/verified.")
 
 # ==========================================
 # 2. Vector Databases (Qdrant)

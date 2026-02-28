@@ -67,39 +67,46 @@ class ChatService:
         sessions = self.repo.list_chat_sessions(user_id, file_hash=file_hash, limit=limit)
         return self.format_session_list(sessions)
 
-    def create_session(self, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat", session_id: Optional[str] = None) -> Dict:
+    def create_session(self, user_id: uuid.UUID, file_hash: str = None, title: str = "New Chat") -> Dict:
         """创建新会话"""
-        if session_id:
-            s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        else:
-            s_uuid = uuid.uuid4()
+        session_id = uuid.uuid4()
         
         session = self.repo.create_chat_session(
-            session_id=s_uuid,
+            session_id=session_id,
             user_id=user_id,
             file_hash=file_hash,
             title=title
         )
         
+        pdf_id = file_hash
+        if session.user_paper:
+            pdf_id = session.user_paper.file_hash
+
         return {
             'id': str(session.id),
-            'pdfId': file_hash,
+            'pdfId': pdf_id,
             'title': session.title,
             'createdAt': session.created_at.isoformat() if session.created_at else None,
             'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
         }
 
-    def get_session(self, session_id: str, user_id: str) -> Optional[Dict]:
+    def get_session(self, session_id, user_id) -> Optional[Dict]:
         """获取单个会话详情"""
-        u_uuid = uuid.UUID(user_id) if user_id != 'default' else uuid.UUID('00000000-0000-0000-0000-000000000000')
-        session = self.repo.get_chat_session(uuid.UUID(session_id), u_uuid)
+        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        u_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        session = self.repo.get_chat_session(s_uuid, u_uuid)
         
         if not session:
             return None
-            
+
+        # 通过 user_paper 关联获取 file_hash
+        pdf_id = None
+        if session.user_paper:
+            pdf_id = session.user_paper.file_hash
+
         return {
             'id': str(session.id),
-            'pdfId': session.user_paper.file_hash if session.user_paper else None,
+            'pdfId': pdf_id,
             'title': session.title,
             'createdAt': session.created_at.isoformat() if session.created_at else None,
             'updatedAt': session.updated_at.isoformat() if getattr(session, 'updated_at', None) else None,
@@ -112,11 +119,6 @@ class ChatService:
     def update_title(self, session_id: str, user_id: uuid.UUID, title: str) -> bool:
         s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         return self.repo.update_chat_session_title(s_uuid, user_id, title)
-
-    def prune_history(self, session_id: str, user_id: uuid.UUID, start_msg_id: int) -> int:
-        """清理历史记录"""
-        s_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        return self.repo.delete_chat_messages_after(s_uuid, user_id, start_msg_id)
 
     # ==================== 格式化工具 ====================
 
@@ -134,13 +136,15 @@ class ChatService:
         """格式化会话列表"""
         result = []
         for s in sessions:
+            pdf_id = None
+            if s.user_paper:
+                pdf_id = s.user_paper.file_hash
             result.append({
                 'id': str(s.id),
-                'pdfId': s.user_paper.file_hash if s.user_paper else None,
+                'pdfId': pdf_id,
                 'title': s.title,
                 'createdAt': s.created_at.isoformat() if s.created_at else None,
                 'updatedAt': s.updated_at.isoformat() if s.updated_at else None,
-                # 如果需要 messageCount，可能需要在 Repo层做 count 查询，这里暂时略过或设为默认
             })
         return result
 

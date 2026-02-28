@@ -275,6 +275,15 @@ async function loadPdf(url: string) {
   pdfStore.isLoading = false
   await nextTick()
 
+  // Fetch MinerU layout (paragraph positions) if document id exists
+  if (libraryStore.currentDocumentId) {
+    try {
+      await pdfStore.fetchLayoutForPdf(libraryStore.currentDocumentId)
+    } catch (e) {
+      console.warn('fetchLayoutForPdf failed', e)
+    }
+  }
+
   updateVisiblePages()
   setTimeout(() => startBackgroundPreload(), 500)
 }
@@ -862,6 +871,20 @@ onBeforeUnmount(() => {
                 :style="getBoundingBoxStyle(hl.rects)"
               />
             </template>
+            <!-- overlays: images / tables / formulas -->
+            <template v-for="ov in pdfStore.getOverlaysByPage(page)" :key="ov.id">
+              <div
+                class="overlay-rect absolute pointer-events-none"
+                :class="`overlay-${ov.type}`"
+                :style="{
+                  left: `${ov.left * 100}%`,
+                  top: `${ov.top * 100}%`,
+                  width: `${ov.width * 100}%`,
+                  height: `${ov.height * 100}%`,
+                  borderRadius: '4px'
+                }"
+              />
+            </template>
           </div>
           <div class="textLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" />
           <div class="linkLayer absolute inset-0" :class="{ 'zooming-layer': isZooming }" />
@@ -1124,7 +1147,6 @@ onBeforeUnmount(() => {
 :deep(.textLayer ::selection) {
   background: rgba(59, 130, 246, 0.3) !important;
 }
-
 /* 预翻译进度条动画 */
 .slide-down-enter-active,
 .slide-down-leave-active {
@@ -1134,5 +1156,22 @@ onBeforeUnmount(() => {
 .slide-down-leave-to {
   opacity: 0;
   transform: translateY(-100%);
+}
+
+.overlay-rect {
+  opacity: 0.35;
+  border: 1px solid rgba(0,0,0,0.12);
+}
+.overlay-image {
+  background: rgba(34,197,94,0.25);
+  border-color: rgba(16,185,129,0.6);
+}
+.overlay-table {
+  background: rgba(59,130,246,0.18);
+  border-color: rgba(37,99,235,0.55);
+}
+.overlay-formula {
+  background: rgba(168,85,247,0.16);
+  border-color: rgba(124,58,237,0.55);
 }
 </style>

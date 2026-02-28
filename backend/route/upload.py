@@ -16,6 +16,10 @@ from flask import Blueprint, request, jsonify, g, send_file, current_app
 from core.security import jwt_required
 from core.exceptions import NotFoundError
 from core.logging import get_logger
+from pathlib import Path
+
+from services.mineru_service import MinerUService
+from utils import pdf_engine
 
 logger = get_logger(__name__)
 
@@ -183,3 +187,41 @@ def get_pdf_source(pdf_id):
         )
     except FileNotFoundError:
         raise NotFoundError('PDF file not found')
+
+
+@upload_bp.route('/<pdf_id>/layout', methods=['GET'])
+@jwt_required()
+def get_pdf_layout(pdf_id):
+    """返回 MinerU 解析的布局信息（包含 bbox），优先从 cache 中读取。"""
+    # 计算 mineru cache 目录: <upload_folder>.parent / cache / mineru / <pdf_id>
+    try:
+        upload_folder = Path(g.pdf_service.upload_folder)
+    except Exception:
+        raise NotFoundError('User upload folder not initialized')
+
+    cache_dir = upload_folder.parent / 'cache' / 'mineru' / pdf_id
+    svc = MinerUService()
+    content_json = svc._find_content_json(cache_dir)
+    if content_json is None:
+        return jsonify({'error': 'Layout not found', 'pdfId': pdf_id}), 404
+
+    parsed = svc.parse_content_list(content_json, cache_dir)
+    # 返回原始解析结果（paragraphs/images/tables/formulas），前端按需渲染
+    return jsonify({'pdfId': pdf_id, 'layout': parsed})
+
+
+@upload_bp.route('/<pdf_id>/image/<int:image_index>', methods=['GET'])
+@jwt_required()
+def get_pdf_image(pdf_id, image_index):
+    """按 image_index 返回图片的 base64 数据（用于 MinerU 提取的 image）。"""
+    try:
+        image_id = pdf_engine.make_image_id(pdf_id, image_index)
+        data = g.pdf_service.get_image_data(image_id)
+        if not data:
+            raise FileNotFoundError('Image not found')
+        return jsonify({'id': image_id, 'mimeType': data.get('mimeType'), 'base64': data.get('base64')})
+    except FileNotFoundError:
+        raise NotFoundError('Image not found')
+    except Exception as e:
+        current_app.logger.error(f"Failed to get image {pdf_id}:{image_index} - {e}")
+        return jsonify({'error': str(e)}), 500

@@ -1,5 +1,4 @@
-from sqlalchemy import Column, String, Integer, Boolean, ForeignKey, DateTime, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy import Column, String, Integer, Boolean, ForeignKey, DateTime, Text, UniqueConstraint, Uuid, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -33,8 +32,8 @@ class GlobalFile(Base):
     error_message = Column(Text, nullable=True)
     
     # 元数据
-    metadata_info = Column(JSONB, default={}, comment="PDF原生元数据: author, publish_date, doi")
-    dimensions = Column(JSONB, default=[], comment="每页的物理尺寸 [{'width': w, 'height': h}]")
+    metadata_info = Column(JSON, default={}, comment="PDF原生元数据: author, publish_date, doi")
+    dimensions = Column(JSON, default=[], comment="每页的物理尺寸 [{'width': w, 'height': h}]")
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_accessed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="最后被访问/引用的时间 (用于GC)")
@@ -63,7 +62,7 @@ class PdfParagraph(Base):
     translation_text = Column(Text, nullable=True, comment="翻译好的文本(可选)")
     
     # 坐标信息
-    bbox = Column(JSONB, comment="[x, y, w, h] 归一化坐标")
+    bbox = Column(JSON, comment="[x, y, w, h] 归一化坐标")
 
     # 复合唯一索引
     __table_args__ = (
@@ -86,7 +85,7 @@ class PdfImage(Base):
     image_index = Column(Integer, nullable=False)
     
     # 坐标
-    bbox = Column(JSONB, nullable=False, comment="[x, y, w, h]")
+    bbox = Column(JSON, nullable=False, comment="[x, y, w, h]")
 
     # 存储路径
     image_path = Column(String, nullable=True, comment="OSS/S3上的存储路径 key")
@@ -110,7 +109,7 @@ class PdfFormula(Base):
     formula_index = Column(Integer, nullable=False)
     
     # 坐标
-    bbox = Column(JSONB, nullable=False, comment="[x, y, w, h]")
+    bbox = Column(JSON, nullable=False, comment="[x, y, w, h]")
 
     # LaTeX 公式内容
     latex_content = Column(Text, nullable=False, comment="LaTeX公式内容")
@@ -129,14 +128,14 @@ class UserPaper(Base):
     """
     __tablename__ = "user_papers"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=False, index=True)
     file_hash = Column(String(64), ForeignKey("global_files.file_hash"), nullable=False)
     
     # 个性化信息
     title = Column(String(255), nullable=False, comment="用户自定义标题")
     read_status = Column(String(20), default="unread", comment="阅读状态: unread, reading, finished")
-    tags = Column(ARRAY(String), default=[], comment="用户标签")
+    tags = Column(JSON, default=[], comment="用户标签")
     
     added_at = Column(DateTime(timezone=True), server_default=func.now())
     last_read_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -163,7 +162,7 @@ class UserNote(Base):
     __tablename__ = "user_notes"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_paper_id = Column(UUID(as_uuid=True), ForeignKey("user_papers.id"), nullable=False, index=True)
+    user_paper_id = Column(Uuid, ForeignKey("user_papers.id"), nullable=False, index=True)
     
     title = Column(String(255), nullable=True, comment="笔记标题")
     content = Column(Text, nullable=False) # 笔记内容(Markdown)
@@ -171,7 +170,7 @@ class UserNote(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    keywords = Column(ARRAY(String), default=[], comment="笔记关键词/标签")
+    keywords = Column(JSON, default=[], comment="笔记关键词/标签")
 
     user_paper = relationship("UserPaper", back_populates="notes")
     linked_graph_nodes = relationship("GraphNode", secondary=note_node_link, back_populates="linked_notes")
@@ -182,13 +181,13 @@ class UserHighlight(Base):
     __tablename__ = "user_highlights"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_paper_id = Column(UUID(as_uuid=True), ForeignKey("user_papers.id"), nullable=False, index=True)
+    user_paper_id = Column(Uuid, ForeignKey("user_papers.id"), nullable=False, index=True)
     
     page_number = Column(Integer, nullable=False)
     selected_text = Column(Text, nullable=True)
     
     # 高亮区域列表
-    rects = Column(JSONB, nullable=False, comment="[{x,y,w,h}, {x,y,w,h}]")
+    rects = Column(JSON, nullable=False, comment="[{x,y,w,h}, {x,y,w,h}]")
     color = Column(String(20), default="#FFFF00")
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
