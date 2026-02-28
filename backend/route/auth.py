@@ -131,7 +131,12 @@ def login():
         repo = SQLRepository(db_session)
         user = repo.get_user_by_email(email)
 
-        if not user or not verify_password(password, user.password_hash):
+        if not user:
+            # 防御时间盲注：用户不存在时也执行等量的哈希消耗
+            hash_password(password)
+            return jsonify({'code': 'INVALID_CREDENTIALS', 'error': 'Invalid email or password'}), 401
+
+        if not verify_password(password, user.password_hash):
             return jsonify({'code': 'INVALID_CREDENTIALS', 'error': 'Invalid email or password'}), 401
 
         # 签发令牌

@@ -114,7 +114,7 @@ export const useAuthStore = defineStore('auth', () => {
   /** 登录成功：设置用户，跳转首页 */
   async function onLoginSuccess(userData: { id: string; username: string; email: string }) {
     user.value = userData
-    // 登录成功后，强制刷新文献库缓存
+    // 登录成功后，强制刷新文献库缓存（必须 await 保证跳转主页时数据已就位，避免闪屏）
     const libraryStore = useLibraryStore()
     await libraryStore.fetchDocuments(true)
     router.push('/')
@@ -123,9 +123,13 @@ export const useAuthStore = defineStore('auth', () => {
   /** 注册成功：设置用户，跳转首页 */
   async function onRegisterSuccess(userData: { id: string; username: string; email: string }) {
     user.value = userData
-    // 注册成功同理
+    // 注册的新用户必定没有文档，清空可能残留的缓存后直接跳转（无需 await 网络请求）
     const libraryStore = useLibraryStore()
-    await libraryStore.fetchDocuments(true)
+    await libraryStore.clearLibrary()
+
+    // 静默在后台初始化一次空列表，防止因状态异常导致的报错
+    libraryStore.fetchDocuments(true)
+
     router.push('/')
   }
 

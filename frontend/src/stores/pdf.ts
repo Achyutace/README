@@ -385,8 +385,11 @@ export const usePdfStore = defineStore('pdf', () => {
 
     let allSuccess = true
 
-    // 逐段翻译（后端已做服务端缓存，同一段落 force=false 时永远直接返回已缓存结果，无需前端轮询跳过）
+    // 逐段翻译（如果前端有缓存则直接跳过，不再请求后端）
     for (const p of pageParagraphs) {
+      if (translationStore.getCachedTranslation(p.id)) {
+        continue
+      }
       try {
         const result = await aiApi.translateParagraph(pdfId, p.id)
         if (result.success) {

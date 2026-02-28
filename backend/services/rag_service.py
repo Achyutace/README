@@ -129,12 +129,17 @@ class RAGService:
                     meta.update(chunk['metadata'])
                 
                 metadatas.append(meta)
-                ids.append(f"{file_hash}_chunk_{i}")
+                
+                # Qdrant requires UUIDs or unsigned integers for point IDs
+                chunk_id_str = f"{file_hash}_chunk_{i}"
+                chunk_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk_id_str))
+                ids.append(chunk_uuid)
             
             user_id_str = str(user_id) if user_id else "public"
             
-            # Ensure collection exists
+            # Ensure collection exists and index is built
             vector_repo.create_collection(self.COLLECTION_NAME)
+            vector_repo.create_payload_index(self.COLLECTION_NAME, "file_hash")
 
             # Check if vectors already exist for this file (globally)
             if vector_repo.count(self.COLLECTION_NAME, {'file_hash': file_hash}) > 0:

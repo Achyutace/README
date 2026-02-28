@@ -59,9 +59,32 @@ class VectorRepository:
                     distance=models.Distance.COSINE
                 )
             )
+            # 建立用于条件过滤的索引
+            self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="file_hash",
+                field_schema=models.PayloadSchemaType.KEYWORD
+            )
             logger.info(f"Initialized collection: {collection_name}")
         except Exception as e:
             logger.error(f"Failed to create collection '{collection_name}': {e}")
+
+    def create_payload_index(self, collection_name: str, field_name: str, field_schema: Any = None):
+        """在指定的 Payload 上建立索引"""
+        if not self.is_available: return
+        if field_schema is None:
+            field_schema = models.PayloadSchemaType.KEYWORD
+            
+        try:
+            self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                field_schema=field_schema
+            )
+            logger.info(f"Created payload index for '{field_name}' in '{collection_name}'.")
+        except Exception as e:
+            # 如果已经存在会抛错，这属于预期情况
+            logger.debug(f"Payload index '{field_name}' might already exist or failed: {e}")
 
     def delete_collection(self, collection_name: str):
         """销毁整个集合（不可恢复）。"""

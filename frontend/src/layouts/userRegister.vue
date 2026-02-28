@@ -107,7 +107,7 @@ const handleRegister = async () => {
   loading.value = true
   try {
     const res = await authApi.register(form.username, form.email, form.password)
-    authStore.onRegisterSuccess(res.user)
+    await authStore.onRegisterSuccess(res.user)
   } catch (e: any) {
     const code = e.response?.data?.code
     const msgMap: Record<string, string> = {

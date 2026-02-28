@@ -95,7 +95,7 @@ const handleLogin = async () => {
   loading.value = true
   try {
     const res = await authApi.login(form.email, form.password)
-    authStore.onLoginSuccess(res.user)
+    await authStore.onLoginSuccess(res.user) // 增加 await，直到文献加载完毕并完成路由跳转
   } catch (e: any) {
     const code = e.response?.data?.code
     if (code === 'INVALID_CREDENTIALS') {
