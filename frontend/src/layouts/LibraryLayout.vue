@@ -3,12 +3,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '../stores/library'
 import { useThemeStore } from '../stores/theme'
+import { usePdfStore } from '../stores/pdf'
 import { formatDate } from '../utils/date'
 import type { PdfDocument } from '../types'
 
 // ------------------------- Stores & Router -------------------------
 const libraryStore = useLibraryStore()
 const themeStore = useThemeStore()
+const pdfStore = usePdfStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -87,7 +89,13 @@ const handleRemoveTag = async (pdfId: string, tag: string) => {
   await libraryStore.removeTagFromDocument(pdfId, tag)
 }
 
-
+const handleRemoveDocument = async (pdfId: string, event: Event) => {
+  event.stopPropagation()
+  if (confirm('确定要彻底删除该文献及其所有相关数据吗？(包括笔记、高亮和对话) 此操作不可逆！')) {
+    pdfStore.removeDocumentHighlights(pdfId)
+    await libraryStore.removeDocument(pdfId)
+  }
+}
 
 const handleZoteroImport = () => {
   isImporting.value = true
@@ -189,7 +197,7 @@ onMounted(() => {
 
       <!-- Results Table Area -->
       <main class="flex-1 bg-gray-50 dark:bg-[#121212] overflow-y-auto p-6">
-        <div class="bg-white dark:bg-[#1e1e1e] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+        <div class="bg-white dark:bg-[#1e1e1e] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 text-sm font-semibold text-gray-600 dark:text-gray-400">
@@ -205,10 +213,10 @@ onMounted(() => {
               <template v-for="doc in filteredDocuments" :key="doc.id">
                 <!-- Main Paper Row -->
                 <tr 
-                  @dblclick="openPaper(doc.id)"
-                  class="group border-b border-gray-100 dark:border-gray-800/50 hover:bg-primary-50/30 dark:hover:bg-primary-900/5 text-sm transition-colors cursor-default"
+                  @click="openPaper(doc.id)"
+                  class="group border-b border-gray-100 dark:border-gray-800/50 hover:bg-primary-50/30 dark:hover:bg-primary-900/5 text-sm transition-colors cursor-pointer"
                 >
-                  <td class="px-4 py-3 text-center">
+                  <td class="px-4 py-3 text-center" @click.stop>
                     <button 
                       @click="toggleExpand(doc.id)"
                       class="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-transform duration-200"
@@ -218,13 +226,13 @@ onMounted(() => {
                     </button>
                   </td>
                   <td class="px-4 py-3">
-                    <div class="font-medium text-gray-900 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 cursor-pointer" @click="openPaper(doc.id)">
+                    <div class="font-medium text-gray-900 dark:text-gray-200 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
                       {{ doc.name }}
                     </div>
                   </td>
                   <td class="px-4 py-3 text-center text-gray-500">{{ doc.pageCount || '-' }}</td>
                   <td class="px-4 py-3 text-gray-500 whitespace-nowrap">{{ formatDate(doc.uploadedAt) }}</td>
-                  <td class="px-4 py-3">
+                  <td class="px-4 py-3" @click.stop>
                     <div class="flex flex-wrap gap-1.5 items-center">
                       <span 
                         v-for="tag in doc.tags" :key="tag"
@@ -239,42 +247,47 @@ onMounted(() => {
                         <button class="p-1 text-gray-400 hover:text-primary-500 transition-colors">
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
                         </button>
-                        <!-- Add Tag Popover (Enhanced with selection) -->
-                        <div class="absolute left-0 bottom-full mb-2 opacity-0 group-focus-within/addtag:opacity-100 transition-opacity pointer-events-none group-focus-within/addtag:pointer-events-auto bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 rounded-lg p-2 z-20 w-48 flex flex-col gap-2">
+                        <div class="absolute left-0 top-full mt-2 opacity-0 group-focus-within/addtag:opacity-100 transition-opacity pointer-events-none group-focus-within/addtag:pointer-events-auto bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 rounded-lg p-3 z-50 w-60 flex flex-col gap-2">
                           <div class="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase px-1">添加标签</div>
-                          <div class="flex gap-1">
-                          <input 
-                            v-model="newTagInputs[doc.id]"
-                            @keyup.enter="handleAddTag(doc.id)"
-                            type="text" 
-                            placeholder="搜索或输入标签..." 
-                            class="flex-1 text-xs px-2 py-1 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-primary-500 dark:text-white"
-                          />
-                            <button @click="handleAddTag(doc.id)" class="text-[10px] bg-primary-600 hover:bg-primary-700 text-white px-2 py-1 rounded transition-colors flex-shrink-0">确定</button>
+                          <div class="flex flex-row gap-2">
+                            <input 
+                              v-model="newTagInputs[doc.id]"
+                              @keyup.enter="handleAddTag(doc.id)"
+                              type="text" 
+                              placeholder="搜索或输入标签..." 
+                              class="w-0 flex-1 text-xs px-2 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-primary-500 dark:text-white"
+                            />
+                            <button @click="handleAddTag(doc.id)" class="text-xs bg-primary-600 hover:bg-primary-700 text-white px-3 py-1.5 rounded transition-colors flex-shrink-0">确定</button>
                           </div>
                           
                           <!-- Suggested existing tags -->
-                          <div v-if="doc && getSuggestedTags(doc).length > 0" class="flex flex-col border-t border-gray-100 dark:border-gray-700 pt-1 mt-1 max-h-32 overflow-y-auto">
-                            <div class="text-[9px] text-gray-400 dark:text-gray-500 mb-1 px-1">已有标签建议</div>
-                            <div 
-                              v-for="tag in (doc ? getSuggestedTags(doc) : [])" 
-                              :key="tag"
-                              @mousedown.prevent="handleAddTag(doc.id, tag)"
-                              class="text-xs px-2 py-1 hover:bg-primary-50 dark:hover:bg-primary-900/20 text-gray-600 dark:text-gray-400 rounded cursor-pointer truncate transition-colors"
-                            >
-                              {{ tag }}
+                          <details v-if="doc && getSuggestedTags(doc).length > 0" class="border-t border-gray-100 dark:border-gray-700 pt-2 mt-1 group/details" open>
+                            <summary class="text-[10px] text-gray-400 dark:text-gray-500 mb-1 px-1 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden flex items-center justify-between hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                              已有标签建议
+                              <svg class="w-3 h-3 transform transition-transform group-open/details:-rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                            </summary>
+                            <div class="max-h-32 overflow-y-auto flex flex-col pr-1 mt-1 space-y-0.5">
+                              <div 
+                                v-for="tag in (doc ? getSuggestedTags(doc) : [])" 
+                                :key="tag"
+                                @mousedown.prevent="handleAddTag(doc.id, tag)"
+                                class="text-xs px-2 py-1.5 hover:bg-primary-50 dark:hover:bg-primary-900/20 text-gray-700 dark:text-gray-300 rounded cursor-pointer truncate transition-colors"
+                              >
+                                {{ tag }}
+                              </div>
                             </div>
-                          </div>
+                          </details>
                         </div>
                       </div>
                     </div>
                   </td>
-                  <td class="px-4 py-3 text-center">
+                  <td class="px-3 py-3 text-center">
                     <button 
-                      @click="openPaper(doc.id)" 
-                      class="text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 px-2 py-1 rounded transition-colors"
+                      @click.stop="handleRemoveDocument(doc.id, $event)" 
+                      class="text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-1.5 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                      title="删除文献"
                     >
-                      阅读
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </td>
                 </tr>
